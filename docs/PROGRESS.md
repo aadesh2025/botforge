@@ -6,8 +6,8 @@ stubbed/deferred, and any gaps waiting on human secrets.
 ## Status by phase
 | Phase | Title | Status | Notes |
 |---|---|---|---|
-| 0 | Repo/tooling/CI/compose | ✅ core | git, Next.js web scaffold, FastAPI api scaffold (/healthz /readyz /version, structlog, typed errors, request-id mw), docker-compose (postgres+pgvector/redis/api/worker/web/n8n/ollama), .env.example, Makefile, GitHub Actions CI. Remaining: on-start alembic (Phase 1) and Playwright in CI (Phase 19). |
-| 1 | Database foundation | 🟨 code complete | Async SQLAlchemy engine/session, UUIDv7 base + timestamp/soft-delete mixins, all 27 models (identity, agents, knowledge+pgvector, conversations, tools, channels, inbox, platform), org-scoped repository base + pagination (cross-org isolation test passing), Alembic async env + extensions migration, seed script. Pending Docker: autogenerate the tables migration, run `alembic upgrade head`, run seed. |
+| 0 | Repo/tooling/CI/compose | ✅ | git, web + api scaffolds, docker-compose (postgres+pgvector/redis/api/worker/web/n8n/ollama), .env.example, Makefile, CI. **Verified: `docker compose up postgres redis` healthy, `/readyz` green (db+redis reachable).** Remaining: on-start alembic in api container (later), Playwright in CI (Phase 19). |
+| 1 | Database foundation | ✅ | All 27 models, UUIDv7 base + mixins, org-scoped repository (cross-org isolation test), Alembic async. **Verified against real Postgres: `alembic upgrade head` created all 27 tables + pgcrypto/vector extensions + `chunks.embedding vector(768)`; seed ran (idempotent); 10 tests + ruff + mypy green.** |
 | 2 | Auth & accounts | ⬜ | |
 | 3 | Orgs/RBAC | ⬜ | |
 | 4 | App shell & design system | ✅ frontend | Design tokens, dark-first ember system, full app shell, and every dashboard route surface built. Remaining (backend-dependent): generated API client. |
