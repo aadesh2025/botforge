@@ -1,0 +1,135 @@
+"""Agent routes under /v1/agents."""
+
+from __future__ import annotations
+
+import uuid
+from typing import Any
+
+from fastapi import APIRouter, Depends, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.session import get_session
+from app.modules.agents import schemas, service
+from app.modules.orgs.deps import OrgContext, current_org
+
+router = APIRouter(prefix="/v1/agents", tags=["agents"])
+
+
+@router.post("", response_model=schemas.AgentOut, status_code=status.HTTP_201_CREATED)
+async def create_agent(
+    data: schemas.CreateAgentRequest,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.AgentOut:
+    return await service.create_agent(session, ctx, data)
+
+
+@router.get("", response_model=list[schemas.AgentOut])
+async def list_agents(
+    session: AsyncSession = Depends(get_session), ctx: OrgContext = Depends(current_org)
+) -> list[schemas.AgentOut]:
+    return await service.list_agents(session, ctx)
+
+
+@router.get("/{agent_id}", response_model=schemas.AgentOut)
+async def get_agent(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.AgentOut:
+    return await service.get_agent(session, ctx, agent_id)
+
+
+@router.patch("/{agent_id}", response_model=schemas.AgentOut)
+async def update_agent(
+    agent_id: uuid.UUID,
+    data: schemas.UpdateAgentRequest,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.AgentOut:
+    return await service.update_agent(session, ctx, agent_id, data)
+
+
+@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_agent(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> None:
+    await service.delete_agent(session, ctx, agent_id)
+
+
+@router.post("/{agent_id}/duplicate", response_model=schemas.AgentOut, status_code=status.HTTP_201_CREATED)
+async def duplicate_agent(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.AgentOut:
+    return await service.duplicate_agent(session, ctx, agent_id)
+
+
+# ── Versions ──────────────────────────────────────────────────────────────────
+@router.get("/{agent_id}/versions", response_model=list[schemas.VersionOut])
+async def list_versions(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> list[schemas.VersionOut]:
+    return await service.list_versions(session, ctx, agent_id)
+
+
+@router.post("/{agent_id}/versions", response_model=schemas.VersionOut, status_code=status.HTTP_201_CREATED)
+async def create_version(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.VersionOut:
+    return await service.create_version(session, ctx, agent_id)
+
+
+@router.patch("/{agent_id}/versions/{number}", response_model=schemas.VersionOut)
+async def update_version(
+    agent_id: uuid.UUID,
+    number: int,
+    data: schemas.UpdateVersionRequest,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.VersionOut:
+    return await service.update_version(session, ctx, agent_id, number, data)
+
+
+@router.post("/{agent_id}/versions/{number}/publish", response_model=schemas.AgentOut)
+async def publish_version(
+    agent_id: uuid.UUID,
+    number: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.AgentOut:
+    return await service.publish_version(session, ctx, agent_id, number)
+
+
+@router.post("/{agent_id}/rollback", response_model=schemas.AgentOut)
+async def rollback(
+    agent_id: uuid.UUID,
+    data: schemas.RollbackRequest,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.AgentOut:
+    return await service.rollback(session, ctx, agent_id, data.version)
+
+
+# ── Playground ────────────────────────────────────────────────────────────────
+@router.post("/{agent_id}/playground/chat", response_model=None)
+async def playground_chat(
+    agent_id: uuid.UUID,
+    data: schemas.PlaygroundRequest,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> StreamingResponse | dict[str, Any]:
+    if data.stream:
+        return StreamingResponse(
+            service.playground_stream(session, ctx, agent_id, data),
+            media_type="text/event-stream",
+        )
+    return await service.playground_once(session, ctx, agent_id, data)

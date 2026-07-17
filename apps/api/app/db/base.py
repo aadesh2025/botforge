@@ -37,12 +37,22 @@ class UUIDPrimaryKey:
     )
 
 
+def _utcnow() -> dt.datetime:
+    return dt.datetime.now(tz=dt.UTC)
+
+
 class TimestampMixin:
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # Python-side default/onupdate: the value is set on the instance at flush time, so the
+    # attribute is never expired (avoids async lazy-load / MissingGreenlet when serializing).
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        server_default=func.now(),
+        default=_utcnow,
+        onupdate=_utcnow,
+        nullable=False,
     )
 
 

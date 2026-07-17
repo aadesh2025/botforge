@@ -18,6 +18,24 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-018: Agent versioning, model_config aliasing, and Python-side timestamps
+- **Date:** 2026-07-17
+- **Status:** accepted
+- **Context:** Phase 6 agents + the first endpoint that streams through the LLM layer.
+- **Decision:** Latest `agent_version` = the editable draft; publishing sets `is_published`,
+  flips `agent.status` to published, and points `current_version_id` at it; published versions
+  are immutable (edits require a new draft copied from the latest); rollback re-points current
+  at an older published version. The JSON key `model_config` is Pydantic-reserved, so schemas
+  use field `llm_config` with `alias="model_config"` (FastAPI serializes by alias). Playground
+  builds a `ChatRequest` from the draft's model_config and streams via `get_chat_provider` +
+  the `StreamEvent` SSE contract; when no key is configured it falls back to `FakeChatProvider`
+  so the build isn't blocked (CLAUDE §7). Playground route sets `response_model=None`
+  (StreamingResponse | dict union).
+- **Gotcha fixed:** server-side `onupdate=func.now()` on `updated_at` expired the attribute
+  after UPDATE, causing async lazy-load (`MissingGreenlet`) when serializing the response.
+  Switched `TimestampMixin.updated_at` to **Python-side** default/onupdate so the value is set
+  on the instance at flush time. Applies to every timestamped model.
+
 ### ADR-017: LLM layer — one OpenAI-compatible base, transport-injectable for tests
 - **Date:** 2026-07-17
 - **Status:** accepted
