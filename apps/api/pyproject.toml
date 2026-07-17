@@ -13,6 +13,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",
     "alembic>=1.14",
+    "pgvector>=0.3.6",
     "redis>=5.2",
     "celery>=5.4",
     "argon2-cffi>=23.1",
@@ -26,6 +27,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "anyio>=4.6",
+    "aiosqlite>=0.20",
 ]
 
 [build-system]
@@ -36,7 +38,7 @@ build-backend = "hatchling.build"
 packages = ["app"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]

@@ -7,7 +7,7 @@ stubbed/deferred, and any gaps waiting on human secrets.
 | Phase | Title | Status | Notes |
 |---|---|---|---|
 | 0 | Repo/tooling/CI/compose | ✅ core | git, Next.js web scaffold, FastAPI api scaffold (/healthz /readyz /version, structlog, typed errors, request-id mw), docker-compose (postgres+pgvector/redis/api/worker/web/n8n/ollama), .env.example, Makefile, GitHub Actions CI. Remaining: on-start alembic (Phase 1) and Playwright in CI (Phase 19). |
-| 1 | Database foundation | ⬜ | |
+| 1 | Database foundation | 🟨 code complete | Async SQLAlchemy engine/session, UUIDv7 base + timestamp/soft-delete mixins, all 27 models (identity, agents, knowledge+pgvector, conversations, tools, channels, inbox, platform), org-scoped repository base + pagination (cross-org isolation test passing), Alembic async env + extensions migration, seed script. Pending Docker: autogenerate the tables migration, run `alembic upgrade head`, run seed. |
 | 2 | Auth & accounts | ⬜ | |
 | 3 | Orgs/RBAC | ⬜ | |
 | 4 | App shell & design system | ✅ frontend | Design tokens, dark-first ember system, full app shell, and every dashboard route surface built. Remaining (backend-dependent): generated API client. |
