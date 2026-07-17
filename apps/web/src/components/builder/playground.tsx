@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CornerDownLeft, FileText, RotateCcw, Sparkles, Wrench } from "lucide-react";
 import { useBuilder } from "@/lib/store/builder";
+import { playgroundStream } from "@/lib/api/agents";
 import { providerCatalog } from "@/lib/mock/builder";
 import { cn } from "@/lib/utils";
 
@@ -15,27 +16,9 @@ interface Msg {
   tool?: string;
 }
 
-function cannedReply(input: string): { text: string; citation?: string; tool?: string } {
-  const q = input.toLowerCase();
-  if (q.includes("refund") || q.includes("return")) {
-    return {
-      text: "You can return items within 30 days of delivery for a full refund, as long as they're unused and in the original packaging. Refunds go back to your original payment method within 5–7 business days.",
-      citation: "returns-policy.pdf · p2",
-    };
-  }
-  if (q.includes("order") || q.includes("ship") || q.includes("track")) {
-    return {
-      text: "Let me check that for you. I've looked up your order — it shipped yesterday and is currently in transit, with delivery expected in 2–3 days. You'll get a tracking link by email shortly.",
-      tool: "lookup_order",
-    };
-  }
-  return {
-    text: "Happy to help! I answer from AUROZEN's knowledge base, so I can cover orders, shipping, returns, and product questions. What would you like to know?",
-  };
-}
-
 export function Playground() {
   const draft = useBuilder((s) => s.draft);
+  const agentId = useBuilder((s) => s.agentId);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -54,38 +37,53 @@ export function Playground() {
 
   const send = async () => {
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text || busy || !agentId) return;
     setInput("");
     setBusy(true);
 
+    const history = messages.filter((m) => m.text).map((m) => ({ role: m.role, content: m.text }));
     const userId = idRef.current++;
     const botId = idRef.current++;
-    setMessages((m) => [...m, { id: userId, role: "user", text }]);
-
-    const reply = cannedReply(text);
-    // small "thinking" beat, then stream tokens
-    await new Promise((r) => setTimeout(r, 350));
     setMessages((m) => [
       ...m,
-      { id: botId, role: "assistant", text: "", streaming: true, citation: reply.citation, tool: reply.tool },
+      { id: userId, role: "user", text },
+      { id: botId, role: "assistant", text: "", streaming: true },
     ]);
 
-    const words = reply.text.split(" ");
-    for (let i = 0; i < words.length; i++) {
-      await new Promise((r) => setTimeout(r, 28 + Math.random() * 34));
+    try {
+      for await (const event of playgroundStream(agentId, text, history)) {
+        const type = event.type as string;
+        if (type === "token" && typeof event.delta === "string") {
+          const delta = event.delta;
+          setMessages((m) => m.map((msg) => (msg.id === botId ? { ...msg, text: msg.text + delta } : msg)));
+        } else if (type === "tool_call") {
+          const tc = event.tool_call as { name?: string } | null;
+          setMessages((m) => m.map((msg) => (msg.id === botId ? { ...msg, tool: tc?.name } : msg)));
+        } else if (type === "error") {
+          setMessages((m) =>
+            m.map((msg) =>
+              msg.id === botId ? { ...msg, text: `⚠ ${String(event.error)}`, streaming: false } : msg,
+            ),
+          );
+        }
+      }
+    } catch {
       setMessages((m) =>
-        m.map((msg) => (msg.id === botId ? { ...msg, text: words.slice(0, i + 1).join(" ") } : msg)),
+        m.map((msg) =>
+          msg.id === botId ? { ...msg, text: msg.text || "⚠ Couldn't reach the agent.", streaming: false } : msg,
+        ),
       );
+    } finally {
+      setMessages((m) => m.map((msg) => (msg.id === botId ? { ...msg, streaming: false } : msg)));
+      setBusy(false);
     }
-    setMessages((m) => m.map((msg) => (msg.id === botId ? { ...msg, streaming: false } : msg)));
-    setBusy(false);
   };
 
   const reset = () =>
     setMessages(draft ? [{ id: idRef.current++, role: "assistant", text: draft.persona.welcomeMessage }] : []);
 
   if (!draft) return null;
-  const modelLabel = `${providerCatalog[draft.model.provider].label} · ${draft.model.model}`;
+  const modelLabel = `${providerCatalog[draft.model.provider]?.label ?? draft.model.provider} · ${draft.model.model}`;
 
   return (
     <div className="flex h-[calc(100vh-8.5rem)] flex-col overflow-hidden rounded-lg border border-border bg-surface">

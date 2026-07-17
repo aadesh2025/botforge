@@ -18,6 +18,34 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-019: Frontend↔backend integration — cookie tokens, hand-written client, SSE reader
+- **Date:** 2026-07-17
+- **Status:** accepted
+- **Context:** Wire the existing mock UI to the real API (closes 2.6/3.4/4.3/6.4). Backend is a
+  separate FastAPI on :8000 using Bearer JWT + `X-Org-Id`.
+- **Decision:** Tokens in **non-httpOnly cookies** (readable by the SPA + the route-guard
+  middleware); a Next `middleware.ts` gates `/dashboard,/agents,…`. API client is
+  **hand-written** (`lib/api`), not openapi-generated yet — attaches Bearer + `X-Org-Id`,
+  refreshes once on 401, and exposes an **`apiStream` SSE reader** for the playground.
+  `AuthGate` bootstraps `/me` + orgs and shows a create-first-org prompt for fresh signups.
+  Only backends that exist are wired (auth/orgs/credentials/agents+playground); knowledge/
+  inbox/analytics/automations/channels/tools stay on mocks until their phases land. Dev CORS
+  uses an `http://localhost:\d+` regex so any web dev port works.
+- **Note (prod hardening):** move tokens to httpOnly cookies set by a Next route handler
+  before shipping (docs/05 §1).
+- **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
+  autosave persisting across reload, publish, and SSE playground streaming.
+
+### ADR-020: Two streaming/credential bugs found via the live integration test
+- **Date:** 2026-07-17
+- **Status:** accepted
+- **Fixes:** (1) `OpenAICompatibleProvider.stream` called `resp.text` on an *unread* streaming
+  response → `httpx.ResponseNotRead` (not a `ProviderError`, so uncaught → empty stream + crash).
+  Now `await resp.aread()` before reading the error body. (2) `registry.resolve_credential`
+  treated whitespace-only env keys (from `.env.example` comment alignment) as real keys →
+  spurious provider calls. Now blank/whitespace env values are treated as unset (fall back to
+  the fake provider). Both surfaced only because the wired UI exercised the real streaming path.
+
 ### ADR-018: Agent versioning, model_config aliasing, and Python-side timestamps
 - **Date:** 2026-07-17
 - **Status:** accepted

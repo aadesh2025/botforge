@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="dev-insecure-change-me")
     api_base_url: str = "http://localhost:8000"
     web_base_url: str = "http://localhost:3000"
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://localhost:3001"
 
     # --- Datastores (compose defaults; override via env) ---
     database_url: str = "postgresql+asyncpg://botforge:botforge@localhost:5432/botforge"

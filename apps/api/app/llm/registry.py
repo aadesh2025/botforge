@@ -128,6 +128,9 @@ async def resolve_credential(
 
     env_attr = _ENV_KEY.get(provider)
     env_key = getattr(settings, env_attr) if env_attr else None
+    # Treat blank/whitespace-only env values as unset (e.g. placeholder .env lines).
+    if isinstance(env_key, str) and not env_key.strip():
+        env_key = None
     return env_key, None
 
 

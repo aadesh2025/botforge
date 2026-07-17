@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BuilderHeader } from "@/components/builder/builder-header";
 import { Playground } from "@/components/builder/playground";
@@ -12,19 +14,36 @@ import { ChannelsTab } from "@/components/builder/tabs/channels-tab";
 import { VersionsTab } from "@/components/builder/tabs/versions-tab";
 import { SettingsTab } from "@/components/builder/tabs/settings-tab";
 import { useBuilder } from "@/lib/store/builder";
-import { makeDraft } from "@/lib/mock/builder";
+import { getAgent, listVersions, patchVersion } from "@/lib/api/agents";
+import { draftToPatch, versionToDraft } from "@/lib/api/agent-mapping";
+import { useSession } from "@/lib/store/session";
 
 const TABS = ["persona", "model", "knowledge", "tools", "channels", "versions", "settings"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function AgentBuilderPage({ params }: { params: { id: string } }) {
-  const { draft, init, dirty, beginSave, markSaved } = useBuilder();
+  const activeOrgId = useSession((s) => s.activeOrgId);
+  const { draft, agentId, versionNumber, init, dirty, beginSave, markSaved } = useBuilder();
   const [tab, setTab] = useState<Tab>("persona");
+  const loadedFor = useRef<string | null>(null);
 
-  // Seed the draft store for this agent id.
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["agent", params.id, activeOrgId],
+    queryFn: async () => {
+      const [agent, versions] = await Promise.all([getAgent(params.id), listVersions(params.id)]);
+      const latest = versions.reduce((a, b) => (b.version > a.version ? b : a), versions[0]);
+      return { agent, latest };
+    },
+    enabled: Boolean(activeOrgId),
+  });
+
+  // Seed the builder store once the agent loads.
   useEffect(() => {
-    init(makeDraft(params.id));
-  }, [params.id, init]);
+    if (data && loadedFor.current !== params.id) {
+      loadedFor.current = params.id;
+      init(versionToDraft(data.agent, data.latest), data.agent.id, data.latest.version, data.latest.is_published);
+    }
+  }, [data, params.id, init]);
 
   // Restore the active tab from the URL on mount.
   useEffect(() => {
@@ -32,15 +51,19 @@ export default function AgentBuilderPage({ params }: { params: { id: string } })
     if (t && (TABS as readonly string[]).includes(t)) setTab(t as Tab);
   }, []);
 
-  // Debounced autosave whenever the draft becomes dirty.
+  // Debounced autosave: PATCH the draft version whenever it becomes dirty.
   useEffect(() => {
-    if (!dirty) return;
-    const save = setTimeout(() => {
+    if (!dirty || !draft || !agentId || versionNumber === null) return;
+    const timer = setTimeout(async () => {
       beginSave();
-      setTimeout(markSaved, 480);
-    }, 850);
-    return () => clearTimeout(save);
-  }, [dirty, draft, beginSave, markSaved]);
+      try {
+        await patchVersion(agentId, versionNumber, draftToPatch(draft));
+      } finally {
+        markSaved();
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [dirty, draft, agentId, versionNumber, beginSave, markSaved]);
 
   const onTabChange = (v: string) => {
     setTab(v as Tab);
@@ -49,7 +72,16 @@ export default function AgentBuilderPage({ params }: { params: { id: string } })
     window.history.replaceState(null, "", url.toString());
   };
 
-  if (!draft) return null;
+  if (isLoading || !draft) {
+    return (
+      <div className="flex h-[60vh] items-center justify-center text-muted">
+        <Loader2 className="mr-2 size-5 animate-spin text-ember-soft" /> Loading agent…
+      </div>
+    );
+  }
+  if (isError) {
+    return <div className="flex h-[60vh] items-center justify-center text-error">Couldn&apos;t load this agent.</div>;
+  }
 
   return (
     <div className="mx-auto max-w-[1500px]">

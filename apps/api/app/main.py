@@ -53,6 +53,8 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
+        # In dev, accept any localhost port so the web dev server works whatever port it grabs.
+        allow_origin_regex=r"http://localhost:\d+" if not settings.is_prod else None,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

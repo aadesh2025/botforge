@@ -141,7 +141,13 @@ class OpenAICompatibleProvider:
                 async with client.stream(
                     "POST", "/chat/completions", json=build_openai_payload(req, stream=True)
                 ) as resp:
-                    self._raise_for_status(resp)
+                    if resp.status_code >= 400:
+                        # Must read the body before accessing text on a streaming response.
+                        body = (await resp.aread()).decode(errors="replace")[:200]
+                        retryable = resp.status_code == 429 or resp.status_code >= 500
+                        raise ProviderError(
+                            f"provider returned {resp.status_code}: {body}", retryable=retryable
+                        )
                     async for line in resp.aiter_lines():
                         if not line.startswith("data:"):
                             continue

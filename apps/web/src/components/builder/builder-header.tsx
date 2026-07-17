@@ -1,17 +1,31 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, Cloud, Loader2, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useBuilder } from "@/lib/store/builder";
+import { publishVersion } from "@/lib/api/agents";
 import { agentStatusMeta } from "@/lib/display";
 import { relativeTime } from "@/lib/utils";
 
 export function BuilderHeader() {
-  const { draft, dirty, saving, lastSavedAt } = useBuilder();
+  const { draft, agentId, versionNumber, published, dirty, saving, lastSavedAt, setPublished } = useBuilder();
+  const [publishing, setPublishing] = useState(false);
   if (!draft) return null;
   const status = agentStatusMeta[draft.status];
+
+  async function onPublish() {
+    if (!agentId || versionNumber === null) return;
+    setPublishing(true);
+    try {
+      await publishVersion(agentId, versionNumber);
+      setPublished(true);
+    } finally {
+      setPublishing(false);
+    }
+  }
 
   return (
     <div className="sticky top-14 z-20 -mx-4 border-b border-border bg-bg/85 px-4 py-3 backdrop-blur-md md:-mx-6 md:px-6 lg:-mx-8 lg:px-8">
@@ -39,12 +53,15 @@ export function BuilderHeader() {
 
         <div className="ml-auto flex items-center gap-3">
           <SaveIndicator dirty={dirty} saving={saving} lastSavedAt={lastSavedAt} />
-          <Button variant="outline" size="sm">
-            Preview
-          </Button>
-          <Button variant="primary" size="sm">
-            <Rocket className="size-4" /> Publish
-          </Button>
+          {published && !dirty ? (
+            <Badge variant="success">
+              <Check className="size-3" /> Published
+            </Badge>
+          ) : (
+            <Button variant="primary" size="sm" onClick={onPublish} disabled={publishing || dirty}>
+              {publishing ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />} Publish
+            </Button>
+          )}
         </div>
       </div>
     </div>
