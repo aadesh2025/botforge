@@ -6,7 +6,7 @@ stubbed/deferred, and any gaps waiting on human secrets.
 ## Status by phase
 | Phase | Title | Status | Notes |
 |---|---|---|---|
-| 0 | Repo/tooling/CI/compose | 🟨 partial | git init + Next.js 14 web scaffold done; api/compose/CI pending |
+| 0 | Repo/tooling/CI/compose | ✅ core | git, Next.js web scaffold, FastAPI api scaffold (/healthz /readyz /version, structlog, typed errors, request-id mw), docker-compose (postgres+pgvector/redis/api/worker/web/n8n/ollama), .env.example, Makefile, GitHub Actions CI. Remaining: on-start alembic (Phase 1) and Playwright in CI (Phase 19). |
 | 1 | Database foundation | ⬜ | |
 | 2 | Auth & accounts | ⬜ | |
 | 3 | Orgs/RBAC | ⬜ | |

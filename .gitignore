@@ -4,6 +4,10 @@ node_modules/
 !.env.example
 __pycache__/
 .venv/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+*.pyc
 dist/
 .DS_Store
 *.log

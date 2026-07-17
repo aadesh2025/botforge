@@ -18,6 +18,19 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-013: uv + hatchling for the Python backend; structlog for logging
+- **Date:** 2026-07-17
+- **Status:** accepted
+- **Context:** Backend Phase 0 scaffold. Local machine has uv 0.11 (no poetry); need fast,
+  reproducible installs and a lockfile.
+- **Decision:** Manage `apps/api` with **uv** (`uv sync`, `uv.lock` committed) and hatchling as
+  build backend. Structured JSON logging via **structlog** (pretty console in dev, JSON in
+  prod). Typed error envelope `{error:{code,message,details}}` via FastAPI exception handlers;
+  request-id middleware binds a per-request id to the log context. `/readyz` probes Postgres +
+  Redis and 503s until both are reachable, never crashing.
+- **Consequences:** Dockerfile uses the `ghcr.io/astral-sh/uv` image; CI uses `astral-sh/setup-uv`.
+  Alembic on-start migration deferred to Phase 1 (compose `command` has a TODO marker).
+
 ### ADR-010: Dark-first "forge" design system (ember accent over graphite)
 - **Date:** 2026-07-17
 - **Status:** accepted
