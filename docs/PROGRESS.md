@@ -10,18 +10,18 @@ stubbed/deferred, and any gaps waiting on human secrets.
 | 1 | Database foundation | ⬜ | |
 | 2 | Auth & accounts | ⬜ | |
 | 3 | Orgs/RBAC | ⬜ | |
-| 4 | App shell & design system | 🟨 in progress | Design tokens, dark-first ember system, app shell (sidebar/topbar/org-switcher/user-menu/theme), and Dashboard overview built against a typed mock layer. Remaining: full component gallery, generated API client (blocked on backend). |
+| 4 | App shell & design system | ✅ frontend | Design tokens, dark-first ember system, full app shell, and every dashboard route surface built. Remaining (backend-dependent): generated API client. |
 | 5 | LLM provider layer | ⬜ | UI surfaces (provider/model picker, sampling, credentials) built in the builder against mocks; backend pending |
 | 6 | Agents & versions | 🟨 in progress | Frontend built: agents list + full tabbed Agent Builder (Persona/Model/Knowledge/Tools/Channels/Versions/Settings), draft store with debounced autosave + unsaved-changes indicator, and a streaming Playground (simulated tokens, citations, tool markers). All against the typed mock layer; backend + real streaming pending. |
-| 7 | Knowledge base & RAG | ⬜ | |
+| 7 | Knowledge base & RAG | 🟨 UI only | Knowledge list + detail (upload zones, documents table with live status/progress). Ingestion/RAG backend pending. |
 | 8 | Chat persistence & memory | ⬜ | |
-| 9 | Tools & tool calling | ⬜ | |
-| 10 | n8n integration | ⬜ | |
-| 11 | Web widget | ⬜ | |
-| 12 | Messaging channels | ⬜ | |
-| 13 | Inbox & handoff | ⬜ | |
-| 14 | Analytics & metering | ⬜ | |
-| 15 | API keys/webhooks/audit | ⬜ | |
+| 9 | Tools & tool calling | ⬜ | UI surfaces in builder Tools tab (mock) |
+| 10 | n8n integration | 🟨 UI only | Automations page (workflow list, bind-as-tool) against mocks; real n8n client pending. |
+| 11 | Web widget | 🟨 UI only | Live widget preview in builder Channels tab; actual embeddable widget SDK pending. |
+| 12 | Messaging channels | 🟨 UI only | Channels connect UI (mock); channel backends pending. |
+| 13 | Inbox & handoff | 🟨 UI only | Two-pane inbox: list/filters, thread, takeover/handback/assign/tags (mock). Real-time WS pending. |
+| 14 | Analytics & metering | 🟨 UI only | Analytics dashboards (stat cards, activity chart, channel/latency bars, top/unanswered) against mocks. |
+| 15 | API keys/webhooks/audit | 🟨 UI only | Settings pages: API keys, webhooks, provider credentials, org members, profile (mock). |
 | 16 | Guardrails & hardening | ⬜ | |
 | 17 | Admin console | ⬜ | |
 | 18 | Billing (optional) | ⬜ | |
