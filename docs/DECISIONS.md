@@ -18,6 +18,23 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-017: LLM layer — one OpenAI-compatible base, transport-injectable for tests
+- **Date:** 2026-07-17
+- **Status:** accepted
+- **Context:** Phase 5 provider layer. Most providers (Groq/Ollama/OpenRouter/OpenAI/custom)
+  speak the OpenAI protocol; Gemini + Anthropic don't. Need to test without live keys.
+- **Decision:** One `OpenAICompatibleProvider` parameterized by `base_url`+key with thin
+  subclasses; dedicated `gemini.py`/`anthropic.py` adapters with pure `to_*_payload()`
+  translation functions (unit-tested). Every provider accepts an optional
+  `httpx.AsyncBaseTransport` so tests drive them with `httpx.MockTransport` — no network, no
+  keys. Streaming uses the `StreamEvent` contract (token/tool_call/done); Gemini/Anthropic
+  derive a token stream from the full response for now. Key resolution order: agent credential
+  → org default → env (`registry.resolve_credential`, Fernet-decrypted). `run_with_fallback`
+  tries providers in order on `ProviderError`. `PRICING` in micros/1K tokens (free providers=0).
+- **Consequences:** `/v1/credentials` manages BYO keys (masked, never returned in full); the
+  chat runtime (Phase 6/8) calls `get_chat_provider` + `run_with_fallback`. Phase 5 fully
+  backend → tagged phase-05-complete.
+
 ### ADR-016: RBAC as a central permission matrix; org context via path + X-Org-Id
 - **Date:** 2026-07-17
 - **Status:** accepted
