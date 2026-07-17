@@ -63,6 +63,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-botforge}:${POSTGRES_PASSWORD:-botforge}@postgres:5432/${POSTGRES_DB:-botforge}
       REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: http://ollama:11434
     volumes:
       - ../apps/api:/app
       - api_venv:/app/.venv
@@ -71,8 +72,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Celery worker is wired up in a later phase; placeholder keeps the service defined.
-    command: ["sh", "-c", "echo 'celery worker placeholder — defined in Phase 8+'; sleep infinity"]
+    # Celery worker: runs document-ingestion (RAG) and later background jobs (Phase 7+).
+    command: celery -A app.worker.celery_app worker --loglevel=info
 
   web:
     image: node:20-bookworm-slim

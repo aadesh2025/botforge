@@ -51,6 +51,13 @@ disabled.
 ## Observability
 `SENTRY_DSN` (optional), `LOG_LEVEL` (default info).
 
-## Storage
+## Storage & RAG
 `STORAGE_BACKEND=local|s3`; if s3: `S3_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY` — needs-human
 for prod; local default in dev.
+
+- `UPLOAD_DIR` (default `./var/uploads`) — filesystem path where ingested document files are
+  stored under the local backend. Created on demand; gitignored.
+- `RAG_CONTEXT_CHAR_BUDGET` (default `8000`) — ceiling on characters of retrieved context
+  injected into a prompt (token budgeting; oldest/lowest-ranked citations are trimmed first).
+- `CELERY_TASK_ALWAYS_EAGER` (default `false`) — when true, Celery tasks (document ingestion)
+  run inline in-process instead of via the worker/broker. Handy for dev/tests; never in prod.

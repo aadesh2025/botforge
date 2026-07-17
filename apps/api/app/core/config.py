@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     embedding_provider: str = "ollama"
     embedding_model: str = "nomic-embed-text"
 
+    # --- Knowledge base / RAG ---
+    # Directory for uploaded/ingested document files (created on demand).
+    upload_dir: str = "./var/uploads"
+    # Ceiling on characters of retrieved context injected into a prompt (token budgeting).
+    rag_context_char_budget: int = 8000
+    # Run Celery tasks inline (no broker/worker) — handy in dev/tests. Off in prod.
+    celery_task_always_eager: bool = False
+
     # --- n8n ---
     n8n_base_url: str = "http://localhost:5678"
     n8n_api_key: str | None = None

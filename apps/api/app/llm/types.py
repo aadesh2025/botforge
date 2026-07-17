@@ -66,7 +66,7 @@ class ModelInfo(BaseModel):
     provider: str
 
 
-StreamEventType = Literal["token", "tool_call", "usage", "done", "error"]
+StreamEventType = Literal["token", "tool_call", "usage", "citations", "done", "error"]
 
 
 class StreamEvent(BaseModel):
@@ -76,3 +76,6 @@ class StreamEvent(BaseModel):
     usage: Usage | None = None
     finish_reason: str | None = None
     error: str | None = None
+    # RAG citations attached to the response (list of citation dicts). Kept as plain dicts so
+    # the provider layer stays independent of the RAG package.
+    citations: list[dict[str, Any]] | None = None

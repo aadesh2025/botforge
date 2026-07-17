@@ -13,15 +13,19 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import rbac
+from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.llm.base import ChatProvider, ProviderError
 from app.llm.fake import FakeChatProvider
-from app.llm.registry import get_chat_provider
+from app.llm.registry import build_embedding_provider, get_chat_provider
 from app.llm.types import ChatRequest, Message, StreamEvent
-from app.models import Agent, AgentVersion
+from app.models import Agent, AgentVersion, KnowledgeBase
 from app.modules.agents import schemas
 from app.modules.orgs.deps import OrgContext
+from app.rag import retrieval
+from app.rag.context import build_context_block
+from app.rag.retrieval import Citation
 
 log = get_logger("agents")
 
@@ -315,12 +319,57 @@ async def rollback(session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID, 
     return await _agent_out(session, agent)
 
 
-# ── Playground (uses the draft version + LLM layer; no RAG yet) ────────────────
-def _build_request(version: AgentVersion, data: schemas.PlaygroundRequest, stream: bool) -> ChatRequest:
+# ── Playground (uses the draft version + LLM layer + RAG) ──────────────────────
+async def _retrieve_context(
+    session: AsyncSession, ctx: OrgContext, version: AgentVersion, query: str
+) -> tuple[str, list[Citation]]:
+    """Run retrieval for the agent's RAG config; returns (context_block, citations_used)."""
+    rag = version.rag_config or {}
+    if not rag.get("enabled") or not rag.get("knowledge_base_ids"):
+        return "", []
+    try:
+        kb_ids = [uuid.UUID(str(k)) for k in rag["knowledge_base_ids"]]
+    except (ValueError, TypeError):
+        return "", []
+    stmt = select(KnowledgeBase).where(
+        KnowledgeBase.organization_id == ctx.org.id,
+        KnowledgeBase.id.in_(kb_ids),
+        KnowledgeBase.deleted_at.is_(None),
+    )
+    kbs = list((await session.execute(stmt)).scalars().all())
+    if not kbs:
+        return "", []
+    # KBs bound to one agent are expected to share an embedding model; use the first.
+    embedder = build_embedding_provider(kbs[0].embedding_provider, kbs[0].embedding_model)
+    try:
+        citations = await retrieval.search(
+            session,
+            ctx.org.id,
+            [kb.id for kb in kbs],
+            query,
+            embedder,
+            top_k=int(rag.get("top_k", 5)),
+            score_threshold=float(rag.get("score_threshold", 0.0)),
+            hybrid=bool(rag.get("hybrid", True)),
+        )
+    except Exception as exc:  # retrieval failure shouldn't break the chat
+        log.warning("rag_retrieval_failed", agent_version=version.version, error=str(exc))
+        return "", []
+    return build_context_block(citations, settings.rag_context_char_budget)
+
+
+def _build_request(
+    version: AgentVersion,
+    data: schemas.PlaygroundRequest,
+    stream: bool,
+    context_block: str = "",
+) -> ChatRequest:
     mc = version.model_config_json or {}
     messages: list[Message] = []
     if version.system_prompt:
         messages.append(Message(role="system", content=version.system_prompt))
+    if context_block:
+        messages.append(Message(role="system", content=context_block))
     for turn in data.history or []:
         messages.append(Message(role=turn.role, content=turn.content))
     messages.append(Message(role="user", content=data.message))
@@ -356,7 +405,11 @@ async def playground_stream(
     version = await _latest_version(session, agent.id)
     provider_name = (version.model_config_json or {}).get("provider", "fake")
     provider = await _resolve_playground_provider(session, ctx, agent, provider_name)
-    req = _build_request(version, data, stream=True)
+    context_block, citations = await _retrieve_context(session, ctx, version, data.message)
+    req = _build_request(version, data, stream=True, context_block=context_block)
+    if citations:
+        cite_event = StreamEvent(type="citations", citations=[c.model_dump(mode="json") for c in citations])
+        yield f"data: {cite_event.model_dump_json()}\n\n"
     try:
         async for event in provider.stream(req):
             yield f"data: {event.model_dump_json()}\n\n"
@@ -373,12 +426,15 @@ async def playground_once(
     version = await _latest_version(session, agent.id)
     provider_name = (version.model_config_json or {}).get("provider", "fake")
     provider = await _resolve_playground_provider(session, ctx, agent, provider_name)
-    req = _build_request(version, data, stream=False)
+    context_block, citations = await _retrieve_context(session, ctx, version, data.message)
+    req = _build_request(version, data, stream=False, context_block=context_block)
     try:
         result = await provider.chat(req)
     except ProviderError as exc:
         raise AppError("llm.provider_error", str(exc), 502) from exc
-    return result.model_dump()
+    payload = result.model_dump()
+    payload["citations"] = [c.model_dump(mode="json") for c in citations]
+    return payload
 
 
 async def agent_count(session: AsyncSession, org_id: uuid.UUID) -> int:

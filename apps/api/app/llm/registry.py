@@ -13,8 +13,9 @@ from app.core.config import settings
 from app.core.crypto import decrypt
 from app.core.errors import AppError
 from app.llm.anthropic import AnthropicProvider
-from app.llm.base import ChatProvider, ProviderError
-from app.llm.fake import FakeChatProvider
+from app.llm.base import ChatProvider, EmbeddingProvider, ProviderError
+from app.llm.embeddings import OllamaEmbeddingProvider
+from app.llm.fake import FakeChatProvider, FakeEmbeddingProvider
 from app.llm.gemini import GeminiProvider
 from app.llm.openai_compatible import (
     CustomProvider,
@@ -151,6 +152,23 @@ async def get_chat_provider(
             503,
         )
     return build_chat_provider(provider, api_key=api_key, base_url=base_url, transport=transport)
+
+
+def build_embedding_provider(
+    provider: str,
+    model: str,
+    *,
+    dim: int = 768,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> EmbeddingProvider:
+    """Resolve an embedding provider by name. `fake` is used by tests (matches the KB dim)."""
+    if provider in ("ollama", "openai", "gemini"):
+        # All non-fake providers currently route through Ollama's local endpoint (free-first).
+        # Real OpenAI/Gemini embedding adapters can be added later behind this same factory.
+        return OllamaEmbeddingProvider(model or "nomic-embed-text", dim=dim, transport=transport)
+    if provider == "fake":
+        return FakeEmbeddingProvider(dim=dim)
+    raise AppError("kb.unknown_embedding_provider", f"Unknown embedding provider '{provider}'.", 400)
 
 
 async def run_with_fallback(providers: list[ChatProvider], req: ChatRequest) -> ChatResponse:

@@ -17,6 +17,7 @@ from app.core.middleware import RequestContextMiddleware
 from app.modules.agents.router import router as agents_router
 from app.modules.auth.router import router as auth_router
 from app.modules.credentials.router import router as credentials_router
+from app.modules.knowledge.router import router as knowledge_router
 from app.modules.orgs.router import router as orgs_router
 
 log = get_logger("app")
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(orgs_router)
     app.include_router(credentials_router)
     app.include_router(agents_router)
+    app.include_router(knowledge_router)
 
     return app
 
