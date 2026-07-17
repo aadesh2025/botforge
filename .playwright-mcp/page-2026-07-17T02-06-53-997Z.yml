@@ -1,0 +1,241 @@
+- generic [ref=e2]:
+  - complementary [ref=e3]:
+    - link "BotForge" [ref=e5] [cursor=pointer]:
+      - /url: /dashboard
+    - button "A AUROZEN AI Scale plan" [ref=e14] [cursor=pointer]:
+      - generic [ref=e15]: A
+      - generic [ref=e16]:
+        - generic [ref=e17]: AUROZEN AI
+        - generic [ref=e18]: Scale plan
+    - navigation [ref=e22]:
+      - link "Dashboard" [ref=e24] [cursor=pointer]:
+        - /url: /dashboard
+      - generic [ref=e32]:
+        - paragraph [ref=e33]: Build
+        - link "Agents" [ref=e34] [cursor=pointer]:
+          - /url: /agents
+        - link "Knowledge" [ref=e39] [cursor=pointer]:
+          - /url: /knowledge
+        - link "Automations" [ref=e43] [cursor=pointer]:
+          - /url: /automations
+      - generic [ref=e49]:
+        - paragraph [ref=e50]: Operate
+        - link "Inbox 3" [ref=e51] [cursor=pointer]:
+          - /url: /inbox
+          - generic [ref=e55]: Inbox
+          - generic [ref=e56]: "3"
+        - link "Analytics" [ref=e57] [cursor=pointer]:
+          - /url: /analytics
+      - generic [ref=e61]:
+        - paragraph [ref=e62]: Workspace
+        - link "Settings" [ref=e63] [cursor=pointer]:
+          - /url: /settings/org
+    - generic [ref=e68]:
+      - generic [ref=e69]:
+        - generic [ref=e70]: Scale plan
+        - paragraph [ref=e74]: 63% of monthly message credits used. Resets Aug 1.
+      - button "Collapse sidebar" [ref=e77] [cursor=pointer]:
+        - generic [ref=e81]: Collapse
+  - generic [ref=e82]:
+    - banner [ref=e83]:
+      - button "Search or jump to… ⌘K" [ref=e84] [cursor=pointer]:
+        - generic [ref=e88]: Search or jump to…
+        - generic [ref=e89]: ⌘K
+      - generic [ref=e90]:
+        - button "Notifications" [ref=e91] [cursor=pointer]
+        - button "Switch to dark theme" [ref=e96] [cursor=pointer]
+        - button "AS" [ref=e100] [cursor=pointer]
+    - main [ref=e103]:
+      - generic [ref=e104]:
+        - generic [ref=e106]:
+          - generic [ref=e107]:
+            - heading "Dashboard" [level=1] [ref=e108]
+            - paragraph [ref=e109]: Everything your agents did in the last 7 days, at a glance.
+          - generic [ref=e110]:
+            - button "View reports" [ref=e111] [cursor=pointer]
+            - button "New agent" [ref=e112] [cursor=pointer]
+        - generic [ref=e114]:
+          - generic [ref=e115]:
+            - generic [ref=e117]: Conversations
+            - generic [ref=e123]: 2K
+            - generic [ref=e125]:
+              - generic [ref=e126]: 12.4%
+              - generic [ref=e130]: vs last 7d
+          - generic [ref=e131]:
+            - generic [ref=e133]: Resolution rate
+            - generic [ref=e139]: 83%
+            - generic [ref=e141]:
+              - generic [ref=e142]: 2.7%
+              - generic [ref=e146]: auto-resolved
+          - generic [ref=e147]:
+            - generic [ref=e149]: Tokens used
+            - generic [ref=e154]: 18.9M
+            - generic [ref=e156]:
+              - generic [ref=e157]: 9.1%
+              - generic [ref=e161]: across providers
+          - generic [ref=e162]:
+            - generic [ref=e164]: Est. cost
+            - generic [ref=e170]: $11.18
+            - generic [ref=e172]:
+              - generic [ref=e173]: 4.2%
+              - generic [ref=e177]: this period
+        - generic [ref=e178]:
+          - generic [ref=e179]:
+            - generic [ref=e180]:
+              - generic [ref=e181]:
+                - generic [ref=e182]:
+                  - heading "Activity" [level=3] [ref=e183]
+                  - paragraph [ref=e184]: Last 14 days across all agents
+                - generic [ref=e185]:
+                  - button "conversations" [ref=e186] [cursor=pointer]
+                  - button "tokens" [ref=e187] [cursor=pointer]
+                  - button "cost" [ref=e188] [cursor=pointer]
+              - generic [ref=e189]:
+                - img [ref=e190]:
+                  - generic [ref=e194]: Jul 4
+                  - generic [ref=e195]: Jul 11
+                  - generic [ref=e196]: Jul 17
+                - generic:
+                  - generic: Jul 17
+                  - generic: 380 conversations
+            - generic [ref=e197]:
+              - generic [ref=e198]:
+                - generic [ref=e199]:
+                  - heading "Your agents" [level=3] [ref=e200]
+                  - paragraph [ref=e201]: 4 total
+                - link "View all" [ref=e202] [cursor=pointer]:
+                  - /url: /agents
+              - list [ref=e206]:
+                - listitem [ref=e207]:
+                  - link "S Support Concierge Live Groq · llama-3.3-70b-versatile 1.3K 7d chats" [ref=e208] [cursor=pointer]:
+                    - /url: /agents/agt_1
+                    - generic [ref=e209]: S
+                    - generic [ref=e210]:
+                      - generic [ref=e211]:
+                        - generic [ref=e212]: Support Concierge
+                        - generic [ref=e213]: Live
+                      - generic [ref=e215]:
+                        - generic [ref=e216]: Groq
+                        - generic [ref=e217]: ·
+                        - generic [ref=e218]: llama-3.3-70b-versatile
+                    - generic [ref=e231]:
+                      - generic [ref=e232]: 1.3K
+                      - generic [ref=e233]: 7d chats
+                - listitem [ref=e234]:
+                  - link "S Sales Qualifier Live Groq · llama-3.1-8b-instant 642 7d chats" [ref=e235] [cursor=pointer]:
+                    - /url: /agents/agt_2
+                    - generic [ref=e236]: S
+                    - generic [ref=e237]:
+                      - generic [ref=e238]:
+                        - generic [ref=e239]: Sales Qualifier
+                        - generic [ref=e240]: Live
+                      - generic [ref=e242]:
+                        - generic [ref=e243]: Groq
+                        - generic [ref=e244]: ·
+                        - generic [ref=e245]: llama-3.1-8b-instant
+                    - generic [ref=e255]:
+                      - generic [ref=e256]: "642"
+                      - generic [ref=e257]: 7d chats
+                - listitem [ref=e258]:
+                  - link "D Docs Assistant Draft Gemini · gemini-1.5-flash 0 7d chats" [ref=e259] [cursor=pointer]:
+                    - /url: /agents/agt_3
+                    - generic [ref=e260]: D
+                    - generic [ref=e261]:
+                      - generic [ref=e262]:
+                        - generic [ref=e263]: Docs Assistant
+                        - generic [ref=e264]: Draft
+                      - generic [ref=e265]:
+                        - generic [ref=e266]: Gemini
+                        - generic [ref=e267]: ·
+                        - generic [ref=e268]: gemini-1.5-flash
+                    - generic [ref=e274]:
+                      - generic [ref=e275]: "0"
+                      - generic [ref=e276]: 7d chats
+                - listitem [ref=e277]:
+                  - link "O Order Tracker Paused OpenAI · gpt-4o-mini 58 7d chats" [ref=e278] [cursor=pointer]:
+                    - /url: /agents/agt_4
+                    - generic [ref=e279]: O
+                    - generic [ref=e280]:
+                      - generic [ref=e281]:
+                        - generic [ref=e282]: Order Tracker
+                        - generic [ref=e283]: Paused
+                      - generic [ref=e284]:
+                        - generic [ref=e285]: OpenAI
+                        - generic [ref=e286]: ·
+                        - generic [ref=e287]: gpt-4o-mini
+                    - generic [ref=e292]:
+                      - generic [ref=e293]: "58"
+                      - generic [ref=e294]: 7d chats
+          - generic [ref=e296]:
+            - generic [ref=e297]:
+              - generic [ref=e298]:
+                - heading "Recent conversations" [level=3] [ref=e299]
+                - paragraph [ref=e300]: Live across every channel
+              - link "Inbox" [ref=e301] [cursor=pointer]:
+                - /url: /inbox
+            - list [ref=e305]:
+              - listitem [ref=e306]:
+                - 'link "+91 98••• ••210 Needs human My order hasn''t shipped yet, can you check status #48213? Support Concierge · 14 messages · just now" [ref=e307] [cursor=pointer]':
+                  - /url: /inbox/cnv_1
+                  - generic [ref=e308]:
+                    - generic [ref=e312]: +91 98••• ••210
+                    - generic [ref=e313]: Needs human
+                  - paragraph [ref=e314]: "My order hasn't shipped yet, can you check status #48213?"
+                  - generic [ref=e315]:
+                    - generic [ref=e316]: Support Concierge
+                    - generic [ref=e317]: ·
+                    - generic [ref=e318]: 14 messages
+                    - generic [ref=e319]: ·
+                    - generic [ref=e320]: just now
+              - listitem [ref=e321]:
+                - link "visitor_9f2c Open Do you offer volume pricing for 500+ seats? Sales Qualifier · 6 messages · just now" [ref=e322] [cursor=pointer]:
+                  - /url: /inbox/cnv_2
+                  - generic [ref=e323]:
+                    - generic [ref=e328]: visitor_9f2c
+                    - generic [ref=e329]: Open
+                  - paragraph [ref=e330]: Do you offer volume pricing for 500+ seats?
+                  - generic [ref=e331]:
+                    - generic [ref=e332]: Sales Qualifier
+                    - generic [ref=e333]: ·
+                    - generic [ref=e334]: 6 messages
+                    - generic [ref=e335]: ·
+                    - generic [ref=e336]: just now
+              - listitem [ref=e337]:
+                - link "@rahul_dev Closed How do I reset the widget theme to default colors? Support Concierge · 9 messages · just now" [ref=e338] [cursor=pointer]:
+                  - /url: /inbox/cnv_3
+                  - generic [ref=e339]:
+                    - generic [ref=e344]: "@rahul_dev"
+                    - generic [ref=e345]: Closed
+                  - paragraph [ref=e346]: How do I reset the widget theme to default colors?
+                  - generic [ref=e347]:
+                    - generic [ref=e348]: Support Concierge
+                    - generic [ref=e349]: ·
+                    - generic [ref=e350]: 9 messages
+                    - generic [ref=e351]: ·
+                    - generic [ref=e352]: just now
+              - listitem [ref=e353]:
+                - link "visitor_a71b Closed Thanks, that fixed it! The RAG citations show now. Support Concierge · 4 messages · just now" [ref=e354] [cursor=pointer]:
+                  - /url: /inbox/cnv_4
+                  - generic [ref=e355]:
+                    - generic [ref=e360]: visitor_a71b
+                    - generic [ref=e361]: Closed
+                  - paragraph [ref=e362]: Thanks, that fixed it! The RAG citations show now.
+                  - generic [ref=e363]:
+                    - generic [ref=e364]: Support Concierge
+                    - generic [ref=e365]: ·
+                    - generic [ref=e366]: 4 messages
+                    - generic [ref=e367]: ·
+                    - generic [ref=e368]: just now
+              - listitem [ref=e369]:
+                - link "+91 90••• ••884 Open Where is my refund? It's been 5 days. Order Tracker · 11 messages · just now" [ref=e370] [cursor=pointer]:
+                  - /url: /inbox/cnv_5
+                  - generic [ref=e371]:
+                    - generic [ref=e375]: +91 90••• ••884
+                    - generic [ref=e376]: Open
+                  - paragraph [ref=e377]: Where is my refund? It's been 5 days.
+                  - generic [ref=e378]:
+                    - generic [ref=e379]: Order Tracker
+                    - generic [ref=e380]: ·
+                    - generic [ref=e381]: 11 messages
+                    - generic [ref=e382]: ·
+                    - generic [ref=e383]: just now

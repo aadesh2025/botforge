@@ -1,0 +1,58 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { nav } from "@/lib/nav";
+import { cn } from "@/lib/utils";
+
+export function SidebarNav({ collapsed }: { collapsed: boolean }) {
+  const pathname = usePathname();
+
+  return (
+    <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 py-4 no-scrollbar">
+      {nav.map((group, gi) => (
+        <div key={gi} className="flex flex-col gap-1">
+          {group.heading && !collapsed && (
+            <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-faint">
+              {group.heading}
+            </p>
+          )}
+          {group.items.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={collapsed ? item.label : undefined}
+                className={cn(
+                  "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  collapsed && "justify-center px-0",
+                  active
+                    ? "bg-surface-2 text-text"
+                    : "text-muted hover:bg-surface-2/60 hover:text-text",
+                )}
+              >
+                {active && (
+                  <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-ember shadow-[0_0_8px_0_rgb(255_106_61_/_0.6)]" />
+                )}
+                <Icon
+                  className={cn(
+                    "size-[18px] shrink-0 transition-colors",
+                    active ? "text-ember-soft" : "text-faint group-hover:text-muted",
+                  )}
+                />
+                {!collapsed && <span className="flex-1">{item.label}</span>}
+                {!collapsed && item.badge ? (
+                  <span className="rounded-full bg-ember/15 px-1.5 py-0.5 text-[11px] font-semibold text-ember-soft">
+                    {item.badge}
+                  </span>
+                ) : null}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
+    </nav>
+  );
+}

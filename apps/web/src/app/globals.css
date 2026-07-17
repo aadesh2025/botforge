@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  BotForge design tokens — dark-first "forge" system.
+  Palette is stored as space-separated RGB channels so Tailwind's
+  `rgb(var(--x) / <alpha-value>)` opacity modifiers keep working.
+*/
+:root {
+  /* Surfaces (cool graphite) */
+  --bg: 10 11 13; /* #0A0B0D */
+  --surface: 19 21 25; /* #131519 */
+  --surface-2: 24 27 33; /* #181B21 */
+  --surface-3: 31 35 43; /* #1F232B */
+  --border: 36 40 50; /* #242832 */
+  --border-strong: 52 58 71; /* #343A47 */
+
+  /* Text */
+  --text: 237 238 240; /* #EDEEF0 */
+  --muted: 138 143 152; /* #8A8F98 */
+  --faint: 92 97 106; /* #5C616A */
+
+  /* Signature ember accent */
+  --ember: 255 106 61; /* #FF6A3D */
+  --ember-2: 255 176 32; /* #FFB020 spark gold */
+  --ember-soft: 255 138 92; /* lighter ember for text-on-dark */
+
+  /* Semantic */
+  --success: 63 185 80; /* #3FB950 */
+  --warn: 240 160 32; /* #F0A020 */
+  --error: 248 81 73; /* #F85149 */
+  --info: 88 166 255; /* #58A6FF */
+
+  --ring: 255 106 61;
+  --radius: 0.625rem;
+}
+
+.light {
+  --bg: 250 250 251;
+  --surface: 255 255 255;
+  --surface-2: 246 247 249;
+  --surface-3: 240 242 245;
+  --border: 226 229 234;
+  --border-strong: 205 210 218;
+  --text: 24 27 33;
+  --muted: 96 102 112;
+  --faint: 150 156 165;
+  --ember: 234 88 12;
+  --ember-2: 217 119 6;
+  --ember-soft: 234 88 12;
+  --ring: 234 88 12;
+}
+
+@layer base {
+  * {
+    border-color: rgb(var(--border));
+  }
+  body {
+    background-color: rgb(var(--bg));
+    color: rgb(var(--text));
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* Typographic scale defaults */
+  h1, h2, h3, h4 {
+    font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  /* Ember gradient text for the signature moments */
+  .text-ember-gradient {
+    background: linear-gradient(100deg, rgb(var(--ember)) 0%, rgb(var(--ember-2)) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* Hairline grid backdrop */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, rgb(var(--border) / 0.35) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(var(--border) / 0.35) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  /* Ember glow used sparingly behind headers */
+  .glow-ember {
+    background: radial-gradient(60% 120% at 15% 0%, rgb(var(--ember) / 0.14), transparent 60%);
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* Focus-visible ring, honored across the app */
+:focus-visible {
+  outline: 2px solid rgb(var(--ember) / 0.7);
+  outline-offset: 2px;
+}
+
+/* Custom thin scrollbars for scroll regions */
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgb(var(--border-strong));
+  border-radius: 8px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
