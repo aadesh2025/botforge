@@ -18,6 +18,22 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-016: RBAC as a central permission matrix; org context via path + X-Org-Id
+- **Date:** 2026-07-17
+- **Status:** accepted
+- **Context:** Phase 3 tenancy/RBAC. Need consistent authorization reusable by every later
+  module, and a single way to resolve "the current org."
+- **Decision:** `core/rbac.py` holds capability constants + a `ROLE_PERMISSIONS` matrix
+  (docs/02 §6); services call `require_permission(role, perm)` → `403 org.forbidden`. Org
+  resolution has two dependencies: `org_context` (from the `{org_id}` path, for /v1/orgs
+  routes) and `current_org` (from the `X-Org-Id` header, for org-scoped resource routes in
+  later phases) — both verify active membership. Owner is assigned only via
+  transfer-ownership (role-change endpoints reject "owner"); removing a member is a soft
+  status flip to "removed" (keeps the unique (org,user) row for re-invite). Sensitive
+  mutations write `audit_logs`.
+- **Consequences:** later modules (agents, KB, tools, channels, inbox, apikeys) depend on
+  `current_org` + `require_permission`; the frontend org switcher (3.4) is deferred.
+
 ### ADR-015: Auth design — opaque rotating refresh tokens, module layout, DB-backed tests
 - **Date:** 2026-07-17
 - **Status:** accepted

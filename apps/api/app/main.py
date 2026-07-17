@@ -15,6 +15,7 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware
 from app.modules.auth.router import router as auth_router
+from app.modules.orgs.router import router as orgs_router
 
 log = get_logger("app")
 
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
     app.include_router(health.router)
     app.include_router(auth_router)
+    app.include_router(orgs_router)
 
     return app
 
