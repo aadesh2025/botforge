@@ -11,8 +11,8 @@ stubbed/deferred, and any gaps waiting on human secrets.
 | 2 | Auth & accounts | ⬜ | |
 | 3 | Orgs/RBAC | ⬜ | |
 | 4 | App shell & design system | 🟨 in progress | Design tokens, dark-first ember system, app shell (sidebar/topbar/org-switcher/user-menu/theme), and Dashboard overview built against a typed mock layer. Remaining: full component gallery, generated API client (blocked on backend). |
-| 5 | LLM provider layer | ⬜ | |
-| 6 | Agents & versions | ⬜ | |
+| 5 | LLM provider layer | ⬜ | UI surfaces (provider/model picker, sampling, credentials) built in the builder against mocks; backend pending |
+| 6 | Agents & versions | 🟨 in progress | Frontend built: agents list + full tabbed Agent Builder (Persona/Model/Knowledge/Tools/Channels/Versions/Settings), draft store with debounced autosave + unsaved-changes indicator, and a streaming Playground (simulated tokens, citations, tool markers). All against the typed mock layer; backend + real streaming pending. |
 | 7 | Knowledge base & RAG | ⬜ | |
 | 8 | Chat persistence & memory | ⬜ | |
 | 9 | Tools & tool calling | ⬜ | |
