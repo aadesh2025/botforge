@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     n8n_api_key: str | None = None
     n8n_webhook_signing_secret: str | None = None
 
+    # --- Auth / rate limiting ---
+    auth_rate_limit: int = 30
+    auth_rate_window: int = 60  # seconds
+    oauth_redirect_base: str = "http://localhost:8000"
+
+    # --- OAuth (None = provider hidden/denied) ---
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    github_client_id: str | None = None
+    github_client_secret: str | None = None
+
     # --- Email ---
     email_backend: Literal["console", "smtp"] = "console"
 

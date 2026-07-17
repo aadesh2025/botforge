@@ -18,6 +18,25 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-015: Auth design — opaque rotating refresh tokens, module layout, DB-backed tests
+- **Date:** 2026-07-17
+- **Status:** accepted
+- **Context:** Phase 2 auth. Need secure sessions, testability without a mail server, and a
+  clean module structure per `02 §2`.
+- **Decision:** Access = short-lived **JWT** (15m, HS256). Refresh = **opaque** random token,
+  only its SHA-256 hash stored in `sessions`; refresh **rotates** (old row revoked) — enables
+  server-side revocation and logout. Argon2 for passwords; **Fernet** (SECRET_KEY-derived) for
+  secrets at rest (OAuth tokens). Added an **`email_verification_tokens`** table (not in the
+  original `03` schema) mirroring the reset-token pattern. Email via a **console backend** with
+  an in-memory outbox tests read to extract tokens. OAuth uses PKCE(Google)+state held in a
+  process-local store; unconfigured providers return `501 auth.oauth_not_configured`. Rate
+  limiting via Redis fixed-window with an **in-memory fallback** so it works without Redis.
+  Auth code lives in `app/modules/auth/{schemas,deps,service,oauth,router}.py`.
+- **Testing:** DB-backed tests run against real Postgres inside a **transaction rolled back**
+  per test (`conftest` overrides `get_session`); CI runs pgvector + redis services + migrations.
+- **Consequences:** stable error codes (`auth.*`); `/me` returns memberships (empty until
+  Phase 3). Frontend auth pages (2.6) deferred to a later frontend pass.
+
 ### ADR-014: UUIDv7 primary keys; String enums; JSONB config; autogenerate migrations
 - **Date:** 2026-07-17
 - **Status:** accepted

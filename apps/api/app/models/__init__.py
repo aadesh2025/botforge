@@ -5,6 +5,7 @@ from app.models.agents import Agent, AgentVersion, ProviderCredential
 from app.models.channels import Channel
 from app.models.conversations import Conversation, Message
 from app.models.identity import (
+    EmailVerificationToken,
     Invitation,
     MagicLinkToken,
     Membership,
@@ -36,6 +37,7 @@ __all__ = [
     "Chunk",
     "Conversation",
     "Document",
+    "EmailVerificationToken",
     "Handoff",
     "Invitation",
     "KnowledgeBase",

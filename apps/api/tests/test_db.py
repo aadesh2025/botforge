@@ -15,7 +15,7 @@ from app.db.repository import BaseRepository
 
 EXPECTED_TABLES = {
     "users", "oauth_accounts", "magic_link_tokens", "password_reset_tokens", "sessions",
-    "organizations", "memberships", "invitations",
+    "email_verification_tokens", "organizations", "memberships", "invitations",
     "agents", "agent_versions", "provider_credentials",
     "knowledge_bases", "documents", "chunks",
     "conversations", "messages",

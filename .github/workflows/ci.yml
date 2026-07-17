@@ -12,6 +12,29 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: botforge
+          POSTGRES_PASSWORD: botforge
+          POSTGRES_DB: botforge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U botforge"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      SECRET_KEY: ci-test-secret-key
+      DATABASE_URL: postgresql+asyncpg://botforge:botforge@localhost:5432/botforge
+      REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +51,9 @@ jobs:
 
       - name: Mypy (typecheck)
         run: uv run mypy app
+
+      - name: Migrate database
+        run: uv run alembic upgrade head
 
       - name: Pytest
         run: uv run pytest -q

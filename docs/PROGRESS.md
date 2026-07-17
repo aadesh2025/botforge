@@ -8,7 +8,7 @@ stubbed/deferred, and any gaps waiting on human secrets.
 |---|---|---|---|
 | 0 | Repo/tooling/CI/compose | ✅ | git, web + api scaffolds, docker-compose (postgres+pgvector/redis/api/worker/web/n8n/ollama), .env.example, Makefile, CI. **Verified: `docker compose up postgres redis` healthy, `/readyz` green (db+redis reachable).** Remaining: on-start alembic in api container (later), Playwright in CI (Phase 19). |
 | 1 | Database foundation | ✅ | All 27 models, UUIDv7 base + mixins, org-scoped repository (cross-org isolation test), Alembic async. **Verified against real Postgres: `alembic upgrade head` created all 27 tables + pgcrypto/vector extensions + `chunks.embedding vector(768)`; seed ran (idempotent); 10 tests + ruff + mypy green.** |
-| 2 | Auth & accounts | ⬜ | |
+| 2 | Auth & accounts | 🟨 backend done | Password auth (argon2), JWT access + rotating refresh (session table), logout, /me; email verification + password reset + magic-link (console email backend w/ test outbox); OAuth Google/GitHub (PKCE+state, stubbed without keys); sessions list/revoke; Redis rate limiting (in-memory fallback); secrets encrypted at rest (Fernet). **25 tests pass vs real Postgres (tx-rollback isolation); live smoke OK; ruff+mypy clean; CI now runs pg+redis+migrations.** Remaining: 2.6 web auth pages (frontend). |
 | 3 | Orgs/RBAC | ⬜ | |
 | 4 | App shell & design system | ✅ frontend | Design tokens, dark-first ember system, full app shell, and every dashboard route surface built. Remaining (backend-dependent): generated API client. |
 | 5 | LLM provider layer | ⬜ | UI surfaces (provider/model picker, sampling, credentials) built in the builder against mocks; backend pending |
