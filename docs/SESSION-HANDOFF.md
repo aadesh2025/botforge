@@ -3,7 +3,7 @@
 > **Read this first, then continue the build.** This file is the pick-up point for the next
 > session. It records what's done, what's half-done, and exactly what to do next.
 
-Last updated: **2026-07-18** · Latest commit: `phase-13-complete` · Branch: `master`
+Last updated: **2026-07-19** · Latest commit: `phase-15-complete` · Branch: `master`
 
 ---
 
@@ -19,7 +19,7 @@ Read every file in `docs/` **in order** before writing code:
 6. Then the running logs: `PROGRESS.md` (per-phase status), `DECISIONS.md` (ADR-001…020),
    `ENV.md`, and `RUNBOOK-docker.md` (how to bring the stack up).
 
-**Continue from where we left off: Phase 14 (Analytics & usage metering).**
+**Continue from where we left off: Phase 16 (Guardrails, moderation, hardening).**
 
 ---
 
@@ -53,7 +53,7 @@ A backend was built from nothing and the existing mock frontend was wired to it.
 | 0 | Repo/tooling/CI/compose | ✅ **complete** (tag `phase-00-complete`) |
 | 1 | Database foundation | ✅ **complete** (tag `phase-01-complete`) |
 | 2 | Auth & accounts | ✅ **complete** — backend + web auth pages (tag `phase-02-complete`) |
-| 3 | Orgs & RBAC | 🟨 **mostly done** — backend ✅, org switcher wired; **members/invitations settings UI + RoleGuard still on mocks** |
+| 3 | Orgs & RBAC | ✅ **complete** — gap closed in Phase 15: members/invitations UI + real `lib/rbac` gating; viewer-denial verified live |
 | 4 | App shell & design system | ✅ **complete** — shell + typed API client (tag `phase-04-complete`) |
 | 5 | LLM provider layer | ✅ **complete** (tag `phase-05-complete`) |
 | 6 | Agents & versions | ✅ **complete** — backend + builder wired + streaming playground (tag `phase-06-complete`) |
@@ -64,49 +64,57 @@ A backend was built from nothing and the existing mock frontend was wired to it.
 | 11 | Web widget | ✅ **complete** — public config/chat + Shadow-DOM widget + SDK + Channels tab; live embed verified (tag `phase-11-complete`) |
 | 12 | Messaging channels | ✅ **complete** — Telegram/WhatsApp/Slack/Discord adapters + signed webhooks + Channels tab; Telegram inbound verified live (tag `phase-12-complete`) |
 | 13 | Inbox & handoff | ✅ **complete** — handoff triggers + inbox + realtime hub + widget push; full loop verified live (tag `phase-13-complete`) |
-| 14 | **Analytics & metering** | ⬜ **NOT STARTED — do this next** (analytics UI is mock) |
-| 15 | API keys/webhooks/audit | ⬜ (settings pages are mock) |
-| 16 | Guardrails & hardening | ⬜ |
+| 14 | Analytics & metering | ✅ **complete** — live aggregates + rollups; verified against messages table (tag `phase-14-complete`) |
+| 15 | API keys/webhooks/audit | ✅ **complete** — keys+auth, signed webhooks, audit, settings UIs; verified live (tag `phase-15-complete`) |
+| 16 | **Guardrails & hardening** | ⬜ **NOT STARTED — do this next** |
 | 17 | Admin console | ⬜ |
 | 18 | Billing (optional) | ⬜ |
 | 19 | E2E/docs/polish | ⬜ |
 | 20 | Production deployment | ⬜ |
 
-**Scoreboard:** 13 phases tagged complete (0,1,2,4,5,6,7,8,9,10,11,12,13) · 1 mostly done (3) · 7 not started (14–20).
-Roughly **13 of 21** phases have real, tested, wired progress. **123 backend tests pass.**
+**Scoreboard:** 15 phases tagged complete (0–15 except 3 which is now ✅ too) · 0 partial · 5 not started (16–20).
+Roughly **16 of 21** phases have real, tested, wired progress. **141 backend tests pass.**
 
 ### Backend business routes live now
 `/v1/auth/*`, `/v1/orgs/*`, `/v1/credentials/*`, `/v1/agents/*` (+ playground + `/chat` +
 `/chat/ws`), `/v1/knowledge/*`, `/v1/conversations/*`, `/v1/tools/*` (+ `/n8n/*`),
-`/v1/public/agents/{public_key}/{config,chat,ws,subscribe}`, `/v1/channels/*` (+ signed webhooks),
-`/v1/inbox/*` (+ WS). Not built yet: analytics, apikeys, webhooks (outbound), admin, billing.
+`/v1/public/agents/{public_key}/{config,chat,ws,subscribe}`, `/v1/channels/*`, `/v1/inbox/*` (+ WS),
+`/v1/analytics/*`, `/v1/apikeys/*`, `/v1/webhooks/*`, `/v1/audit`. **API-key auth** works on any
+org-scoped route (`X-API-Key` / `Bearer bf_…`). Not built yet: admin console, billing.
 
 ### Frontend: what's real vs mock
-- **Real (wired to API):** login/signup, org switcher, user menu, agents list + builder
-  (Persona/Model/Versions/**Knowledge**/**Tools**/**Channels** + playground), credentials,
-  knowledge, **conversations browser**, **automations** (n8n bind), **inbox** (two-pane, realtime).
-- **Still mock (no backend yet):** dashboard analytics, analytics, and members/invites settings.
+- **Real (wired to API):** login/signup, org switcher, user menu, agents + builder (all tabs),
+  credentials, knowledge, **conversations**, **automations**, **inbox**, **analytics** + dashboard
+  stats, **settings** (org members/invites, API keys, webhooks, audit) with real RBAC gating.
   The **web widget is real** (`packages/widget` → `/widget.js`).
+- **Still mock:** the `/admin` console (Phase 17) and billing (Phase 18).
 
 ---
 
-## 3. NEXT: Phase 14 — Analytics & usage metering
+## 3. NEXT: Phase 16 — Guardrails, moderation, hardening
 
-Per `08-PHASES.md §14` and `04-API-SPEC.md §Analytics`:
-- **14.1** Usage rollups (Celery) into `usage_records`; quotas + threshold events. The raw data
-  already exists: every `messages` row carries `tokens_prompt/completion`, `cost_micros`,
-  `latency_ms`, `provider`, `model`; `tool_runs` carries per-tool latency/status.
-- **14.2** Analytics endpoints: overview (conversations/messages/users/resolution+handoff rate),
-  usage (tokens + cost, group by day/provider/model), latency, top/unanswered questions, CSV export.
-- **14.3** Analytics dashboards (cards + Recharts + date range + export) — the `/analytics` and
-  dashboard pages are still mock.
+Per `08-PHASES.md §16`:
+- **16.1** Guardrails: blocked topics (already in `version.persona.blockedTopics`), prompt-injection
+  heuristics on **untrusted** content (retrieved RAG chunks + tool outputs — never let them
+  override the system prompt), and an output redaction hook. Wire into `app/chat` assembly/runtime.
+- **16.2** Security pass: rate limits on every public surface (public chat is limited; add to
+  channel webhooks?), SSRF guards (present for HTTP tools/webhooks/URL-KB — audit coverage),
+  CSP/security headers (add middleware), encrypted-key audit, input/file validation review →
+  write `docs/SECURITY.md` checklist.
+- **16.3** Load/perf sanity (locust/k6) against NFR-1 (p50 first-token on Groq).
 
-Reuse: aggregate straight off `messages`/`conversations`/`handoffs`/`tool_runs` (all org-scoped).
-"Resolution rate" ≈ conversations closed without an open handoff; "handoff rate" ≈ conversations
-with a `Handoff` row. "Unanswered" ≈ turns where RAG returned no citations (a marker could be
-added). The Celery worker + `usage_records`/`quotas` tables already exist (Phase 1/7).
+Reuse: `app/chat/assembly.build_messages` is where retrieved context + memory + history are
+assembled — the guardrail input filter goes there. `app/rag/loaders._is_blocked_host` is the
+shared SSRF check. The rate limiter is `app/core/ratelimit`.
+
+### Roadmap items now due before Phase 20 (see PROGRESS roadmap)
+- **Realtime hub → Redis pub/sub** (ADR-028): in-process only; must swap before multi-node prod.
+- **Webhook retry beat sweep**: `pending` deliveries past `next_retry_at` need a periodic sweep.
 
 ### Live-demo state (carried forward)
+- **API keys / webhooks / audit / RBAC verified live** this session (see PROGRESS §15). A viewer
+  member `viewer_demo@example.com` exists in the demo org (role viewer) for RBAC demos.
+- **Analytics verified live** against the messages table (real Groq usage from prior phases).
 - **Groq key is now VALID** — real chat works (`llama-3.1-8b-instant` verified). SECRET_KEY was
   rotated: old JWTs + any Fernet-encrypted `provider_credentials`/channel tokens are invalid;
   re-login and re-enter provider keys if needed (env Groq key is used as the fallback).
