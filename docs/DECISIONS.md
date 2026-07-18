@@ -36,6 +36,27 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-029: Analytics computed live from messages; usage_records for metering/quotas
+- **Date:** 2026-07-18
+- **Status:** accepted
+- **Context:** Phase 14 — analytics + usage metering.
+- **Decisions:**
+  - **Analytics endpoints aggregate live** from `messages`/`conversations`/`handoffs` per request
+    (org-scoped, date-ranged), so the numbers are always exactly what's in the tables — no
+    dependence on a rollup having run. Verified by matching a direct `messages` SQL aggregate.
+  - **`usage_records` + `quotas` are a separate metering layer** populated by a Celery rollup
+    (`app/worker/rollup`) — a daily per-(agent, provider, model) upsert used for quota
+    enforcement + a `usage.threshold` event (emitted as a webhook in Phase 15). The rollup's
+    totals match the live message sums.
+  - **Metric definitions:** resolution_rate = 1 − (conversations with a `Handoff` / total
+    conversations); "unanswered/escalated" = user questions in conversations that got a handoff
+    (a pragmatic proxy — a dedicated "no-citation" marker can refine it later); latency from
+    `messages.latency_ms` via Postgres `percentile_cont`. Free providers cost 0 (`PRICING`), so
+    real cost is genuinely $0 until a paid provider is used.
+  - **Keyword handoff is an inbound (widget/channel) behaviour** — the authenticated dashboard
+    `/chat` doesn't run it (it's an operator/test surface), so analytics escalations come from
+    end-user surfaces.
+
 ### ADR-028: Human handoff + inbox with an in-process realtime hub
 - **Date:** 2026-07-18
 - **Status:** accepted
