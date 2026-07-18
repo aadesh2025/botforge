@@ -36,6 +36,28 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-028: Human handoff + inbox with an in-process realtime hub
+- **Date:** 2026-07-18
+- **Status:** accepted
+- **Context:** Phase 13 — pause the bot for a human, queue it in an inbox, deliver operator
+  replies back to the end user in real time.
+- **Decisions:**
+  - **Handoff = `conversation.status="handoff"` + a `Handoff` row.** `app/chat/handoff` triggers
+    it from a keyword (when `features.handoff_enabled`) or the `request_handoff` built-in tool.
+    The shared `InboundTurn` (ADR-027) already checks the status and stays silent while paused —
+    so every surface (widget + channels) pauses consistently. Handback flips the status back to
+    `active` and the bot resumes.
+  - **Realtime via a tiny in-process pub/sub** (`app/realtime/hub`): topics `inbox:{org}` and
+    `conv:{id}`. The operator inbox WS subscribes to the org topic (handoff/message events); the
+    **widget** opens a listen-only socket (`/v1/public/agents/{key}/subscribe`) to its
+    conversation topic and appends operator replies + handback pushes live. Single-process only;
+    swap the hub body for Redis pub/sub to scale out (same interface).
+  - **Operator replies** persist as `role="assistant", provider="operator"` (distinct from bot
+    turns), deliver to the end user's channel via the adapter (`send`) for messaging channels and
+    via the hub push for the widget, and emit an inbox event.
+  - **Inbox queue = conversations that have a `Handoff` record** (any status), filterable by the
+    conversation's current status — so resolved handoffs stay visible for history.
+
 ### ADR-027: Messaging channels via a shared inbound turn + adapter registry
 - **Date:** 2026-07-18
 - **Status:** accepted
