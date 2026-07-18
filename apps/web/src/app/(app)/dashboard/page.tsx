@@ -1,12 +1,10 @@
-import { CircleDollarSign, MessagesSquare, Plus, ShieldCheck, Zap } from "lucide-react";
+import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
-import { StatCard } from "@/components/dashboard/stat-card";
-import { UsageChart } from "@/components/dashboard/usage-chart";
+import { DashboardStats } from "@/components/dashboard/dashboard-stats";
 import { AgentsPanel } from "@/components/dashboard/agents-panel";
 import { ConversationsPanel } from "@/components/dashboard/conversations-panel";
 import { Button } from "@/components/ui/button";
-import { agents, dashboardSummary as s, recentConversations, usageSeries } from "@/lib/mock/data";
-import { compact, usd } from "@/lib/utils";
+import { agents, recentConversations } from "@/lib/mock/data";
 
 export default function DashboardPage() {
   return (
@@ -27,43 +25,12 @@ export default function DashboardPage() {
         </PageHeader>
       </div>
 
-      {/* Stat row */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Conversations"
-          value={compact(s.conversations7d)}
-          delta={s.conversationsDelta}
-          icon={MessagesSquare}
-          hint="vs last 7d"
-        />
-        <StatCard
-          label="Resolution rate"
-          value={`${Math.round(s.resolutionRate * 100)}%`}
-          delta={s.resolutionDelta}
-          icon={ShieldCheck}
-          hint="auto-resolved"
-        />
-        <StatCard
-          label="Tokens used"
-          value={compact(s.tokens7d)}
-          delta={s.messagesDelta}
-          icon={Zap}
-          hint="across providers"
-        />
-        <StatCard
-          label="Est. cost"
-          value={usd(s.cost7d)}
-          delta={s.costDelta}
-          icon={CircleDollarSign}
-          hint="this period"
-          invertDelta
-        />
-      </div>
+      {/* Stat row + usage chart, wired to real analytics */}
+      <DashboardStats />
 
       {/* Two-column body */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
-          <UsageChart data={usageSeries} />
           <AgentsPanel agents={agents} />
         </div>
         <div className="xl:col-span-1">

@@ -30,17 +30,26 @@ export function UsageChart({ data }: { data: UsagePoint[] }) {
   }, []);
 
   const { areaPath, linePath, points } = useMemo(() => {
+    if (data.length === 0) return { areaPath: "", linePath: "", points: [] as { x: number; y: number; v: number }[] };
     const values = data.map((d) => d[metric]);
-    const max = Math.max(...values) * 1.15;
+    const max = Math.max(...values, 1) * 1.15;
     const innerW = w - PAD.left - PAD.right;
     const innerH = H - PAD.top - PAD.bottom;
-    const x = (i: number) => PAD.left + (innerW * i) / (data.length - 1);
+    const x = (i: number) => PAD.left + (innerW * i) / Math.max(1, data.length - 1);
     const y = (v: number) => PAD.top + innerH - (innerH * v) / max;
     const pts = values.map((v, i) => ({ x: x(i), y: y(v), v }));
     const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
     const area = `${line} L${pts[pts.length - 1].x.toFixed(1)},${PAD.top + innerH} L${pts[0].x.toFixed(1)},${PAD.top + innerH} Z`;
     return { areaPath: area, linePath: line, points: pts };
   }, [data, metric, w]);
+
+  if (data.length === 0) {
+    return (
+      <div className="flex h-[220px] items-center justify-center rounded-lg border border-border bg-surface text-sm text-muted">
+        No usage in this period yet.
+      </div>
+    );
+  }
 
   const active = hover ?? points.length - 1;
   const activePoint = points[active];
