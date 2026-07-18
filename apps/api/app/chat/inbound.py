@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.assembly import build_messages
+from app.chat.handoff import trigger_handoff, wants_handoff
 from app.chat.runtime import TurnResult, run_turn
 from app.core.config import settings
 from app.llm.types import StreamEvent
@@ -65,6 +66,32 @@ class InboundTurn:
             self.handed_off = True
             conv.last_message_at = dt.datetime.now(tz=dt.UTC)
             await session.flush()
+            return
+
+        # Keyword handoff: the visitor is asking for a human.
+        features = self.version.features or {}
+        if features.get("handoff_enabled") and wants_handoff(self.message):
+            await trigger_handoff(session, conv, requested_by="user", reason="keyword")
+            self.handed_off = True
+            canned = (
+                self.version.fallback_message
+                or "Let me connect you with a teammate — someone will be with you shortly."
+            )
+            msg = Message(
+                conversation_id=conv.id,
+                organization_id=conv.organization_id,
+                role="assistant",
+                content=canned,
+                provider="system",
+            )
+            session.add(msg)
+            conv.last_message_at = dt.datetime.now(tz=dt.UTC)
+            await session.flush()
+            self.assistant_message = msg
+            self.result.content = canned
+            yield StreamEvent(type="token", delta=canned)
+            yield StreamEvent(type="done", finish_reason="handoff")
+            yield StreamEvent(type="message", message_id=str(msg.id))
             return
 
         context_block, citations = await retrieve_for_version(session, org_id, self.version, self.message)

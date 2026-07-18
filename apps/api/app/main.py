@@ -19,6 +19,7 @@ from app.modules.agents.router import router as agents_router
 from app.modules.auth.router import router as auth_router
 from app.modules.conversations.router import router as conversations_router
 from app.modules.credentials.router import router as credentials_router
+from app.modules.inbox.router import router as inbox_router
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.orgs.router import router as orgs_router
 from app.modules.public.router import router as public_router
@@ -76,6 +77,7 @@ def create_app() -> FastAPI:
     app.include_router(tools_router)
     app.include_router(public_router)
     app.include_router(channels_router)
+    app.include_router(inbox_router)
 
     return app
 

@@ -143,6 +143,22 @@ async def _web_search(_ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
     )
 
 
+# ── request_handoff ──────────────────────────────────────────────────────────────────
+async def _request_handoff(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
+    from app.chat.handoff import trigger_handoff
+    from app.models import Conversation
+
+    if ctx.conversation_id is None:
+        return ToolResult(output={"status": "unavailable"}, status="error", error="no conversation")
+    conv = await ctx.session.get(Conversation, ctx.conversation_id)
+    if conv is None:
+        return ToolResult(output={}, status="error", error="conversation not found")
+    await trigger_handoff(
+        ctx.session, conv, requested_by="bot", reason=str(args.get("reason") or "agent requested a human")
+    )
+    return ToolResult(output={"status": "handoff_requested"})
+
+
 BUILTINS: dict[str, BuiltinTool] = {
     "get_datetime": BuiltinTool(
         name="get_datetime",
@@ -197,5 +213,15 @@ BUILTINS: dict[str, BuiltinTool] = {
             "required": ["query"],
         },
         run=_web_search,
+    ),
+    "request_handoff": BuiltinTool(
+        name="request_handoff",
+        description="Escalate the conversation to a human agent when you cannot help or the user asks.",
+        parameters={
+            "type": "object",
+            "properties": {"reason": {"type": "string", "description": "why a human is needed"}},
+            "required": [],
+        },
+        run=_request_handoff,
     ),
 }
