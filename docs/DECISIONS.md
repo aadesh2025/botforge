@@ -36,6 +36,46 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-023: Branch-on-edit for published agent versions
+- **Date:** 2026-07-18
+- **Status:** accepted
+- **Context:** The builder autosaves via `PATCH /agents/{id}/versions/{n}`, but a published
+  version is immutable (previously returned 409), which the autosave swallowed → edits to a
+  live agent were silently lost.
+- **Decision:** `update_version` now forks on edit: if the targeted version is published, it
+  transparently creates a new draft copied from the latest version (per ADR-018) and applies
+  the patch to that. The response carries the new (higher) version number; the builder detects
+  the bump, re-targets its autosave at the new draft, and shows an "Editing new draft vN" badge.
+- **Consequences:** No silent failures; editing a live agent always produces an editable draft
+  you then publish. The old 409 path is gone.
+
+### ADR-022: Chat runtime, persistence, and memory
+- **Date:** 2026-07-18
+- **Status:** accepted
+- **Context:** Phase 8 — durable dashboard chat with memory, separate from the ephemeral
+  builder playground.
+- **Decisions:**
+  - **Shared runtime in `app/chat`.** `assembly.build_messages` orders the prompt per docs/06
+    §2 (system → retrieved context → memory summary → recent window → current turn).
+    `runtime.stream_turn` runs one provider pass, forwards `StreamEvent`s, and accumulates a
+    `TurnResult` (content/usage/cost/citations) the caller persists. Phase 9 wraps this with a
+    tool loop.
+  - **Persistence lives in the conversations service**, which owns `POST /v1/agents/{id}/chat`
+    (SSE + non-stream) and the conversation CRUD. The request-scoped session is used inside the
+    `StreamingResponse` generator (Starlette consumes it before the `get_session` commit), and
+    the WS handler uses its own committing `SessionFactory` session per socket.
+  - **The "live" version answers**: `current_version_id` if published, else the latest draft
+    (the playground still uses the latest draft). The builder playground stays ephemeral; the
+    persisted `/chat` endpoint backs the conversations browser.
+  - **Memory:** a recent window (`MEMORY_WINDOW_MESSAGES`) stays verbatim; once a conversation
+    passes `MEMORY_SUMMARY_THRESHOLD`, newly aged-out turns are folded into
+    `conversation.memory_summary` via a **separate small model** (`SUMMARY_PROVIDER`/`MODEL`,
+    groq default → fake fallback) — never the agent's own model, so a heavy local model like
+    qwen3:14b is never pulled into background summaries. `meta.summarized_upto` bounds the work
+    to only the newly aged slice each turn.
+  - **WebSocket** `WS /v1/agents/{id}/chat/ws` mirrors the SSE contract; auth is via
+    `?token=&org_id=` query params (browsers can't set WS Authorization headers).
+
 ### ADR-021: RAG pipeline shape — char-based chunking, hybrid RRF, fake-embed KBs for tests
 - **Date:** 2026-07-18
 - **Status:** accepted
