@@ -36,6 +36,30 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-030: API keys, outbound webhooks, audit, and frontend RBAC
+- **Date:** 2026-07-19
+- **Status:** accepted
+- **Context:** Phase 15 — programmatic access, event delivery, audit trail, and closing the
+  Phase 3 RBAC-UI gap.
+- **Decisions:**
+  - **API keys act as their creator.** A `bf_`-prefixed key is stored as `sha256` + a prefix for
+    O(1) lookup; `current_org` accepts it via `X-API-Key` or `Bearer bf_…`, resolves the key's
+    org, and builds an `OrgContext` whose acting user is the key's creator — so `created_by`,
+    audit, and RBAC all reuse the creator's membership role. Scopes are stored (and exposed on
+    `OrgContext.scopes`) for future fine-grained checks; enforcement is currently role-based.
+  - **Webhooks: emit → persist → deliver.** `emit_event` (best-effort, never raises into the
+    request) creates a `WebhookDelivery` per subscribed endpoint and enqueues a Celery delivery
+    task. `deliver_delivery` signs (`HMAC-SHA256` of `"{ts}.{body}"`), POSTs, and records
+    status/attempts/response; failures set `pending` + `next_retry_at` (exp backoff, cap 5
+    attempts) and Celery retries. **Webhook URLs are SSRF-guarded** (arbitrary user input), unlike
+    the trusted n8n base URL. The full event catalog is emitted from the runtime (message,
+    conversation, handoff, document, tool, usage.threshold).
+  - **Shared audit writer** (`app/core/audit.write_audit`) records sensitive mutations across
+    modules (org, member, apikey, webhook); the read API is admin/owner-only (`members:manage`).
+  - **Frontend RBAC mirrors the backend matrix** in `lib/rbac` (`useCan`) to hide/disable UI a
+    role can't use — the server stays authoritative. Verified live: a viewer sees read-only
+    settings and gets 403 from the API on admin actions.
+
 ### ADR-029: Analytics computed live from messages; usage_records for metering/quotas
 - **Date:** 2026-07-18
 - **Status:** accepted
