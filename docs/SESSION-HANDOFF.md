@@ -3,7 +3,7 @@
 > **Read this first, then continue the build.** This file is the pick-up point for the next
 > session. It records what's done, what's half-done, and exactly what to do next.
 
-Last updated: **2026-07-17** · Latest commit: `b2cb207` · Branch: `master`
+Last updated: **2026-07-18** · Latest commit: `ef508a7` · Branch: `master`
 
 ---
 
@@ -19,7 +19,7 @@ Read every file in `docs/` **in order** before writing code:
 6. Then the running logs: `PROGRESS.md` (per-phase status), `DECISIONS.md` (ADR-001…020),
    `ENV.md`, and `RUNBOOK-docker.md` (how to bring the stack up).
 
-**Continue from where we left off: Phase 7 (Knowledge base & RAG).**
+**Continue from where we left off: Phase 8 (Chat persistence, memory, conversations).**
 
 ---
 
@@ -57,8 +57,8 @@ A backend was built from nothing and the existing mock frontend was wired to it.
 | 4 | App shell & design system | ✅ **complete** — shell + typed API client (tag `phase-04-complete`) |
 | 5 | LLM provider layer | ✅ **complete** (tag `phase-05-complete`) |
 | 6 | Agents & versions | ✅ **complete** — backend + builder wired + streaming playground (tag `phase-06-complete`) |
-| 7 | **Knowledge base & RAG** | ⬜ **NOT STARTED — do this next** |
-| 8 | Chat persistence & memory | ⬜ |
+| 7 | Knowledge base & RAG | ✅ **complete** — backend (KB/ingestion/retrieval/RAG) + worker + UI wired; verified live (tag `phase-07-complete`) |
+| 8 | **Chat persistence & memory** | ⬜ **NOT STARTED — do this next** |
 | 9 | Tools & tool calling | ⬜ (builder Tools tab is mock) |
 | 10 | n8n integration | ⬜ (Automations page is mock) |
 | 11 | Web widget | ⬜ (widget preview is mock) |
@@ -72,35 +72,47 @@ A backend was built from nothing and the existing mock frontend was wired to it.
 | 19 | E2E/docs/polish | ⬜ |
 | 20 | Production deployment | ⬜ |
 
-**Scoreboard:** 6 phases tagged complete (0,1,2,4,5,6) · 1 mostly done (3) · 14 not started (7–20).
-Roughly **6 of 21** phases have real, tested, wired progress.
+**Scoreboard:** 7 phases tagged complete (0,1,2,4,5,6,7) · 1 mostly done (3) · 13 not started (8–20).
+Roughly **7 of 21** phases have real, tested, wired progress.
 
 ### Backend business routes live now
-`/v1/auth/*`, `/v1/orgs/*`, `/v1/credentials/*`, `/v1/agents/*` (+ playground). Everything
-else in `04-API-SPEC.md` is not built yet.
+`/v1/auth/*`, `/v1/orgs/*`, `/v1/credentials/*`, `/v1/agents/*` (+ playground), `/v1/knowledge/*`
+(KB CRUD, document upload file/url/text, chunks, `/{id}/search`). Everything else in
+`04-API-SPEC.md` is not built yet.
 
 ### Frontend: what's real vs mock
 - **Real (wired to API):** login/signup, org switcher, user menu, agents list + builder
-  (Persona/Model/Versions + playground), credentials settings.
-- **Still mock (no backend yet):** dashboard analytics, knowledge, inbox, analytics,
-  automations, the builder's Knowledge/Tools/Channels tabs, and members/invites settings.
+  (Persona/Model/Versions/**Knowledge** + playground), credentials settings, **knowledge
+  list + detail (upload/url/text, live status, chunk viewer)**.
+- **Still mock (no backend yet):** dashboard analytics, inbox, analytics, automations, the
+  builder's Tools/Channels tabs, and members/invites settings.
 
 ---
 
-## 3. NEXT: Phase 7 — Knowledge base & RAG (the heaviest phase)
+## 3. NEXT: Phase 8 — Chat persistence, memory, conversations
 
-Per `08-PHASES.md §7` and `06-AI-ENGINE.md §2`:
-- **7.1** KB CRUD; document upload (file/url/text) → store file + `document` row + Celery enqueue.
-- **7.2** Celery worker + ingestion task: parse (PDF/DOCX/TXT/CSV/MD/URL) → chunk → embed →
-  store chunks/vectors → status transitions + progress. (Embeddings via Ollama `nomic-embed-text`
-  or a fake embedder in tests.)
-- **7.3** Retrieval: vector top-k + threshold, optional hybrid (tsvector RRF), citations.
-- **7.4** Wire RAG into the chat/playground runtime: prompt assembly + citations + token budget.
-- **7.5** Knowledge UI + builder Knowledge tab (wire to the new API).
+Per `08-PHASES.md §8` and `06-AI-ENGINE.md §3`:
+- **8.1** Persist conversations/messages (usage/cost/latency); conversation list + detail +
+  messages endpoints. Currently the playground is stateless — nothing is written to
+  `conversations`/`messages`.
+- **8.2** Memory: short-term window + long-term summarization into `memory_summary` (cheap
+  free model) when history exceeds a threshold.
+- **8.3** WebSocket chat endpoint mirroring the SSE contract.
+- **8.4** Conversations browser (web) + wire the playground/chat to persisted history.
 
-This phase needs a **Celery worker** (a service already stubbed in `infra/docker-compose.yml`)
-and an **embedding provider** (`EmbeddingProvider` protocol + `FakeEmbeddingProvider` already
-exist in `app/llm/`). The `chunks.embedding vector(768)` column already exists.
+The `conversations` + `messages` models already exist (Phase 1). The RAG runtime in
+`app/modules/agents/service.py` (`_retrieve_context`, `_build_request`, `playground_stream/once`)
+is where message persistence + memory assembly should hook in.
+
+### Phase 7 leftovers / gotchas discovered
+- **Builder autosave 409 on published agents:** the builder edits the *latest* version, but for
+  a **published** agent that version is immutable (PATCH → 409) so edits silently don't persist.
+  The builder should create a new draft version when the latest is published (a Phase 6/8 UX
+  fix). Test RAG in the playground on a **draft** agent.
+- **RAG UI works end-to-end on a draft agent** — proven live by pointing the "aadesh" draft
+  agent at Ollama `qwen3:14b` with the "Product Docs" KB (id `019f7164-…`) attached.
+- Hybrid FTS uses `plainto_tsquery` which **ANDs** all query tokens; a query only matches
+  lexically when every non-stopword token appears in a chunk (see ADR-021).
 
 ---
 
@@ -113,11 +125,16 @@ cd infra && docker compose up -d postgres redis          # wait for healthy
 cd ../apps/api && uv run alembic upgrade head
 # 3. Run the API on the host (fast path):
 uv run uvicorn app.main:app --port 8000                  # /readyz should be green
+# 3b. Run the Celery worker (REQUIRED for document ingestion; --pool=solo on Windows):
+uv run celery -A app.worker.celery_app worker --pool=solo --loglevel=info
 # 4. Run the web app:
 cd ../web && npm run dev                                 # grabs a free port (3000/3001/…)
 ```
 Dev CORS accepts any `http://localhost:<port>`. A demo account exists from this session:
-`webflow_test@example.com` / `password123` (org "Aurozen Live", agent "Support Concierge").
+`webflow_test@example.com` / `password123` (org "Aurozen Live"). Agents: "Support Concierge"
+(published) and "aadesh" (draft, wired to Ollama qwen3:14b + the "Product Docs" KB for RAG).
+Ingestion uses Ollama `nomic-embed-text` (already pulled in the local Ollama). The web dev
+server from this session is on **:3001** (port 3000 is taken by another local app).
 
 ---
 
