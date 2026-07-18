@@ -11,7 +11,8 @@ import { agentStatusMeta } from "@/lib/display";
 import { relativeTime } from "@/lib/utils";
 
 export function BuilderHeader() {
-  const { draft, agentId, versionNumber, published, dirty, saving, lastSavedAt, setPublished } = useBuilder();
+  const { draft, agentId, versionNumber, published, dirty, saving, lastSavedAt, branchedToDraft, setPublished } =
+    useBuilder();
   const [publishing, setPublishing] = useState(false);
   if (!draft) return null;
   const status = agentStatusMeta[draft.status];
@@ -52,6 +53,11 @@ export function BuilderHeader() {
         </div>
 
         <div className="ml-auto flex items-center gap-3">
+          {branchedToDraft !== null && (
+            <Badge variant="ember" title="Your edit created a new editable draft; publish it when ready.">
+              Editing new draft v{branchedToDraft}
+            </Badge>
+          )}
           <SaveIndicator dirty={dirty} saving={saving} lastSavedAt={lastSavedAt} />
           {published && !dirty ? (
             <Badge variant="success">

@@ -244,9 +244,8 @@ async def list_versions(session: AsyncSession, ctx: OrgContext, agent_id: uuid.U
     return [_version_out(v) for v in (await session.execute(stmt)).scalars().all()]
 
 
-async def create_version(session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID) -> schemas.VersionOut:
-    rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
-    await _get_agent(session, ctx, agent_id)
+async def _draft_from_latest(session: AsyncSession, agent_id: uuid.UUID, user_id: uuid.UUID) -> AgentVersion:
+    """Create a new draft version copied from the latest version. Returns the ORM object."""
     latest = await _latest_version(session, agent_id)
     draft = AgentVersion(
         agent_id=agent_id,
@@ -260,25 +259,20 @@ async def create_version(session: AsyncSession, ctx: OrgContext, agent_id: uuid.
         model_config_json=dict(latest.model_config_json),
         rag_config=dict(latest.rag_config),
         features=dict(latest.features),
-        created_by=ctx.user.id,
+        created_by=user_id,
     )
     session.add(draft)
     await session.flush()
-    return _version_out(draft)
+    return draft
 
 
-async def update_version(
-    session: AsyncSession,
-    ctx: OrgContext,
-    agent_id: uuid.UUID,
-    number: int,
-    data: schemas.UpdateVersionRequest,
-) -> schemas.VersionOut:
+async def create_version(session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID) -> schemas.VersionOut:
     rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
     await _get_agent(session, ctx, agent_id)
-    version = await _get_version(session, agent_id, number)
-    if version.is_published:
-        raise AppError("agents.version_published", "Published versions are immutable; create a new draft.", 409)
+    return _version_out(await _draft_from_latest(session, agent_id, ctx.user.id))
+
+
+def _apply_version_patch(version: AgentVersion, data: schemas.UpdateVersionRequest) -> None:
     if data.system_prompt is not None:
         version.system_prompt = data.system_prompt
     if data.persona is not None:
@@ -295,6 +289,25 @@ async def update_version(
         version.rag_config = data.rag_config
     if data.features is not None:
         version.features = data.features
+
+
+async def update_version(
+    session: AsyncSession,
+    ctx: OrgContext,
+    agent_id: uuid.UUID,
+    number: int,
+    data: schemas.UpdateVersionRequest,
+) -> schemas.VersionOut:
+    rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
+    await _get_agent(session, ctx, agent_id)
+    version = await _get_version(session, agent_id, number)
+    if version.is_published:
+        # Branch-on-edit (ADR-023): a published version is immutable, so the first edit
+        # transparently forks a new draft copied from the latest version and patches that.
+        # The response carries the new (higher) version number so the client can re-target.
+        version = await _draft_from_latest(session, agent_id, ctx.user.id)
+        log.info("branch_on_edit", agent_id=str(agent_id), new_version=version.version)
+    _apply_version_patch(version, data)
     return _version_out(version)
 
 

@@ -23,7 +23,7 @@ type Tab = (typeof TABS)[number];
 
 export default function AgentBuilderPage({ params }: { params: { id: string } }) {
   const activeOrgId = useSession((s) => s.activeOrgId);
-  const { draft, agentId, versionNumber, init, dirty, beginSave, markSaved } = useBuilder();
+  const { draft, agentId, versionNumber, init, dirty, beginSave, markSaved, retarget } = useBuilder();
   const [tab, setTab] = useState<Tab>("persona");
   const loadedFor = useRef<string | null>(null);
 
@@ -57,13 +57,16 @@ export default function AgentBuilderPage({ params }: { params: { id: string } })
     const timer = setTimeout(async () => {
       beginSave();
       try {
-        await patchVersion(agentId, versionNumber, draftToPatch(draft));
+        const saved = await patchVersion(agentId, versionNumber, draftToPatch(draft));
+        // Branch-on-edit: if the backend forked a new draft off a published version, the
+        // returned version number is higher — re-point the builder at that new draft.
+        if (saved.version !== versionNumber) retarget(saved.version);
       } finally {
         markSaved();
       }
     }, 800);
     return () => clearTimeout(timer);
-  }, [dirty, draft, agentId, versionNumber, beginSave, markSaved]);
+  }, [dirty, draft, agentId, versionNumber, beginSave, markSaved, retarget]);
 
   const onTabChange = (v: string) => {
     setTab(v as Tab);

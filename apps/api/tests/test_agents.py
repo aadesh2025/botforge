@@ -89,11 +89,6 @@ async def test_version_lifecycle(client: AsyncClient) -> None:
     v1_current = published.json()["current_version_id"]
     assert v1_current is not None
 
-    # Published versions are immutable.
-    assert (
-        await client.patch(f"/v1/agents/{aid}/versions/1", json={"system_prompt": "x"}, headers=headers)
-    ).status_code == 409
-
     # New draft v2 copies from v1, edit + publish → current moves to v2.
     v2 = await client.post(f"/v1/agents/{aid}/versions", headers=headers)
     assert v2.json()["version"] == 2
@@ -109,6 +104,32 @@ async def test_version_lifecycle(client: AsyncClient) -> None:
 
     versions = await client.get(f"/v1/agents/{aid}/versions", headers=headers)
     assert {v["version"] for v in versions.json()} == {1, 2}
+
+
+async def test_branch_on_edit_forks_draft_from_published(client: AsyncClient) -> None:
+    """Editing a published version transparently forks a new draft (no silent 409)."""
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    aid = agent["id"]
+
+    await client.patch(f"/v1/agents/{aid}/versions/1", json={"system_prompt": "original"}, headers=headers)
+    await client.post(f"/v1/agents/{aid}/versions/1/publish", headers=headers)
+
+    # Patching the now-published v1 forks v2 and applies the change there.
+    resp = await client.patch(
+        f"/v1/agents/{aid}/versions/1", json={"system_prompt": "edited after publish"}, headers=headers
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["version"] == 2
+    assert body["is_published"] is False
+    assert body["system_prompt"] == "edited after publish"
+
+    # v1 remains published and unchanged.
+    versions = {v["version"]: v for v in (await client.get(f"/v1/agents/{aid}/versions", headers=headers)).json()}
+    assert versions[1]["is_published"] is True
+    assert versions[1]["system_prompt"] == "original"
+    assert set(versions) == {1, 2}
 
 
 # ── RBAC ──────────────────────────────────────────────────────────────────────
