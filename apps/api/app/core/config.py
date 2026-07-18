@@ -47,6 +47,22 @@ class Settings(BaseSettings):
     # Run Celery tasks inline (no broker/worker) — handy in dev/tests. Off in prod.
     celery_task_always_eager: bool = False
 
+    # --- Chat runtime / memory ---
+    # How many recent turns (user+assistant messages) to keep verbatim in the prompt.
+    memory_window_messages: int = 12
+    # Once a conversation exceeds this many messages, older turns are summarized.
+    memory_summary_threshold: int = 24
+    # Summarizer provider/model — deliberately a small/fast model, NOT the agent's model
+    # (so a heavy local model like qwen3:14b never gets used for background summaries).
+    summary_provider: str = "groq"
+    summary_model: str = "llama-3.1-8b-instant"
+
+    # --- Tools (Phase 9) ---
+    # Max tool-call iterations per turn before the runtime forces a final answer.
+    tool_max_iterations: int = 4
+    # Per-tool execution timeout (seconds) for HTTP / built-in tools.
+    tool_timeout_seconds: float = 15.0
+
     # --- n8n ---
     n8n_base_url: str = "http://localhost:5678"
     n8n_api_key: str | None = None

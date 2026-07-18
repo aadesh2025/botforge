@@ -61,3 +61,15 @@ for prod; local default in dev.
   injected into a prompt (token budgeting; oldest/lowest-ranked citations are trimmed first).
 - `CELERY_TASK_ALWAYS_EAGER` (default `false`) — when true, Celery tasks (document ingestion)
   run inline in-process instead of via the worker/broker. Handy for dev/tests; never in prod.
+
+## Chat runtime, memory & tools
+- `MEMORY_WINDOW_MESSAGES` (default `12`) — how many recent turns stay verbatim in the prompt.
+- `MEMORY_SUMMARY_THRESHOLD` (default `24`) — once a conversation exceeds this many messages,
+  older turns are folded into `conversation.memory_summary`.
+- `SUMMARY_PROVIDER` / `SUMMARY_MODEL` (default `groq` / `llama-3.1-8b-instant`) — the small,
+  fast model used for background memory summaries. Deliberately independent of the agent's own
+  model so a heavy local model (e.g. qwen3:14b) is never used for summaries. Falls back to the
+  fake provider when the provider has no key (CLAUDE §7).
+- `TOOL_MAX_ITERATIONS` (default `4`) — max tool-call iterations per turn before the runtime
+  forces a final answer.
+- `TOOL_TIMEOUT_SECONDS` (default `15`) — per-tool execution timeout (HTTP / built-in tools).

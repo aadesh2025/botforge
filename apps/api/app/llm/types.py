@@ -66,16 +66,22 @@ class ModelInfo(BaseModel):
     provider: str
 
 
-StreamEventType = Literal["token", "tool_call", "usage", "citations", "done", "error"]
+StreamEventType = Literal[
+    "token", "tool_call", "tool_result", "usage", "citations", "conversation", "message", "done", "error"
+]
 
 
 class StreamEvent(BaseModel):
     type: StreamEventType
     delta: str | None = None
     tool_call: ToolCall | None = None
+    tool_result: dict[str, Any] | None = None
     usage: Usage | None = None
     finish_reason: str | None = None
     error: str | None = None
     # RAG citations attached to the response (list of citation dicts). Kept as plain dicts so
     # the provider layer stays independent of the RAG package.
     citations: list[dict[str, Any]] | None = None
+    # Persistence markers (dashboard chat): the conversation and persisted assistant message.
+    conversation_id: str | None = None
+    message_id: str | None = None
