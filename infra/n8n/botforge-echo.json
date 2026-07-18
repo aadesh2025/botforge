@@ -1,0 +1,37 @@
+{
+  "name": "BotForge — Echo (sync)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "botforge-echo",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b1a1c1d1-0001-4001-8001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "webhookId": "botforge-echo"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"message\": \"BotForge echo\", \"received\": $json.body ? $json.body.args : $json } }}",
+        "options": {}
+      },
+      "id": "b1a1c1d1-0002-4002-8002-000000000002",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [700, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {}
+}

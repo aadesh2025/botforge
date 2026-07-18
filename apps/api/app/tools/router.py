@@ -4,14 +4,48 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import AppError
 from app.db.session import get_session
+from app.integrations.n8n_client import verify_callback
 from app.modules.orgs.deps import OrgContext, current_org
 from app.tools import schemas, service
 
 router = APIRouter(prefix="/v1/tools", tags=["tools"])
+
+
+# ── n8n binding (static paths; registered before /{tool_id}) ─────────────────────
+@router.get("/n8n/workflows", response_model=list[schemas.N8nWorkflowOut])
+async def list_n8n_workflows(
+    session: AsyncSession = Depends(get_session), ctx: OrgContext = Depends(current_org)
+) -> list[schemas.N8nWorkflowOut]:
+    return await service.list_n8n_workflows(session, ctx)
+
+
+@router.post("/n8n/bind", response_model=schemas.ToolOut, status_code=status.HTTP_201_CREATED)
+async def bind_n8n_workflow(
+    data: schemas.BindN8nRequest,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.ToolOut:
+    return await service.bind_n8n_workflow(session, ctx, data)
+
+
+@router.post("/n8n/callback")
+async def n8n_callback(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> dict[str, bool]:
+    """Public, HMAC-verified callback that resolves a pending async n8n tool run."""
+    body = await request.body()
+    signature = request.headers.get("X-BotForge-Signature")
+    timestamp = request.headers.get("X-BotForge-Timestamp")
+    if not verify_callback(signature, timestamp, body):
+        raise AppError("n8n.bad_signature", "Invalid callback signature.", 401)
+    data = schemas.N8nCallbackRequest.model_validate_json(body)
+    ok = await service.resolve_n8n_callback(session, data.run_id, data.output, data.status, data.error)
+    return {"ok": ok}
 
 
 # Static paths first so they don't collide with /{tool_id}.

@@ -55,6 +55,31 @@ class TestToolResponse(BaseModel):
     latency_ms: int
 
 
+class N8nWorkflowOut(BaseModel):
+    id: str
+    name: str
+    active: bool
+    webhook_url: str | None
+
+
+class BindN8nRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    workflow_id: str | None = None
+    workflow_name: str | None = None
+    webhook_url: str | None = None
+    mode: str = Field(default="sync", pattern="^(sync|async)$")
+    agent_id: uuid.UUID | None = None
+    description: str | None = None
+    input_schema: dict[str, Any] | None = None
+
+
+class N8nCallbackRequest(BaseModel):
+    run_id: uuid.UUID
+    output: dict[str, Any] = Field(default_factory=dict)
+    status: str = Field(default="success", pattern="^(success|error)$")
+    error: str | None = None
+
+
 class ToolRunOut(BaseModel):
     id: uuid.UUID
     tool_id: uuid.UUID

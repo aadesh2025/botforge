@@ -1,0 +1,53 @@
+{
+  "name": "BotForge — Create Support Ticket (sync)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "botforge-create-ticket",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c2a2c2d2-0001-4001-8001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "webhookId": "botforge-create-ticket"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "ticket_id", "value": "={{ 'TICKET-' + Math.floor(Math.random() * 90000 + 10000) }}", "type": "string" },
+            { "id": "2", "name": "status", "value": "open", "type": "string" },
+            { "id": "3", "name": "subject", "value": "={{ $json.body?.args?.subject || 'New request' }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c2a2c2d2-0002-4002-8002-000000000002",
+      "name": "Build Ticket",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ticket_id\": $json.ticket_id, \"status\": $json.status, \"subject\": $json.subject } }}",
+        "options": {}
+      },
+      "id": "c2a2c2d2-0003-4003-8003-000000000003",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [980, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Build Ticket", "type": "main", "index": 0 }]] },
+    "Build Ticket": { "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]] }
+  },
+  "settings": {}
+}

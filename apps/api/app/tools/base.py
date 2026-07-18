@@ -20,6 +20,9 @@ class ToolContext:
     agent_id: uuid.UUID
     version: AgentVersion
     conversation_id: uuid.UUID | None = None
+    # The tool_run row id for this call — set before dispatch so async tools (n8n) can pass it
+    # as a callback token that later resolves the pending run.
+    run_id: uuid.UUID | None = None
 
 
 @dataclass(slots=True)

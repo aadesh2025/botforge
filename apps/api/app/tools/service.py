@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import rbac
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.integrations.n8n_client import get_client
 from app.llm.types import ToolCall, ToolSpec
 from app.models import Agent, AgentVersion, Tool, ToolRun
 from app.modules.orgs.deps import OrgContext
@@ -19,6 +20,7 @@ from app.tools import schemas
 from app.tools.base import ToolContext, ToolResult
 from app.tools.builtins import BUILTINS
 from app.tools.http_tool import execute_http_tool
+from app.tools.n8n_tool import execute_n8n_tool
 
 log = get_logger("tools")
 
@@ -177,6 +179,8 @@ async def _dispatch(tool: Tool, ctx: ToolContext, args: dict[str, Any]) -> ToolR
         return await builtin.run(ctx, args)
     if tool.type == "http":
         return await execute_http_tool(tool.config, args)
+    if tool.type == "n8n":
+        return await execute_n8n_tool(tool.config, args, ctx)
     return ToolResult(output={}, status="error", error=f"unsupported tool type '{tool.type}'")
 
 
@@ -186,10 +190,26 @@ async def execute_tool_call(
     tools_by_name: dict[str, Tool],
     call: ToolCall,
 ) -> ToolResult:
-    """Execute a model-requested tool call, logging a ToolRun. Never raises."""
+    """Execute a model-requested tool call, logging a ToolRun. Never raises.
+
+    The ToolRun is created (status ``pending``) *before* dispatch so async tools (n8n) can pass
+    its id as a callback token; it's finalized afterwards (async tools stay ``pending`` until the
+    callback resolves them).
+    """
     tool = tools_by_name.get(call.name)
     if tool is None:
         return ToolResult(output={}, status="error", error=f"tool '{call.name}' is not available")
+
+    run = ToolRun(
+        organization_id=tool.organization_id,
+        tool_id=tool.id,
+        conversation_id=ctx.conversation_id,
+        input=call.arguments,
+        status="pending",
+    )
+    session.add(run)
+    await session.flush()
+    ctx.run_id = run.id
 
     t0 = time.perf_counter()
     try:
@@ -197,20 +217,10 @@ async def execute_tool_call(
     except Exception as exc:  # a tool must never crash the turn
         result = ToolResult(output={}, status="error", error=str(exc))
         log.warning("tool_execute_error", tool=call.name, error=str(exc))
-    latency_ms = int((time.perf_counter() - t0) * 1000)
-
-    session.add(
-        ToolRun(
-            organization_id=tool.organization_id,
-            tool_id=tool.id,
-            conversation_id=ctx.conversation_id,
-            input=call.arguments,
-            output=result.output,
-            status=result.status,
-            latency_ms=latency_ms,
-            error=result.error,
-        )
-    )
+    run.latency_ms = int((time.perf_counter() - t0) * 1000)
+    run.output = result.output
+    run.status = result.status
+    run.error = result.error
     return result
 
 
@@ -269,6 +279,76 @@ async def _any_agent_id(session: AsyncSession, ctx: OrgContext) -> uuid.UUID:
     stmt = select(Agent.id).where(Agent.organization_id == ctx.org.id).limit(1)
     found = (await session.execute(stmt)).scalar_one_or_none()
     return found or uuid.uuid4()
+
+
+# ── n8n binding ────────────────────────────────────────────────────────────────────
+async def list_n8n_workflows(session: AsyncSession, ctx: OrgContext) -> list[schemas.N8nWorkflowOut]:
+    rbac.require_permission(ctx.role, rbac.READ)
+    client = get_client()
+    workflows = await client.list_workflows()
+    out: list[schemas.N8nWorkflowOut] = []
+    for wf in workflows:
+        out.append(
+            schemas.N8nWorkflowOut(
+                id=str(wf.get("id")),
+                name=str(wf.get("name", "workflow")),
+                active=bool(wf.get("active", False)),
+                webhook_url=client.extract_webhook_url(wf),
+            )
+        )
+    return out
+
+
+async def bind_n8n_workflow(
+    session: AsyncSession, ctx: OrgContext, data: schemas.BindN8nRequest
+) -> schemas.ToolOut:
+    rbac.require_permission(ctx.role, rbac.TOOLS_MANAGE)
+    client = get_client()
+    webhook_url = data.webhook_url
+    workflow_name = data.workflow_name
+    if not webhook_url and data.workflow_id:
+        workflow = await client.get_workflow(data.workflow_id)
+        workflow_name = workflow_name or str(workflow.get("name", ""))
+        webhook_url = client.extract_webhook_url(workflow)
+    if not webhook_url:
+        raise AppError("tools.n8n_no_webhook", "Could not resolve a webhook URL for this workflow.", 400)
+
+    input_schema = data.input_schema or {
+        "type": "object",
+        "properties": {"args": {"type": "object", "description": "arguments passed to the workflow"}},
+    }
+    tool = Tool(
+        organization_id=ctx.org.id,
+        agent_id=data.agent_id,
+        name=data.name,
+        type="n8n",
+        description=data.description or f"n8n workflow: {workflow_name or data.workflow_id}",
+        enabled=True,
+        config={
+            "workflow_id": data.workflow_id,
+            "workflow_name": workflow_name,
+            "webhook_url": webhook_url,
+            "mode": data.mode,
+        },
+        input_schema=input_schema,
+        created_by=ctx.user.id,
+    )
+    session.add(tool)
+    await session.flush()
+    return _tool_out(tool)
+
+
+async def resolve_n8n_callback(
+    session: AsyncSession, run_id: uuid.UUID, output: dict[str, Any], status: str, error: str | None
+) -> bool:
+    """Resolve a pending async n8n tool run from a verified callback. Returns True if updated."""
+    run = await session.get(ToolRun, run_id)
+    if run is None:
+        return False
+    run.output = output
+    run.status = status
+    run.error = error
+    return True
 
 
 async def list_runs(
