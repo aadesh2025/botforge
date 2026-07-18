@@ -75,3 +75,27 @@ export function listToolRuns(conversationId?: string) {
   const q = conversationId ? `?conversation_id=${conversationId}` : "";
   return api<ApiToolRun[]>(`/v1/tools/runs${q}`, { orgScoped: true });
 }
+
+// ── n8n ──────────────────────────────────────────────────────────────────────
+export interface ApiN8nWorkflow {
+  id: string;
+  name: string;
+  active: boolean;
+  webhook_url: string | null;
+}
+
+export function listN8nWorkflows() {
+  return api<ApiN8nWorkflow[]>("/v1/tools/n8n/workflows", { orgScoped: true });
+}
+
+export function bindN8nWorkflow(body: {
+  name: string;
+  workflow_id?: string;
+  workflow_name?: string;
+  webhook_url?: string | null;
+  mode: "sync" | "async";
+  agent_id?: string;
+  description?: string;
+}) {
+  return api<ApiTool>("/v1/tools/n8n/bind", { method: "POST", orgScoped: true, body });
+}
