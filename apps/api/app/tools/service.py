@@ -222,6 +222,14 @@ async def execute_tool_call(
     run.output = result.output
     run.status = result.status
     run.error = result.error
+    from app.webhooks.dispatch import emit_event
+
+    await emit_event(
+        session,
+        tool.organization_id,
+        "tool.run",
+        {"tool": tool.name, "status": result.status, "run_id": str(run.id)},
+    )
     return result
 
 

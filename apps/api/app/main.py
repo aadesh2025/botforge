@@ -17,6 +17,8 @@ from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware
 from app.modules.agents.router import router as agents_router
 from app.modules.analytics.router import router as analytics_router
+from app.modules.apikeys.router import router as apikeys_router
+from app.modules.audit.router import router as audit_router
 from app.modules.auth.router import router as auth_router
 from app.modules.conversations.router import router as conversations_router
 from app.modules.credentials.router import router as credentials_router
@@ -25,6 +27,7 @@ from app.modules.knowledge.router import router as knowledge_router
 from app.modules.orgs.router import router as orgs_router
 from app.modules.public.router import router as public_router
 from app.tools.router import router as tools_router
+from app.webhooks.router import router as webhooks_router
 
 log = get_logger("app")
 
@@ -80,6 +83,9 @@ def create_app() -> FastAPI:
     app.include_router(channels_router)
     app.include_router(inbox_router)
     app.include_router(analytics_router)
+    app.include_router(apikeys_router)
+    app.include_router(webhooks_router)
+    app.include_router(audit_router)
 
     return app
 

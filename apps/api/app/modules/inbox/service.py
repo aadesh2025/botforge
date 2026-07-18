@@ -19,6 +19,7 @@ from app.modules.conversations.service import _message_out
 from app.modules.inbox import schemas
 from app.modules.orgs.deps import OrgContext
 from app.realtime.hub import conv_topic, hub, inbox_topic
+from app.webhooks.dispatch import emit_event
 
 log = get_logger("inbox")
 
@@ -147,6 +148,7 @@ async def handback(session: AsyncSession, ctx: OrgContext, cid: uuid.UUID) -> sc
     conv.assigned_to = None
     await session.flush()
     await _publish_inbox(session, ctx, conv, "handoff.resolved")
+    await emit_event(session, ctx.org.id, "handoff.resolved", {"conversation_id": str(conv.id)})
     await hub.publish(conv_topic(conv.id), {"type": "handback", "content": "You're back with the assistant."})
     return await _item_out(session, conv)
 
@@ -161,6 +163,9 @@ async def close(session: AsyncSession, ctx: OrgContext, cid: uuid.UUID) -> schem
     conv.status = "closed"
     await session.flush()
     await _publish_inbox(session, ctx, conv, "conversation.closed")
+    await emit_event(session, ctx.org.id, "conversation.closed", {"conversation_id": str(conv.id)})
+    if handoff is not None:
+        await emit_event(session, ctx.org.id, "handoff.resolved", {"conversation_id": str(conv.id)})
     return await _item_out(session, conv)
 
 

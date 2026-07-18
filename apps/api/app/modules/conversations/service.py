@@ -28,6 +28,7 @@ from app.modules.conversations import schemas
 from app.modules.orgs.deps import OrgContext
 from app.rag.agent_retrieval import retrieve_for_version
 from app.tools.service import build_tooling
+from app.webhooks.dispatch import emit_event
 
 log = get_logger("conversations")
 
@@ -87,6 +88,9 @@ async def _get_or_create_conversation(
     )
     session.add(conv)
     await session.flush()
+    await emit_event(
+        session, ctx.org.id, "conversation.created", {"conversation_id": str(conv.id), "channel": "dashboard"}
+    )
     return conv
 
 
@@ -229,6 +233,12 @@ async def _finalize_turn(
         conv.title = first_text[:80]
     await session.flush()
     await _maybe_summarize(session, conv.organization_id, conv)
+    await emit_event(
+        session,
+        conv.organization_id,
+        "message.created",
+        {"conversation_id": str(conv.id), "message_id": str(msg.id), "role": "assistant"},
+    )
     return msg
 
 

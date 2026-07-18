@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import rbac
+from app.core.audit import write_audit
 from app.core.config import settings
 from app.core.email import EmailMessage, get_email_backend
 from app.core.errors import AppError
@@ -55,15 +56,8 @@ async def _write_audit(
     target_id: str | None = None,
     meta: dict[str, Any] | None = None,
 ) -> None:
-    session.add(
-        AuditLog(
-            organization_id=org_id,
-            actor_user_id=actor_id,
-            action=action,
-            target_type=target_type,
-            target_id=target_id,
-            meta=meta or {},
-        )
+    await write_audit(
+        session, org_id, actor_id, action, target_type=target_type, target_id=target_id, meta=meta
     )
 
 

@@ -45,3 +45,21 @@ async def _run_rollup(org_id: str, date_str: str) -> dict[str, int]:
 def rollup_org_task(org_id: str, date_str: str) -> dict[str, int]:
     """Roll up one org's usage for a date into usage_records + refresh its quota."""
     return asyncio.run(_run_rollup(org_id, date_str))
+
+
+async def _run_delivery(delivery_id: str) -> bool:
+    from app.webhooks.dispatch import deliver_delivery
+
+    async with SessionFactory() as session:
+        ok = await deliver_delivery(session, uuid.UUID(delivery_id))
+        await session.commit()
+        return ok
+
+
+@celery_app.task(name="webhooks.deliver", bind=True, max_retries=5)  # type: ignore[untyped-decorator]
+def deliver_webhook_task(self: object, delivery_id: str) -> bool:
+    """Attempt one webhook delivery; Celery retries with backoff on failure."""
+    ok = asyncio.run(_run_delivery(delivery_id))
+    if not ok:
+        raise self.retry(countdown=min(3600, 30), exc=RuntimeError("delivery not confirmed"))  # type: ignore[attr-defined]
+    return ok

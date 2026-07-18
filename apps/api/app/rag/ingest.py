@@ -18,6 +18,7 @@ from app.llm.registry import build_embedding_provider
 from app.models import Chunk, Document, KnowledgeBase
 from app.rag import loaders
 from app.rag.chunking import chunk_text
+from app.webhooks.dispatch import emit_event
 
 log = get_logger("rag.ingest")
 
@@ -99,11 +100,19 @@ async def ingest_document(
         document.chunk_count = len(chunks)
         document.error_message = None
         await session.flush()
+        await emit_event(
+            session, document.organization_id, "document.ready",
+            {"document_id": str(document.id), "chunks": len(chunks)},
+        )
         log.info("document_ingested", document_id=str(document.id), chunks=len(chunks))
     except Exception as exc:  # record failure, don't crash the worker
         document.status = "failed"
         document.error_message = str(exc)[:1000]
         document.chunk_count = 0
         await session.flush()
+        await emit_event(
+            session, document.organization_id, "document.failed",
+            {"document_id": str(document.id), "error": str(exc)[:200]},
+        )
         log.warning("document_ingest_failed", document_id=str(document.id), error=str(exc))
     return document
