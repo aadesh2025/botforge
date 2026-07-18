@@ -3,7 +3,7 @@
 > **Read this first, then continue the build.** This file is the pick-up point for the next
 > session. It records what's done, what's half-done, and exactly what to do next.
 
-Last updated: **2026-07-18** · Latest commit: `phase-11-complete` · Branch: `master`
+Last updated: **2026-07-18** · Latest commit: `phase-13-complete` · Branch: `master`
 
 ---
 
@@ -19,7 +19,7 @@ Read every file in `docs/` **in order** before writing code:
 6. Then the running logs: `PROGRESS.md` (per-phase status), `DECISIONS.md` (ADR-001…020),
    `ENV.md`, and `RUNBOOK-docker.md` (how to bring the stack up).
 
-**Continue from where we left off: Phase 12 (Messaging channels).**
+**Continue from where we left off: Phase 14 (Analytics & usage metering).**
 
 ---
 
@@ -62,9 +62,9 @@ A backend was built from nothing and the existing mock frontend was wired to it.
 | 9 | Tools & tool calling | ✅ **complete** — built-ins + HTTP tools + tool loop + tool_runs + Tools tab; live tool call via qwen3 (tag `phase-09-complete`) |
 | 10 | n8n integration | ✅ **complete** — client + n8n tool type (sync/async) + automations UI; live agent→n8n verified (tag `phase-10-complete`) |
 | 11 | Web widget | ✅ **complete** — public config/chat + Shadow-DOM widget + SDK + Channels tab; live embed verified (tag `phase-11-complete`) |
-| 12 | **Messaging channels** | ⬜ **NOT STARTED — do this next** |
-| 13 | Inbox & handoff | ⬜ (inbox UI is mock) |
-| 14 | Analytics & metering | ⬜ (analytics UI is mock) |
+| 12 | Messaging channels | ✅ **complete** — Telegram/WhatsApp/Slack/Discord adapters + signed webhooks + Channels tab; Telegram inbound verified live (tag `phase-12-complete`) |
+| 13 | Inbox & handoff | ✅ **complete** — handoff triggers + inbox + realtime hub + widget push; full loop verified live (tag `phase-13-complete`) |
+| 14 | **Analytics & metering** | ⬜ **NOT STARTED — do this next** (analytics UI is mock) |
 | 15 | API keys/webhooks/audit | ⬜ (settings pages are mock) |
 | 16 | Guardrails & hardening | ⬜ |
 | 17 | Admin console | ⬜ |
@@ -72,58 +72,58 @@ A backend was built from nothing and the existing mock frontend was wired to it.
 | 19 | E2E/docs/polish | ⬜ |
 | 20 | Production deployment | ⬜ |
 
-**Scoreboard:** 11 phases tagged complete (0,1,2,4,5,6,7,8,9,10,11) · 1 mostly done (3) · 9 not started (12–20).
-Roughly **11 of 21** phases have real, tested, wired progress.
+**Scoreboard:** 13 phases tagged complete (0,1,2,4,5,6,7,8,9,10,11,12,13) · 1 mostly done (3) · 7 not started (14–20).
+Roughly **13 of 21** phases have real, tested, wired progress. **123 backend tests pass.**
 
 ### Backend business routes live now
 `/v1/auth/*`, `/v1/orgs/*`, `/v1/credentials/*`, `/v1/agents/*` (+ playground + `/chat` +
 `/chat/ws`), `/v1/knowledge/*`, `/v1/conversations/*`, `/v1/tools/*` (+ `/n8n/*`),
-`/v1/public/agents/{public_key}/{config,chat,ws}`. Not built yet: channels (Telegram/WhatsApp/
-Slack/Discord), inbox, analytics, apikeys, webhooks, admin, billing.
+`/v1/public/agents/{public_key}/{config,chat,ws,subscribe}`, `/v1/channels/*` (+ signed webhooks),
+`/v1/inbox/*` (+ WS). Not built yet: analytics, apikeys, webhooks (outbound), admin, billing.
 
 ### Frontend: what's real vs mock
 - **Real (wired to API):** login/signup, org switcher, user menu, agents list + builder
   (Persona/Model/Versions/**Knowledge**/**Tools**/**Channels** + playground), credentials,
-  knowledge list + detail, **conversations browser**, **automations** (n8n bind).
-- **Still mock (no backend yet):** dashboard analytics, inbox, analytics, and members/invites
-  settings. The **web widget is real** (`packages/widget` → `/widget.js`).
+  knowledge, **conversations browser**, **automations** (n8n bind), **inbox** (two-pane, realtime).
+- **Still mock (no backend yet):** dashboard analytics, analytics, and members/invites settings.
+  The **web widget is real** (`packages/widget` → `/widget.js`).
 
 ---
 
-## 3. NEXT: Phase 12 — Messaging channels
+## 3. NEXT: Phase 14 — Analytics & usage metering
 
-Per `08-PHASES.md §12` and `07-INTEGRATIONS.md §2`:
-- **12.1** Channel abstraction (`verify` / `parse_inbound` / `send`) + a registry, keeping the
-  chat runtime channel-agnostic. Persisted chat already writes `conversation.channel`; the
-  public chat already uses `channel="widget"`. Inbound webhooks resolve/create a conversation
-  keyed by the channel's external user id and run the **same** runtime as `app/modules/public`.
-- **12.2** Telegram (webhook set, inbound parse, `sendMessage`). Real token stubbed per §7.
-- **12.3** WhatsApp (Meta) incl. GET verify challenge + `X-Hub-Signature-256`.
-- **12.4** Slack + Discord (signature verify, events, send).
-- **12.5** Channels tab connect flows per channel (the tab currently only does the **web widget**).
-  A `channels` table + model already exist (Phase 1); store per-channel config (encrypted tokens).
+Per `08-PHASES.md §14` and `04-API-SPEC.md §Analytics`:
+- **14.1** Usage rollups (Celery) into `usage_records`; quotas + threshold events. The raw data
+  already exists: every `messages` row carries `tokens_prompt/completion`, `cost_micros`,
+  `latency_ms`, `provider`, `model`; `tool_runs` carries per-tool latency/status.
+- **14.2** Analytics endpoints: overview (conversations/messages/users/resolution+handoff rate),
+  usage (tokens + cost, group by day/provider/model), latency, top/unanswered questions, CSV export.
+- **14.3** Analytics dashboards (cards + Recharts + date range + export) — the `/analytics` and
+  dashboard pages are still mock.
 
-Reuse: the public chat service (`app/modules/public/service.py`) is the template for a channel
-runner — resolve agent/org, get/create a `Conversation` (channel=<type>, `channel_user_id`),
-run `run_turn`, persist. Factor the shared "run a turn for an unauthenticated inbound message"
-helper out of `public.service` so each channel just implements verify/parse/send.
+Reuse: aggregate straight off `messages`/`conversations`/`handoffs`/`tool_runs` (all org-scoped).
+"Resolution rate" ≈ conversations closed without an open handoff; "handoff rate" ≈ conversations
+with a `Handoff` row. "Unanswered" ≈ turns where RAG returned no citations (a marker could be
+added). The Celery worker + `usage_records`/`quotas` tables already exist (Phase 1/7).
 
 ### Live-demo state (carried forward)
-- **n8n live**: the `BotForge — Echo (sync)` workflow is created + active in the running n8n
-  (`/webhook/botforge-echo`); the "aadesh" agent (`019f7098-…`, qwen3:14b) has it bound as the
-  `botforge_echo` tool + the `calculator` built-in. Asking it to echo/multiply triggers real
-  tool calls. n8n public API key is valid.
-- **Widget live**: a demo agent "Widget Demo" (`019f745f-…`, provider **fake**) with public key
-  `bf_pub_UTEtOezWofg-ZKEv7x73Gw`; embed page at `http://localhost:3001/widget-demo.html`
-  (replace the key placeholder in the committed version). Rebuild the widget with
-  `cd packages/widget && node build.mjs`.
-- **qwen3:14b supports tool calls** over Ollama (local, key-free, but slow: 30–90s/turn).
+- **Groq key is now VALID** — real chat works (`llama-3.1-8b-instant` verified). SECRET_KEY was
+  rotated: old JWTs + any Fernet-encrypted `provider_credentials`/channel tokens are invalid;
+  re-login and re-enter provider keys if needed (env Groq key is used as the fallback).
+- **Memory summarization verified real** (llama-3.1-8b-instant), not fake.
+- **n8n live**: `BotForge — Echo (sync)` workflow active (`/webhook/botforge-echo`); "aadesh"
+  agent (`019f7098-…`, qwen3:14b) has it bound + `calculator`. n8n API key valid.
+- **Channels**: verified via signed inbound → real bot → persist (Telegram inbound live gave a
+  real Groq "Paris."). Provider *delivery* (telegram.org etc.) is unreachable from this env, so
+  outbound is mock-tested; `TELEGRAM_BOT_TOKEN` is present. Tokens are per-`Channel` (encrypted).
+- **Handoff/inbox verified live** in the browser (widget → handoff → inbox takeover → operator
+  reply pushed to the widget → handback → bot resumes). Realtime is an **in-process** hub
+  (`app/realtime/hub`) — single-node only; swap for Redis pub/sub to scale out.
+- **qwen3:14b** does tool calls over Ollama (local, key-free, slow 30–90s/turn).
 - **Chat vs playground:** `/v1/agents/{id}/chat` persists + uses the live version; the builder
-  playground is ephemeral (latest draft). Public/widget chat = `channel="widget"`, shows in the
-  conversations browser.
-- **Summarizer** never uses the agent's model — `SUMMARY_PROVIDER/MODEL` (groq→fake).
-- The dev **GROQ_API_KEY in `.env` is invalid** (401) — use Ollama or provider `fake` for live
-  demos until a valid key is added.
+  playground is ephemeral. Widget/channel chat sets `channel=<type>`.
+- `widget-demo.html` is committed with a `YOUR_PUBLIC_KEY` placeholder; rebuild the widget with
+  `cd packages/widget && node build.mjs`.
 
 ---
 
