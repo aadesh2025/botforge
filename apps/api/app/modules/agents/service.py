@@ -382,7 +382,7 @@ async def _resolve_playground_provider(
 async def _playground_tooling(
     session: AsyncSession, ctx: OrgContext, agent: Agent, version: AgentVersion, provider: ChatProvider
 ) -> tuple[list[Any], ToolExecutor | None]:
-    specs, executor = await build_tooling(session, ctx, agent, version, None)
+    specs, executor = await build_tooling(session, ctx.org.id, agent, version, None)
     if specs and executor is not None and provider.supports_tools():
         return specs, executor
     return [], None

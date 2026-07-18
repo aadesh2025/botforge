@@ -121,9 +121,9 @@ def _build_chat_request(version: AgentVersion, messages: list[LLMMessage], strea
     )
 
 
-async def _resolve_provider(session: AsyncSession, ctx: OrgContext, agent: Agent, provider: str) -> ChatProvider:
+async def _resolve_provider(session: AsyncSession, org_id: uuid.UUID, agent: Agent, provider: str) -> ChatProvider:
     try:
-        return await get_chat_provider(session, ctx.org.id, provider, agent_id=agent.id)
+        return await get_chat_provider(session, org_id, provider, agent_id=agent.id)
     except AppError:
         log.warning("chat_stub_provider", provider=provider, agent_id=str(agent.id))
         return FakeChatProvider()
@@ -162,7 +162,7 @@ async def _message_count(session: AsyncSession, conversation_id: uuid.UUID) -> i
     return int((await session.execute(stmt)).scalar_one())
 
 
-async def _maybe_summarize(session: AsyncSession, ctx: OrgContext, conv: Conversation) -> None:
+async def _maybe_summarize(session: AsyncSession, org_id: uuid.UUID, conv: Conversation) -> None:
     """Fold newly aged-out messages into `conv.memory_summary` when over the threshold."""
     total = await _message_count(session, conv.id)
     if total <= settings.memory_summary_threshold:
@@ -181,7 +181,7 @@ async def _maybe_summarize(session: AsyncSession, ctx: OrgContext, conv: Convers
     )
     older = list((await session.execute(stmt)).scalars().all())
     llm_older = [LLMMessage(role=m.role, content=m.content) for m in older if m.content]
-    await memory.summarize(session, ctx.org.id, conv, llm_older)
+    await memory.summarize(session, org_id, conv, llm_older)
     conv.meta = {**conv.meta, "summarized_upto": cut}
 
 
@@ -207,11 +207,11 @@ async def _prepare_turn(
         window_messages=settings.memory_window_messages,
     )
     provider_name = (version.model_config_json or {}).get("provider", "fake")
-    provider = await _resolve_provider(session, ctx, agent, provider_name)
+    provider = await _resolve_provider(session, ctx.org.id, agent, provider_name)
     req = _build_chat_request(version, messages, stream=stream)
 
     # Tool calling: attach the agent's enabled tools when the provider supports them.
-    specs, executor = await build_tooling(session, ctx, agent, version, conv.id)
+    specs, executor = await build_tooling(session, ctx.org.id, agent, version, conv.id)
     if specs and executor is not None and provider.supports_tools():
         req.tools = specs
     else:
@@ -220,14 +220,15 @@ async def _prepare_turn(
 
 
 async def _finalize_turn(
-    session: AsyncSession, ctx: OrgContext, conv: Conversation, result: TurnResult, latency_ms: int, first_text: str
+    session: AsyncSession, conv: Conversation, result: TurnResult, latency_ms: int, first_text: str
 ) -> Message:
+    """Persist the assistant message, bump the conversation, and maybe summarize. Reused by public chat."""
     msg = _persist_assistant_message(session, conv, result, latency_ms)
     conv.last_message_at = _now()
     if not conv.title:
         conv.title = first_text[:80]
     await session.flush()
-    await _maybe_summarize(session, ctx, conv)
+    await _maybe_summarize(session, conv.organization_id, conv)
     return msg
 
 
@@ -249,7 +250,7 @@ async def chat_events(
         yield ev
     latency_ms = int((time.perf_counter() - t0) * 1000)
 
-    msg = await _finalize_turn(session, ctx, conv, result, latency_ms, data.message)
+    msg = await _finalize_turn(session, conv, result, latency_ms, data.message)
     yield StreamEvent(type="message", message_id=str(msg.id))
 
 
@@ -274,7 +275,7 @@ async def chat_once(
         pass
     latency_ms = int((time.perf_counter() - t0) * 1000)
 
-    msg = await _finalize_turn(session, ctx, conv, result, latency_ms, data.message)
+    msg = await _finalize_turn(session, conv, result, latency_ms, data.message)
     return {
         "conversation_id": str(conv.id),
         "message_id": str(msg.id),

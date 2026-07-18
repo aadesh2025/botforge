@@ -139,26 +139,27 @@ async def resolve_agent_tools(
 
 async def build_tooling(
     session: AsyncSession,
-    ctx: OrgContext,
+    org_id: uuid.UUID,
     agent: Agent,
     version: AgentVersion,
     conversation_id: uuid.UUID | None,
 ) -> tuple[list[ToolSpec], Any]:
     """Return (ToolSpecs, executor) for an agent's enabled tools, or ([], None) when disabled.
 
-    `executor(call)` runs the tool and returns a plain dict {output, status, error} (the runtime
-    stays decoupled from the tools package).
+    Takes `org_id` (not an OrgContext) so the public/widget chat can reuse it. `executor(call)`
+    runs the tool and returns a plain dict {output, status, error} (the runtime stays decoupled
+    from the tools package).
     """
     features = version.features or {}
     if not features.get("tools_enabled"):
         return [], None
-    specs, by_name = await resolve_agent_tools(session, ctx.org.id, agent.id)
+    specs, by_name = await resolve_agent_tools(session, org_id, agent.id)
     if not specs:
         return [], None
 
     tool_ctx = ToolContext(
         session=session,
-        org_id=ctx.org.id,
+        org_id=org_id,
         agent_id=agent.id,
         version=version,
         conversation_id=conversation_id,
