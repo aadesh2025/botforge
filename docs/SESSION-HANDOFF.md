@@ -3,7 +3,7 @@
 > **Read this first, then continue the build.** This file is the pick-up point for the next
 > session. It records what's done, what's half-done, and exactly what to do next.
 
-Last updated: **2026-07-18** · Latest commit: `ef508a7` · Branch: `master`
+Last updated: **2026-07-18** · Latest commit: `phase-09-complete` · Branch: `master`
 
 ---
 
@@ -19,7 +19,7 @@ Read every file in `docs/` **in order** before writing code:
 6. Then the running logs: `PROGRESS.md` (per-phase status), `DECISIONS.md` (ADR-001…020),
    `ENV.md`, and `RUNBOOK-docker.md` (how to bring the stack up).
 
-**Continue from where we left off: Phase 8 (Chat persistence, memory, conversations).**
+**Continue from where we left off: Phase 10 (n8n integration).**
 
 ---
 
@@ -58,9 +58,9 @@ A backend was built from nothing and the existing mock frontend was wired to it.
 | 5 | LLM provider layer | ✅ **complete** (tag `phase-05-complete`) |
 | 6 | Agents & versions | ✅ **complete** — backend + builder wired + streaming playground (tag `phase-06-complete`) |
 | 7 | Knowledge base & RAG | ✅ **complete** — backend (KB/ingestion/retrieval/RAG) + worker + UI wired; verified live (tag `phase-07-complete`) |
-| 8 | **Chat persistence & memory** | ⬜ **NOT STARTED — do this next** |
-| 9 | Tools & tool calling | ⬜ (builder Tools tab is mock) |
-| 10 | n8n integration | ⬜ (Automations page is mock) |
+| 8 | Chat persistence & memory | ✅ **complete** — persistence + memory + WebSocket + conversations browser; branch-on-edit fix (tag `phase-08-complete`) |
+| 9 | Tools & tool calling | ✅ **complete** — built-ins + HTTP tools + tool loop + tool_runs + Tools tab; live tool call via qwen3 (tag `phase-09-complete`) |
+| 10 | **n8n integration** | ⬜ **NOT STARTED — do this next** (Automations page is mock) |
 | 11 | Web widget | ⬜ (widget preview is mock) |
 | 12 | Messaging channels | ⬜ (Channels tab is mock) |
 | 13 | Inbox & handoff | ⬜ (inbox UI is mock) |
@@ -72,47 +72,48 @@ A backend was built from nothing and the existing mock frontend was wired to it.
 | 19 | E2E/docs/polish | ⬜ |
 | 20 | Production deployment | ⬜ |
 
-**Scoreboard:** 7 phases tagged complete (0,1,2,4,5,6,7) · 1 mostly done (3) · 13 not started (8–20).
-Roughly **7 of 21** phases have real, tested, wired progress.
+**Scoreboard:** 9 phases tagged complete (0,1,2,4,5,6,7,8,9) · 1 mostly done (3) · 11 not started (10–20).
+Roughly **9 of 21** phases have real, tested, wired progress.
 
 ### Backend business routes live now
-`/v1/auth/*`, `/v1/orgs/*`, `/v1/credentials/*`, `/v1/agents/*` (+ playground), `/v1/knowledge/*`
-(KB CRUD, document upload file/url/text, chunks, `/{id}/search`). Everything else in
-`04-API-SPEC.md` is not built yet.
+`/v1/auth/*`, `/v1/orgs/*`, `/v1/credentials/*`, `/v1/agents/*` (+ playground + `/chat` +
+`/chat/ws`), `/v1/knowledge/*`, `/v1/conversations/*`, `/v1/tools/*`. Everything else in
+`04-API-SPEC.md` is not built yet (channels, inbox, analytics, apikeys, webhooks, admin, billing).
 
 ### Frontend: what's real vs mock
 - **Real (wired to API):** login/signup, org switcher, user menu, agents list + builder
-  (Persona/Model/Versions/**Knowledge** + playground), credentials settings, **knowledge
-  list + detail (upload/url/text, live status, chunk viewer)**.
+  (Persona/Model/Versions/**Knowledge**/**Tools** + playground), credentials settings, knowledge
+  list + detail, **conversations browser** (persisted streaming chat).
 - **Still mock (no backend yet):** dashboard analytics, inbox, analytics, automations, the
-  builder's Tools/Channels tabs, and members/invites settings.
+  builder's Channels tab, and members/invites settings.
 
 ---
 
-## 3. NEXT: Phase 8 — Chat persistence, memory, conversations
+## 3. NEXT: Phase 10 — n8n integration
 
-Per `08-PHASES.md §8` and `06-AI-ENGINE.md §3`:
-- **8.1** Persist conversations/messages (usage/cost/latency); conversation list + detail +
-  messages endpoints. Currently the playground is stateless — nothing is written to
-  `conversations`/`messages`.
-- **8.2** Memory: short-term window + long-term summarization into `memory_summary` (cheap
-  free model) when history exceeds a threshold.
-- **8.3** WebSocket chat endpoint mirroring the SSE contract.
-- **8.4** Conversations browser (web) + wire the playground/chat to persisted history.
+Per `08-PHASES.md §10` and `07-INTEGRATIONS.md`:
+- **10.1** `integrations/n8n_client` (list workflows, trigger webhook signed, verify callback).
+  n8n is already in compose; `N8N_BASE_URL` / `N8N_API_KEY` in env (stub loudly if unset).
+- **10.2** n8n tool type: bind a workflow → callable tool (sync + async modes + callback
+  endpoint). This slots into the **existing tool system** (`app/tools`): add a `type="n8n"`
+  branch in `tools.service._dispatch` + an `n8n` executor, mirroring the `http` tool. The
+  tool-calling loop (`run_turn`) already handles it.
+- **10.3** Ship starter workflows in `infra/n8n/` + import docs.
+- **10.4** `/automations` page (currently mock): list n8n workflows, bind as tools.
 
-The `conversations` + `messages` models already exist (Phase 1). The RAG runtime in
-`app/modules/agents/service.py` (`_retrieve_context`, `_build_request`, `playground_stream/once`)
-is where message persistence + memory assembly should hook in.
-
-### Phase 7 leftovers / gotchas discovered
-- **Builder autosave 409 on published agents:** the builder edits the *latest* version, but for
-  a **published** agent that version is immutable (PATCH → 409) so edits silently don't persist.
-  The builder should create a new draft version when the latest is published (a Phase 6/8 UX
-  fix). Test RAG in the playground on a **draft** agent.
-- **RAG UI works end-to-end on a draft agent** — proven live by pointing the "aadesh" draft
-  agent at Ollama `qwen3:14b` with the "Product Docs" KB (id `019f7164-…`) attached.
-- Hybrid FTS uses `plainto_tsquery` which **ANDs** all query tokens; a query only matches
-  lexically when every non-stopword token appears in a chunk (see ADR-021).
+### Phase 8/9 gotchas & live-demo state
+- **Tools live-verified** on the "aadesh" draft agent (`019f7098-…`, Ollama `qwen3:14b`): tools
+  enabled + `calculator` built-in attached; asking "47 × 89" makes it call the tool → `4183`.
+  That agent currently has tools on and RAG off. The "Product Docs" KB (`019f7164-…`) is still
+  attached-capable for RAG demos.
+- **qwen3:14b supports tool calls** over Ollama's OpenAI-compatible endpoint — good for local,
+  key-free live tool demos (but slow: a turn can take 30–90s).
+- **Chat vs playground:** `/v1/agents/{id}/chat` persists (backs the conversations browser) and
+  uses the **live** version (published `current_version_id` else latest draft); the builder
+  playground stays ephemeral and uses the latest draft.
+- **Summarizer** never uses the agent's model — it's `SUMMARY_PROVIDER/MODEL` (groq→fake).
+- The dev **GROQ_API_KEY in `.env` is invalid** (401) — real chat against groq fails; use Ollama
+  or the fake provider for live demos until a valid key is added.
 
 ---
 

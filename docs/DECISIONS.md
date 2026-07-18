@@ -36,6 +36,29 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-024: Tools as rows, a decoupled executor, and an iteration-capped loop
+- **Date:** 2026-07-18
+- **Status:** accepted
+- **Context:** Phase 9 — built-in + user-defined tools the agent can call mid-conversation.
+- **Decisions:**
+  - **Every enabled tool is a `Tool` row** (`type=builtin|http`, scoped to an agent). Enabling a
+    built-in creates a row (its `input_schema` mirrors the canonical schema); this keeps
+    `tool_runs.tool_id` a real FK for both built-ins and HTTP tools. The runtime loads an agent's
+    enabled rows → `ToolSpec`s for the provider.
+  - **The runtime stays decoupled from the tools package.** `tools.service.build_tooling` returns
+    `(specs, executor)` where `executor(call)` runs the tool, logs a `ToolRun`, and returns a plain
+    dict `{output, status, error}`. `chat.runtime.run_turn` takes that callable and knows nothing
+    about the tools module — avoiding an import cycle (conversations/agents → tools → llm/rag).
+  - **`run_turn` is the single loop** used by both the persisted chat and the playground: stream a
+    provider pass, and if the model emits tool calls (and budget remains), append an assistant
+    tool-call message + `tool` result messages and re-run — capped by `TOOL_MAX_ITERATIONS`. It
+    emits `tool_call`/`tool_result` events and one aggregated `done`.
+  - **Safety:** `calculator` uses an AST allow-list (no `eval`); `http_request` and HTTP tools
+    reuse the SSRF host check (reject private/loopback) and a per-tool timeout; a tool exception
+    never crashes the turn (logged as an error `ToolRun`).
+  - **Rate-limit fix (found via the growing suite):** `rate_limit` now resolves limit/window
+    per-request instead of at import time, so runtime overrides (tests raising the limit) apply.
+
 ### ADR-023: Branch-on-edit for published agent versions
 - **Date:** 2026-07-18
 - **Status:** accepted
