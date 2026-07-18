@@ -39,6 +39,7 @@
     })(),
     visitor: {},
     sending: false,
+    ws: null,
   };
 
   function emit(event, payload) {
@@ -332,6 +333,7 @@
             try {
               localStorage.setItem(STORE_KEY, ev.conversation_id);
             } catch (e2) {}
+            ensureSubscription(ev.conversation_id);
           } else if (ev.type === "token" && ev.delta) {
             acc += ev.delta;
             bubble.innerHTML = renderMarkdown(acc);
@@ -350,6 +352,35 @@
     } finally {
       state.sending = false;
       els.send.disabled = false;
+    }
+  }
+
+  // Listen socket: receive operator replies / handback pushes for this conversation.
+  function ensureSubscription(cid) {
+    if (state.ws || !cid) return;
+    try {
+      var wsBase = API.replace(/^http/, "ws");
+      var ws = new WebSocket(wsBase + "/v1/public/agents/" + PUBLIC_KEY + "/subscribe?conversation_id=" + cid);
+      state.ws = ws;
+      ws.onmessage = function (e) {
+        var ev;
+        try {
+          ev = JSON.parse(e.data);
+        } catch (err) {
+          return;
+        }
+        if (ev.type === "operator_message" && ev.content) {
+          addMessage("bot", ev.content);
+          emit("message", { role: "assistant", content: ev.content, operator: true });
+        } else if (ev.type === "handback" && ev.content) {
+          addMessage("bot", ev.content);
+        }
+      };
+      ws.onclose = function () {
+        state.ws = null;
+      };
+    } catch (err) {
+      /* WS unavailable — degrade gracefully (operator replies still persist) */
     }
   }
 

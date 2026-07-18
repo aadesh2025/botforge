@@ -1,162 +1,239 @@
 "use client";
 
-import { useState } from "react";
-import { CornerDownLeft, Hand, Tag, UserPlus, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bot, Check, Headphones, Loader2, Send, User, UserCog } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChannelIcon } from "@/components/shared/channel-icon";
-import { convoStatusMeta } from "@/lib/display";
-import { inboxThreads, type MsgRole } from "@/lib/mock/inbox";
-import { cn, relativeTime } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  closeConversation,
+  getInboxDetail,
+  handback,
+  listInbox,
+  openInboxSocket,
+  replyInbox,
+  takeover,
+} from "@/lib/api/inbox";
+import { useSession } from "@/lib/store/session";
 
-const filters = ["all", "open", "handoff", "closed"] as const;
-type Filter = (typeof filters)[number];
+const STATUS_FILTERS = [
+  { key: "", label: "All" },
+  { key: "handoff", label: "Handoff" },
+  { key: "active", label: "Active" },
+  { key: "closed", label: "Closed" },
+];
 
-const roleMeta: Record<MsgRole, { align: string; bubble: string; label: string }> = {
-  visitor: { align: "justify-start", bubble: "border border-border bg-surface-2 text-text", label: "Visitor" },
-  agent: { align: "justify-start", bubble: "border border-ember/25 bg-ember/[0.07] text-text", label: "Ava (bot)" },
-  operator: { align: "justify-end", bubble: "bg-ember text-[#0A0B0D]", label: "You" },
+const statusVariant: Record<string, "success" | "warn" | "default"> = {
+  handoff: "warn",
+  active: "success",
+  closed: "default",
 };
 
 export function InboxView({ initialId }: { initialId?: string }) {
-  const [filter, setFilter] = useState<Filter>("all");
-  const [selectedId, setSelectedId] = useState(initialId ?? inboxThreads[0].id);
-  const [draft, setDraft] = useState("");
+  const qc = useQueryClient();
+  const activeOrgId = useSession((s) => s.activeOrgId);
+  const [filter, setFilter] = useState("");
+  const [activeCid, setActiveCid] = useState<string | null>(initialId ?? null);
 
-  const list = inboxThreads.filter((t) => filter === "all" || t.status === filter);
-  const thread = inboxThreads.find((t) => t.id === selectedId) ?? inboxThreads[0];
-  // A human is handling only once someone is assigned; otherwise the bot owns it
-  // (including a handoff that's been requested but not yet taken over).
-  const isBot = thread.assignee === null;
+  const { data: items, isLoading } = useQuery({
+    queryKey: ["inbox", activeOrgId, filter],
+    queryFn: () => listInbox(filter || undefined),
+    enabled: Boolean(activeOrgId),
+  });
+
+  // Realtime: refresh the queue on inbox events.
+  useEffect(() => {
+    if (!activeOrgId) return;
+    const ws = openInboxSocket();
+    if (!ws) return;
+    ws.onmessage = () => {
+      qc.invalidateQueries({ queryKey: ["inbox", activeOrgId] });
+      qc.invalidateQueries({ queryKey: ["inbox-detail"] });
+    };
+    return () => ws.close();
+  }, [activeOrgId, qc]);
 
   return (
-    <div className="flex h-[calc(100vh-6.5rem)] overflow-hidden rounded-lg border border-border bg-surface">
-      {/* List pane */}
-      <div className="flex w-full max-w-[340px] flex-col border-r border-border">
-        <div className="flex items-center gap-1 border-b border-border p-2">
-          {filters.map((f) => (
+    <div className="grid h-[calc(100vh-220px)] grid-cols-[340px_1fr] overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="flex flex-col border-r border-border">
+        <div className="flex gap-1 border-b border-border p-2">
+          {STATUS_FILTERS.map((f) => (
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn(
-                "flex-1 rounded-md px-2 py-1.5 text-xs font-medium capitalize transition-colors",
-                filter === f ? "bg-surface-2 text-text" : "text-muted hover:text-text",
-              )}
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                filter === f.key ? "bg-ember/15 text-ember-soft" : "text-muted hover:bg-surface-2"
+              }`}
             >
-              {f}
+              {f.label}
             </button>
           ))}
         </div>
         <div className="flex-1 overflow-y-auto scroll-thin">
-          {list.map((t) => {
-            const status = convoStatusMeta[t.status];
-            const active = t.id === selectedId;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setSelectedId(t.id)}
-                className={cn(
-                  "flex w-full flex-col gap-1.5 border-b border-border px-4 py-3 text-left transition-colors",
-                  active ? "bg-surface-2" : "hover:bg-surface-2/50",
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="grid size-5 place-items-center rounded border border-border bg-surface-2 text-faint">
-                    <ChannelIcon channel={t.channel} />
-                  </span>
-                  <span className="truncate font-mono text-xs text-muted">{t.visitor}</span>
-                  {t.unread && <span className="ml-auto size-2 rounded-full bg-ember" />}
-                </div>
-                <p className="line-clamp-1 text-sm text-text">{t.messages[t.messages.length - 1].text}</p>
-                <div className="flex items-center gap-2">
-                  <Badge variant={status.variant}>{status.label}</Badge>
-                  <span className="text-[11px] text-faint">{relativeTime(t.updatedAt)}</span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Thread pane */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-3 border-b border-border px-5 py-3">
-          <span className="grid size-9 place-items-center rounded-md border border-border bg-surface-2 text-muted">
-            <ChannelIcon channel={thread.channel} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-medium text-text">{thread.visitor}</div>
-            <div className="text-xs text-faint">
-              {thread.agentName}
-              {thread.assignee ? ` · assigned to ${thread.assignee}` : ""}
-            </div>
-          </div>
-          <div className="hidden items-center gap-1.5 sm:flex">
-            {thread.tags.map((tag) => (
-              <span key={tag} className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-2 px-2 py-0.5 text-xs text-muted">
-                <Tag className="size-3" /> {tag}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex-1 space-y-3 overflow-y-auto p-5 scroll-thin">
-          {thread.messages.map((m) => {
-            const meta = roleMeta[m.role];
-            return (
-              <div key={m.id} className={cn("flex", meta.align)}>
-                <div className="max-w-[75%]">
-                  <div className={cn("rounded-2xl px-3.5 py-2 text-sm leading-relaxed", meta.bubble)}>{m.text}</div>
-                  <div className={cn("mt-1 text-[11px] text-faint", m.role === "operator" ? "text-right" : "")}>
-                    {meta.label} · {relativeTime(m.at)}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Operator controls */}
-        <div className="border-t border-border p-3">
-          <div className="mb-2 flex items-center gap-2">
-            {isBot ? (
-              <Button variant="primary" size="sm">
-                <Hand className="size-3.5" /> Take over
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm">
-                <X className="size-3.5" /> Hand back to bot
-              </Button>
-            )}
-            <Button variant="ghost" size="sm">
-              <UserPlus className="size-3.5" /> Assign
-            </Button>
-            <span className="ml-auto text-[11px] text-faint">
-              {isBot ? "Bot is handling this conversation" : "You are handling this conversation"}
-            </span>
-          </div>
-          <div className="flex items-end gap-2 rounded-lg border border-border bg-surface-2 p-2 focus-within:border-ember/50">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              rows={1}
-              placeholder={isBot ? "Take over to reply…" : "Type a reply…"}
-              disabled={isBot}
-              className="max-h-28 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm text-text placeholder:text-faint focus:outline-none disabled:opacity-60"
-            />
+          {isLoading && <Skeleton className="m-3 h-16" />}
+          {!isLoading && (items ?? []).length === 0 && (
+            <p className="p-6 text-center text-sm text-muted">Nothing in the inbox yet.</p>
+          )}
+          {(items ?? []).map((it) => (
             <button
-              disabled={isBot || !draft.trim()}
-              className={cn(
-                "grid size-8 shrink-0 place-items-center rounded-md transition-colors",
-                !isBot && draft.trim() ? "bg-ember text-[#0A0B0D] hover:bg-ember-2" : "bg-surface-3 text-faint",
-              )}
-              aria-label="Send reply"
+              key={it.id}
+              onClick={() => setActiveCid(it.id)}
+              className={`flex w-full flex-col gap-1 border-b border-border p-3 text-left transition-colors hover:bg-surface-2/50 ${
+                activeCid === it.id ? "bg-surface-2/60" : ""
+              }`}
             >
-              <CornerDownLeft className="size-4" />
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-medium text-text">{it.title || "Conversation"}</span>
+                <Badge variant={statusVariant[it.status] ?? "default"} className="ml-auto shrink-0">
+                  {it.status}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-faint">
+                <span className="capitalize">{it.channel}</span>
+                <span>·</span>
+                <span>{it.message_count} msgs</span>
+                {it.handoff && it.handoff.status !== "resolved" && (
+                  <Badge variant="ember" className="ml-auto">
+                    {it.handoff.assigned_to ? "assigned" : "needs agent"}
+                  </Badge>
+                )}
+              </div>
             </button>
-          </div>
+          ))}
         </div>
       </div>
+
+      {activeCid ? (
+        <Thread cid={activeCid} onChanged={() => qc.invalidateQueries({ queryKey: ["inbox", activeOrgId] })} />
+      ) : (
+        <div className="flex items-center justify-center text-sm text-muted">
+          Select a conversation to view it.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
+  const qc = useQueryClient();
+  const [text, setText] = useState("");
+  const scroller = useRef<HTMLDivElement>(null);
+
+  const { data: detail } = useQuery({
+    queryKey: ["inbox-detail", cid],
+    queryFn: () => getInboxDetail(cid),
+    refetchInterval: 4000, // catch end-user messages while handed off
+  });
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["inbox-detail", cid] });
+    onChanged();
+  };
+  const doTakeover = useMutation({ mutationFn: () => takeover(cid), onSuccess: invalidate });
+  const doHandback = useMutation({ mutationFn: () => handback(cid), onSuccess: invalidate });
+  const doClose = useMutation({ mutationFn: () => closeConversation(cid), onSuccess: invalidate });
+  const doReply = useMutation({
+    mutationFn: (t: string) => replyInbox(cid, t),
+    onSuccess: () => {
+      setText("");
+      invalidate();
+    },
+  });
+
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+  }, [detail?.messages.length]);
+
+  const handoff = detail?.handoff;
+  const isHandoff = detail?.status === "handoff";
+  const assigned = Boolean(handoff?.assigned_to);
+
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center gap-2 border-b border-border p-3">
+        <UserCog className="size-4 text-ember-soft" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-text">{detail?.title || "Conversation"}</div>
+          <div className="text-xs capitalize text-faint">
+            {detail?.channel} · {detail?.status}
+            {handoff?.reason ? ` · reason: ${handoff.reason}` : ""}
+          </div>
+        </div>
+        {isHandoff && !assigned && (
+          <Button size="sm" variant="primary" onClick={() => doTakeover.mutate()} disabled={doTakeover.isPending}>
+            <Headphones className="size-4" /> Take over
+          </Button>
+        )}
+        {isHandoff && assigned && (
+          <Button size="sm" variant="outline" onClick={() => doHandback.mutate()} disabled={doHandback.isPending}>
+            <Bot className="size-4" /> Hand back
+          </Button>
+        )}
+        {detail?.status !== "closed" && (
+          <Button size="sm" variant="outline" onClick={() => doClose.mutate()} disabled={doClose.isPending}>
+            <Check className="size-4" /> Close
+          </Button>
+        )}
+      </div>
+
+      <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto scroll-thin p-4">
+        {(detail?.messages ?? []).map((m) => {
+          const who = m.role === "user" ? "user" : "assistant";
+          const operator = m.provider === "operator";
+          return (
+            <div key={m.id} className={`flex gap-2 ${who === "user" ? "flex-row-reverse" : ""}`}>
+              <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-faint">
+                {who === "user" ? (
+                  <User className="size-3.5" />
+                ) : operator ? (
+                  <Headphones className="size-3.5 text-ember-soft" />
+                ) : (
+                  <Bot className="size-3.5 text-ember-soft" />
+                )}
+              </span>
+              <div
+                className={`max-w-[80%] whitespace-pre-wrap rounded-lg border px-3 py-2 text-sm ${
+                  who === "user"
+                    ? "border-ember/30 bg-ember/[0.06] text-text"
+                    : operator
+                      ? "border-ember/40 bg-ember/[0.1] text-text"
+                      : "border-border bg-surface-2/60 text-text"
+                }`}
+              >
+                {operator && (
+                  <div className="mb-0.5 text-[10px] uppercase tracking-wide text-ember-soft">Operator</div>
+                )}
+                {m.content}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {isHandoff && assigned ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (text.trim()) doReply.mutate(text.trim());
+          }}
+          className="flex items-center gap-2 border-t border-border p-3"
+        >
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Reply as an operator…"
+            className="h-10 flex-1 rounded-md border border-border bg-surface-2 px-3 text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
+          />
+          <Button type="submit" variant="primary" disabled={!text.trim() || doReply.isPending} aria-label="Send reply">
+            {doReply.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+          </Button>
+        </form>
+      ) : (
+        <div className="border-t border-border p-3 text-center text-xs text-muted">
+          {isHandoff ? "Take over to reply." : "The assistant is handling this conversation."}
+        </div>
+      )}
     </div>
   );
 }
