@@ -36,6 +36,32 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-027: Messaging channels via a shared inbound turn + adapter registry
+- **Date:** 2026-07-18
+- **Status:** accepted
+- **Context:** Phase 12 — Telegram/WhatsApp/Slack/Discord, keeping the runtime channel-agnostic.
+- **Decisions:**
+  - **One shared inbound turn.** `app/chat/inbound.InboundTurn` factors "persist the user
+    message → (unless handed off) run the bot → persist the assistant reply" out of the public
+    widget service. The widget streams its events; channels call `.run()` and forward
+    `result.content`. This is also where the **handoff pause** lives (a `status="handoff"`
+    conversation persists the inbound message but the bot stays silent — Phase 13).
+  - **A thin `BaseChannel` adapter per platform** (`verify` / `parse_inbound` / `send` /
+    `on_enable`) on a registry. The channel service handles CRUD + inbound orchestration; each
+    adapter only knows its provider's signature scheme and message shape.
+  - **Signature verification is mandatory per platform**: Telegram secret-token header, WhatsApp
+    `X-Hub-Signature-256` (+ GET verify challenge), Slack v0 HMAC (+ timestamp replay window +
+    `url_verification`), Discord Ed25519 over `timestamp+body` (+ PING/PONG). Discord replies
+    inline in the interaction response (no async `send`).
+  - **Tokens encrypted at rest** (Fernet, same as provider creds) and **masked** (`••••set`) in
+    API responses; the per-channel `webhook_secret` authenticates Telegram callbacks.
+  - **Per-channel config, not global env.** Tokens live on the `Channel` row so one org can run
+    several bots; `TELEGRAM_BOT_TOKEN` etc. are entered in the Channels tab. Dropping a real
+    token in + exposing a public webhook URL is the only step to go live.
+  - **Local verifiability:** providers push to a public URL and we can't reach their hosts from
+    dev, so provider *delivery* is mock-tested; inbound → real-bot → persist is verified live by
+    POSTing signed provider-shaped payloads to the running API.
+
 ### ADR-026: Public widget surface + a zero-dependency Shadow-DOM widget
 - **Date:** 2026-07-18
 - **Status:** accepted
