@@ -3,7 +3,7 @@
 > **Read this first, then continue the build.** This file is the pick-up point for the next
 > session. It records what's done, what's half-done, and exactly what to do next.
 
-Last updated: **2026-07-18** · Latest commit: `phase-09-complete` · Branch: `master`
+Last updated: **2026-07-18** · Latest commit: `phase-11-complete` · Branch: `master`
 
 ---
 
@@ -19,7 +19,7 @@ Read every file in `docs/` **in order** before writing code:
 6. Then the running logs: `PROGRESS.md` (per-phase status), `DECISIONS.md` (ADR-001…020),
    `ENV.md`, and `RUNBOOK-docker.md` (how to bring the stack up).
 
-**Continue from where we left off: Phase 10 (n8n integration).**
+**Continue from where we left off: Phase 12 (Messaging channels).**
 
 ---
 
@@ -60,9 +60,9 @@ A backend was built from nothing and the existing mock frontend was wired to it.
 | 7 | Knowledge base & RAG | ✅ **complete** — backend (KB/ingestion/retrieval/RAG) + worker + UI wired; verified live (tag `phase-07-complete`) |
 | 8 | Chat persistence & memory | ✅ **complete** — persistence + memory + WebSocket + conversations browser; branch-on-edit fix (tag `phase-08-complete`) |
 | 9 | Tools & tool calling | ✅ **complete** — built-ins + HTTP tools + tool loop + tool_runs + Tools tab; live tool call via qwen3 (tag `phase-09-complete`) |
-| 10 | **n8n integration** | ⬜ **NOT STARTED — do this next** (Automations page is mock) |
-| 11 | Web widget | ⬜ (widget preview is mock) |
-| 12 | Messaging channels | ⬜ (Channels tab is mock) |
+| 10 | n8n integration | ✅ **complete** — client + n8n tool type (sync/async) + automations UI; live agent→n8n verified (tag `phase-10-complete`) |
+| 11 | Web widget | ✅ **complete** — public config/chat + Shadow-DOM widget + SDK + Channels tab; live embed verified (tag `phase-11-complete`) |
+| 12 | **Messaging channels** | ⬜ **NOT STARTED — do this next** |
 | 13 | Inbox & handoff | ⬜ (inbox UI is mock) |
 | 14 | Analytics & metering | ⬜ (analytics UI is mock) |
 | 15 | API keys/webhooks/audit | ⬜ (settings pages are mock) |
@@ -72,48 +72,58 @@ A backend was built from nothing and the existing mock frontend was wired to it.
 | 19 | E2E/docs/polish | ⬜ |
 | 20 | Production deployment | ⬜ |
 
-**Scoreboard:** 9 phases tagged complete (0,1,2,4,5,6,7,8,9) · 1 mostly done (3) · 11 not started (10–20).
-Roughly **9 of 21** phases have real, tested, wired progress.
+**Scoreboard:** 11 phases tagged complete (0,1,2,4,5,6,7,8,9,10,11) · 1 mostly done (3) · 9 not started (12–20).
+Roughly **11 of 21** phases have real, tested, wired progress.
 
 ### Backend business routes live now
 `/v1/auth/*`, `/v1/orgs/*`, `/v1/credentials/*`, `/v1/agents/*` (+ playground + `/chat` +
-`/chat/ws`), `/v1/knowledge/*`, `/v1/conversations/*`, `/v1/tools/*`. Everything else in
-`04-API-SPEC.md` is not built yet (channels, inbox, analytics, apikeys, webhooks, admin, billing).
+`/chat/ws`), `/v1/knowledge/*`, `/v1/conversations/*`, `/v1/tools/*` (+ `/n8n/*`),
+`/v1/public/agents/{public_key}/{config,chat,ws}`. Not built yet: channels (Telegram/WhatsApp/
+Slack/Discord), inbox, analytics, apikeys, webhooks, admin, billing.
 
 ### Frontend: what's real vs mock
 - **Real (wired to API):** login/signup, org switcher, user menu, agents list + builder
-  (Persona/Model/Versions/**Knowledge**/**Tools** + playground), credentials settings, knowledge
-  list + detail, **conversations browser** (persisted streaming chat).
-- **Still mock (no backend yet):** dashboard analytics, inbox, analytics, automations, the
-  builder's Channels tab, and members/invites settings.
+  (Persona/Model/Versions/**Knowledge**/**Tools**/**Channels** + playground), credentials,
+  knowledge list + detail, **conversations browser**, **automations** (n8n bind).
+- **Still mock (no backend yet):** dashboard analytics, inbox, analytics, and members/invites
+  settings. The **web widget is real** (`packages/widget` → `/widget.js`).
 
 ---
 
-## 3. NEXT: Phase 10 — n8n integration
+## 3. NEXT: Phase 12 — Messaging channels
 
-Per `08-PHASES.md §10` and `07-INTEGRATIONS.md`:
-- **10.1** `integrations/n8n_client` (list workflows, trigger webhook signed, verify callback).
-  n8n is already in compose; `N8N_BASE_URL` / `N8N_API_KEY` in env (stub loudly if unset).
-- **10.2** n8n tool type: bind a workflow → callable tool (sync + async modes + callback
-  endpoint). This slots into the **existing tool system** (`app/tools`): add a `type="n8n"`
-  branch in `tools.service._dispatch` + an `n8n` executor, mirroring the `http` tool. The
-  tool-calling loop (`run_turn`) already handles it.
-- **10.3** Ship starter workflows in `infra/n8n/` + import docs.
-- **10.4** `/automations` page (currently mock): list n8n workflows, bind as tools.
+Per `08-PHASES.md §12` and `07-INTEGRATIONS.md §2`:
+- **12.1** Channel abstraction (`verify` / `parse_inbound` / `send`) + a registry, keeping the
+  chat runtime channel-agnostic. Persisted chat already writes `conversation.channel`; the
+  public chat already uses `channel="widget"`. Inbound webhooks resolve/create a conversation
+  keyed by the channel's external user id and run the **same** runtime as `app/modules/public`.
+- **12.2** Telegram (webhook set, inbound parse, `sendMessage`). Real token stubbed per §7.
+- **12.3** WhatsApp (Meta) incl. GET verify challenge + `X-Hub-Signature-256`.
+- **12.4** Slack + Discord (signature verify, events, send).
+- **12.5** Channels tab connect flows per channel (the tab currently only does the **web widget**).
+  A `channels` table + model already exist (Phase 1); store per-channel config (encrypted tokens).
 
-### Phase 8/9 gotchas & live-demo state
-- **Tools live-verified** on the "aadesh" draft agent (`019f7098-…`, Ollama `qwen3:14b`): tools
-  enabled + `calculator` built-in attached; asking "47 × 89" makes it call the tool → `4183`.
-  That agent currently has tools on and RAG off. The "Product Docs" KB (`019f7164-…`) is still
-  attached-capable for RAG demos.
-- **qwen3:14b supports tool calls** over Ollama's OpenAI-compatible endpoint — good for local,
-  key-free live tool demos (but slow: a turn can take 30–90s).
-- **Chat vs playground:** `/v1/agents/{id}/chat` persists (backs the conversations browser) and
-  uses the **live** version (published `current_version_id` else latest draft); the builder
-  playground stays ephemeral and uses the latest draft.
-- **Summarizer** never uses the agent's model — it's `SUMMARY_PROVIDER/MODEL` (groq→fake).
-- The dev **GROQ_API_KEY in `.env` is invalid** (401) — real chat against groq fails; use Ollama
-  or the fake provider for live demos until a valid key is added.
+Reuse: the public chat service (`app/modules/public/service.py`) is the template for a channel
+runner — resolve agent/org, get/create a `Conversation` (channel=<type>, `channel_user_id`),
+run `run_turn`, persist. Factor the shared "run a turn for an unauthenticated inbound message"
+helper out of `public.service` so each channel just implements verify/parse/send.
+
+### Live-demo state (carried forward)
+- **n8n live**: the `BotForge — Echo (sync)` workflow is created + active in the running n8n
+  (`/webhook/botforge-echo`); the "aadesh" agent (`019f7098-…`, qwen3:14b) has it bound as the
+  `botforge_echo` tool + the `calculator` built-in. Asking it to echo/multiply triggers real
+  tool calls. n8n public API key is valid.
+- **Widget live**: a demo agent "Widget Demo" (`019f745f-…`, provider **fake**) with public key
+  `bf_pub_UTEtOezWofg-ZKEv7x73Gw`; embed page at `http://localhost:3001/widget-demo.html`
+  (replace the key placeholder in the committed version). Rebuild the widget with
+  `cd packages/widget && node build.mjs`.
+- **qwen3:14b supports tool calls** over Ollama (local, key-free, but slow: 30–90s/turn).
+- **Chat vs playground:** `/v1/agents/{id}/chat` persists + uses the live version; the builder
+  playground is ephemeral (latest draft). Public/widget chat = `channel="widget"`, shows in the
+  conversations browser.
+- **Summarizer** never uses the agent's model — `SUMMARY_PROVIDER/MODEL` (groq→fake).
+- The dev **GROQ_API_KEY in `.env` is invalid** (401) — use Ollama or provider `fake` for live
+  demos until a valid key is added.
 
 ---
 

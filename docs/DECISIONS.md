@@ -36,6 +36,50 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-026: Public widget surface + a zero-dependency Shadow-DOM widget
+- **Date:** 2026-07-18
+- **Status:** accepted
+- **Context:** Phase 11 — an embeddable web widget that chats without dashboard auth.
+- **Decisions:**
+  - **Reuse the dashboard runtime.** `build_tooling`, `_resolve_provider`, `_maybe_summarize`,
+    and `_finalize_turn` were refactored to take `org_id`/`Conversation` instead of an
+    `OrgContext`, so the public chat (`app/modules/public`) resolves the agent+org from its
+    `public_key` and runs the exact same assembly → retrieval → tools → `run_turn` → persistence
+    path. Widget conversations use `channel="widget"` and show up in the dashboard's conversations
+    browser (same org).
+  - **Widget appearance lives in `agent_version.persona.widget`** (color/position/launcher/mode/
+    branding) — so it round-trips through the builder's existing version autosave with no schema
+    change; the public `/config` endpoint reads it.
+  - **The widget is one dependency-free `widget.js`** rendered into a **Shadow DOM** (full style
+    isolation), streaming over the public SSE endpoint (works cross-origin from any host). It
+    ships its own minimal, escape-first markdown renderer (no library) and exposes
+    `window.BotForge` (open/close/toggle/sendMessage/on/setUser). Built via a trivial
+    `node build.mjs` (esbuild-minified if present, else plain copy) into `apps/web/public/` so the
+    web app serves it at `/widget.js`.
+  - **Rate limiting:** public chat is throttled per client IP (60/min) via the shared limiter.
+
+### ADR-025: n8n integration via the existing tool system
+- **Date:** 2026-07-18
+- **Status:** accepted
+- **Context:** Phase 10 — agents trigger local n8n workflows.
+- **Decisions:**
+  - **No new runtime path.** An n8n workflow becomes a `Tool` row with `type="n8n"` and
+    `config={workflow_id, workflow_name, webhook_url, mode}`. The Phase-9 tool loop already
+    calls it; only a `type=="n8n"` branch in `_dispatch` + an `execute_n8n_tool` were added
+    (ADR-024 paying off).
+  - **Signing:** outbound webhooks carry `X-BotForge-Signature` = HMAC-SHA256 of
+    `"{timestamp}.{body}"` with `N8N_WEBHOOK_SIGNING_SECRET`; the callback endpoint verifies the
+    same (constant-time) with ±300s replay protection.
+  - **n8n calls are NOT SSRF-guarded** — the target is the operator-configured, trusted
+    `N8N_BASE_URL` (loopback in dev), unlike user-supplied HTTP-tool URLs which are guarded.
+  - **Async without blocking the turn:** the ToolRun is created (`pending`) *before* dispatch so
+    its id is the callback token; async n8n returns an "accepted" result immediately and the
+    signed `POST /v1/tools/n8n/callback` later resolves the pending run. In-turn re-injection of
+    a late async result is a future enhancement.
+  - **Discovery** uses n8n's public REST API (`X-N8N-API-KEY`); the webhook URL is extracted from
+    the workflow's Webhook node. If `N8N_API_KEY` is unset, listing/binding fails loudly (503)
+    but the rest of the app keeps working (CLAUDE §7).
+
 ### ADR-024: Tools as rows, a decoupled executor, and an iteration-capped loop
 - **Date:** 2026-07-18
 - **Status:** accepted
