@@ -16,6 +16,7 @@ from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware
 from app.modules.agents.router import router as agents_router
+from app.modules.analytics.router import router as analytics_router
 from app.modules.auth.router import router as auth_router
 from app.modules.conversations.router import router as conversations_router
 from app.modules.credentials.router import router as credentials_router
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(public_router)
     app.include_router(channels_router)
     app.include_router(inbox_router)
+    app.include_router(analytics_router)
 
     return app
 
