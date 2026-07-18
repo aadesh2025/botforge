@@ -6,7 +6,6 @@ resolves the agent/org from its ``public_key`` instead of an OrgContext.
 
 from __future__ import annotations
 
-import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -14,23 +13,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat.assembly import build_messages
-from app.chat.runtime import TurnResult, run_turn
-from app.core.config import settings
+from app.chat.inbound import InboundTurn
 from app.core.errors import AppError
 from app.llm.types import StreamEvent
 from app.models import Agent, AgentVersion, Conversation
-from app.modules.conversations.service import (
-    _build_chat_request,
-    _finalize_turn,
-    _live_version,
-    _load_history,
-    _persist_user_message,
-    _resolve_provider,
-)
+from app.modules.conversations.service import _live_version
 from app.modules.public import schemas
-from app.rag.agent_retrieval import retrieve_for_version
-from app.tools.service import build_tooling
 
 
 async def _resolve_agent(session: AsyncSession, public_key: str) -> tuple[Agent, AgentVersion]:
@@ -101,43 +89,12 @@ async def public_chat_events(
     session: AsyncSession, public_key: str, data: schemas.PublicChatRequest, visitor_id: str
 ) -> AsyncIterator[StreamEvent]:
     agent, version = await _resolve_agent(session, public_key)
-    org_id = agent.organization_id
     conv = await _get_or_create_conversation(session, agent, data, visitor_id)
 
-    history = await _load_history(session, conv.id)
-    _persist_user_message(session, conv, data.message)
-    await session.flush()
-
-    context_block, citations = await retrieve_for_version(session, org_id, version, data.message)
-    messages = build_messages(
-        system_prompt=version.system_prompt,
-        context_block=context_block,
-        memory_summary=conv.memory_summary,
-        history=history,
-        user_message=data.message,
-        window_messages=settings.memory_window_messages,
-    )
-    provider_name = (version.model_config_json or {}).get("provider", "fake")
-    provider = await _resolve_provider(session, org_id, agent, provider_name)
-    req = _build_chat_request(version, messages, stream=True)
-
-    specs, executor = await build_tooling(session, org_id, agent, version, conv.id)
-    if specs and executor is not None and provider.supports_tools():
-        req.tools = specs
-    else:
-        executor = None
-
     yield StreamEvent(type="conversation", conversation_id=str(conv.id))
-    result = TurnResult()
-    t0 = time.perf_counter()
-    async for ev in run_turn(
-        provider, req, [c.model_dump(mode="json") for c in citations], result,
-        executor=executor, max_iters=settings.tool_max_iterations,
-    ):
+    turn = InboundTurn(session, agent, version, conv, data.message)
+    async for ev in turn.events():
         yield ev
-    latency_ms = int((time.perf_counter() - t0) * 1000)
-    msg = await _finalize_turn(session, conv, result, latency_ms, data.message)
-    yield StreamEvent(type="message", message_id=str(msg.id))
 
 
 async def public_chat_sse(

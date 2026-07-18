@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.api.routers import health
+from app.channels.router import router as channels_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router)
     app.include_router(tools_router)
     app.include_router(public_router)
+    app.include_router(channels_router)
 
     return app
 
