@@ -12,6 +12,7 @@ export function versionToDraft(agent: ApiAgent, v: ApiVersion): AgentDraft {
   const rag = v.rag_config ?? {};
   const feat = v.features ?? {};
   const persona = v.persona ?? {};
+  const w = ((persona.widget as Record<string, unknown>) ?? {}) as Record<string, unknown>;
 
   return {
     id: agent.id,
@@ -48,6 +49,13 @@ export function versionToDraft(agent: ApiAgent, v: ApiVersion): AgentDraft {
       memory: (feat.memory_enabled as boolean) ?? true,
       handoff: (feat.handoff_enabled as boolean) ?? false,
     },
+    widget: {
+      primaryColor: (w.primaryColor as string) ?? "#E8590C",
+      position: (w.position as "bottom-right" | "bottom-left") ?? "bottom-right",
+      launcherText: (w.launcherText as string) ?? "Chat with us",
+      branding: (w.branding as boolean) ?? true,
+      mode: (w.mode as "dark" | "light") ?? "dark",
+    },
   };
 }
 
@@ -62,7 +70,18 @@ export function draftToPatch(draft: AgentDraft): Record<string, unknown> {
     welcome_message: p.welcomeMessage,
     fallback_message: p.fallbackMessage,
     suggested_prompts: p.suggestedPrompts,
-    persona: { displayName: p.displayName, tone: p.tone, blockedTopics: p.blockedTopics },
+    persona: {
+      displayName: p.displayName,
+      tone: p.tone,
+      blockedTopics: p.blockedTopics,
+      widget: {
+        primaryColor: draft.widget.primaryColor,
+        position: draft.widget.position,
+        launcherText: draft.widget.launcherText,
+        branding: draft.widget.branding,
+        mode: draft.widget.mode,
+      },
+    },
     model_config: {
       provider: m.provider,
       model: m.model,

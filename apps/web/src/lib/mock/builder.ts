@@ -35,6 +35,14 @@ export interface FeatureToggles {
   handoff: boolean;
 }
 
+export interface WidgetConfig {
+  primaryColor: string;
+  position: "bottom-right" | "bottom-left";
+  launcherText: string;
+  branding: boolean;
+  mode: "dark" | "light";
+}
+
 export interface AgentDraft {
   id: string;
   name: string;
@@ -43,6 +51,7 @@ export interface AgentDraft {
   model: ModelConfig;
   knowledge: KnowledgeConfig;
   features: FeatureToggles;
+  widget: WidgetConfig;
 }
 
 export const providerCatalog: Record<Provider, { label: string; models: string[]; free: boolean }> = {
@@ -147,5 +156,12 @@ export function makeDraft(id: string): AgentDraft {
     },
     knowledge: { attachedKbIds: ["kb_1", "kb_3"], topK: 5, scoreThreshold: 0.72, hybrid: true },
     features: { rag: true, tools: true, memory: true, handoff: true },
+    widget: {
+      primaryColor: "#E8590C",
+      position: "bottom-right",
+      launcherText: "Chat with us",
+      branding: true,
+      mode: "dark",
+    },
   };
 }

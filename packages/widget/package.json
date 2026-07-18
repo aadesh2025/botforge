@@ -1,0 +1,10 @@
+{
+  "name": "@botforge/widget",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BotForge embeddable chat widget (vanilla, Shadow-DOM isolated, zero dependencies).",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}
