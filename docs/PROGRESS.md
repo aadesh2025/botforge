@@ -22,7 +22,7 @@ stubbed/deferred, and any gaps waiting on human secrets.
 | 13 | Inbox & handoff | ✅ | Handoff triggers (keyword in `app/chat/handoff` + a `request_handoff` built-in tool) pause the bot (`InboundTurn` honours `status="handoff"`); `handoffs` records; inbox endpoints (list/detail/takeover/handback/reply/assign/close/notes/tags); an in-process pub/sub (`app/realtime/hub`) drives the operator inbox WS **and** a widget listen-socket so operator replies reach the end user live. Two-pane Inbox UI wired + realtime. **Verified live end-to-end in the browser: widget user asks for a human → canned handoff message → appears in the inbox → operator takes over + replies → the reply pushes to the widget live → handback → bot resumes.** 123 tests pass; ruff+mypy clean. |
 | 14 | Analytics & metering | ✅ | `app/modules/analytics`: overview (conversations/messages/users/tokens/cost/handoff+resolution rate), usage grouped by day/provider/model, latency (p50/p95/avg via `percentile_cont`), top-questions, unanswered (escalation heuristic), CSV export — all aggregated **live from `messages`/`conversations`/`handoffs`** (org-scoped). `app/worker/rollup`: Celery task upserting `usage_records` + refreshing `quotas` with a threshold event. Frontend: `/analytics` + dashboard stat row/chart wired to real aggregates. **Verified live against real Groq usage: the UI/overview (51 msgs, 3789+956 tokens) matches a direct `messages` aggregate exactly, and the rollup's `usage_records` matches the message sums.** 129 tests pass; ruff+mypy clean. |
 | 15 | API keys/webhooks/audit | ✅ | `app/modules/apikeys`: `bf_`-prefixed keys (hashed + prefix lookup, scopes, last-used), and `current_org` now accepts an API key (`X-API-Key` / `Bearer bf_…`) resolving its org + acting as the creator. `app/webhooks`: endpoint CRUD (encrypted/masked secret), HMAC-signed delivery with retry/backoff + delivery log, and the full event catalog emitted across the app (message.created, conversation.created/closed, handoff.requested/resolved, document.ready/failed, tool.run, usage.threshold). `app/modules/audit`: read API; `app/core/audit.write_audit` records sensitive mutations. Frontend: wired settings pages (API keys, webhooks + deliveries, audit) + a `lib/rbac` matrix / `useCan`. **Verified live: API key authenticates requests; a real chat emits a `message.created` delivery; `/test` signed-delivered to example.com (405); audit recorded key/webhook creation; a viewer got 403 on admin actions + a read-only UI.** 141 tests pass; ruff+mypy clean. |
-| 16 | Guardrails & hardening | ⬜ | |
+| 16 | Guardrails & hardening | ✅ | **16.1** `app/chat/guardrails`: retrieved RAG chunks + tool output are neutralized (`neutralize_injections`) and wrapped as **data, not instructions** before the model sees them; blocked-topics (`persona.blockedTopics`) refuse pre-LLM via a `RefusalProvider`; output redaction strips secret-looking strings from stored/returned text. **16.2** API-key **scope enforcement** (effective role = scope tier capped by creator's role, least privilege; `admin`≠`owner`), rate limits on channel webhooks + n8n callback, `SecurityHeadersMiddleware` (CSP/XFO/nosniff/Referrer/COOP/CORP/Permissions + prod HSTS), advisory `pip-audit`+`npm audit` CI job, and a verified `docs/SECURITY.md` checklist. **16.3** perf harness (`infra/perf/{locustfile,measure}.py`). **Verified live: blocked topic → fallback (not the model), secret → `[redacted]`, a read-scoped key → 403 on write / 200 on read. Measured NFR-1 (see below).** 151 tests pass; ruff+mypy clean. |
 | 17 | Admin console | ⬜ | |
 | 18 | Billing (optional) | ⬜ | |
 | 19 | E2E/docs/polish | ⬜ | |
@@ -30,7 +30,14 @@ stubbed/deferred, and any gaps waiting on human secrets.
 
 Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
 
-## Waiting on human (missing secrets)
+## Measured performance (NFR-1, Phase 16.3 — `infra/perf/measure.py`, live stack 2026-07-19)
+- **Non-LLM API** `GET /v1/agents`: **p50 13 ms, p95 16 ms** (n=30) — well under the 300 ms target.
+- **LLM first-token (Groq `llama-3.1-8b-instant`)**: **p50 417 ms, p95 529 ms** (n=7) — meets NFR-1.
+- Measured **Groq separately from Ollama** on purpose: the earlier "p95 166 s" figure was **local
+  Ollama `qwen3:14b` tool-calling turns** (30–90 s/turn), not a web-provider latency — it must not
+  be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
+
+## Roadmap / deferred enhancements
 List any provider/channel/billing key that is stubbed and needs a real value. (See `ENV.md`.)
 
 ## Roadmap / deferred enhancements
@@ -46,6 +53,18 @@ List any provider/channel/billing key that is stubbed and needs a real value. (S
   record via the signed callback, but a late result is not re-injected into the same generation
   turn. Options: a "pending → notify" follow-up message on the conversation, or a short bounded
   wait on the callback before the turn ends. Deferred; the callback + record resolution work.
+- **httpOnly cookie migration for web auth tokens (required prod hardening, ADR-019).** The Next.js
+  client still keeps the access token in a **JS-readable cookie** (XSS-exfiltratable). Deferred in
+  Phase 16.2 (needs a Next route-handler BFF proxy that sets `httpOnly`+`Secure`+`SameSite` cookies
+  and forwards the Bearer server-side). Mitigations in place: short access TTL + refresh rotation,
+  strict CORS, no token reflection. Do before Phase 20. See `docs/SECURITY.md §1`.
+- **Next.js 14 → 16 major upgrade (clears 5 web advisories).** `npm audit` flags 4 high + 1 moderate
+  advisories in Next 14 + bundled postcss (Image-Opt DoS, WS-upgrade SSRF, RSC cache poisoning, i18n
+  middleware bypass, postcss XSS). The fix is a **breaking** major upgrade — deferred to Phase 19/20
+  to avoid destabilizing the app mid-build. Partial applicability (no i18n; realtime WS is on the
+  FastAPI backend; minimal image optimization). See `docs/SECURITY.md §8`.
+- **Drop `python-jose` → `PyJWT`/`authlib`** to clear the transitive `ecdsa` advisory (PYSEC-2026-1325,
+  no fix). Not exploitable today (JWTs are HS256 symmetric; no ECDSA ops). See `docs/SECURITY.md §8`.
 
 ## Out of scope for v1
 Full visual flow builder (ship minimal first), voice/telephony, native mobile apps, bot
