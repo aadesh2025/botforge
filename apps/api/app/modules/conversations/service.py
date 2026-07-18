@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat import memory
+from app.chat import guardrails, memory
 from app.chat.assembly import build_messages
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.llm.base import ChatProvider
-from app.llm.fake import FakeChatProvider
+from app.llm.fake import FakeChatProvider, RefusalProvider
 from app.llm.registry import get_chat_provider
 from app.llm.types import ChatRequest, StreamEvent
 from app.llm.types import Message as LLMMessage
@@ -140,14 +140,24 @@ def _persist_user_message(session: AsyncSession, conv: Conversation, text: str) 
     return msg
 
 
+_DEFAULT_REFUSAL = "I'm not able to help with that topic. Is there something else I can do for you?"
+
+
+def _refusal_text(version: AgentVersion) -> str:
+    return version.fallback_message or _DEFAULT_REFUSAL
+
+
 def _persist_assistant_message(
     session: AsyncSession, conv: Conversation, result: TurnResult, latency_ms: int
 ) -> Message:
+    # Output redaction guardrail: strip secret-looking strings before the text is stored/returned.
+    redacted = guardrails.redact_secrets((result.content or "").strip()) or None
+    result.content = redacted or ""
     msg = Message(
         conversation_id=conv.id,
         organization_id=conv.organization_id,
         role="assistant",
-        content=(result.content or "").strip() or None,
+        content=redacted,
         citations=result.citations,
         provider=result.provider or None,
         model=result.model or None,
@@ -213,6 +223,12 @@ async def _prepare_turn(
     provider_name = (version.model_config_json or {}).get("provider", "fake")
     provider = await _resolve_provider(session, ctx.org.id, agent, provider_name)
     req = _build_chat_request(version, messages, stream=stream)
+
+    # Blocked-topics guardrail: refuse pre-LLM when the message touches a blocked topic.
+    topics = guardrails.blocked_topics_for(version.persona)
+    if topics and guardrails.matches_blocked_topic(data.message, topics):
+        provider = RefusalProvider(_refusal_text(version))
+        return conv, provider, req, [], None
 
     # Tool calling: attach the agent's enabled tools when the provider supports them.
     specs, executor = await build_tooling(session, ctx.org.id, agent, version, conv.id)

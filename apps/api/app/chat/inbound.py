@@ -13,13 +13,17 @@ from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat import guardrails
 from app.chat.assembly import build_messages
 from app.chat.handoff import trigger_handoff, wants_handoff
 from app.chat.runtime import TurnResult, run_turn
 from app.core.config import settings
+from app.llm.fake import RefusalProvider
 from app.llm.types import StreamEvent
 from app.models import Agent, AgentVersion, Conversation, Message
 from app.rag.agent_retrieval import retrieve_for_version
+
+_DEFAULT_REFUSAL = "I'm not able to help with that topic. Is there something else I can do for you?"
 
 
 class InboundTurn:
@@ -107,11 +111,18 @@ class InboundTurn:
         provider = await _resolve_provider(session, org_id, self.agent, provider_name)
         req = _build_chat_request(self.version, messages, stream=True)
 
-        specs, executor = await build_tooling(session, org_id, self.agent, self.version, conv.id)
-        if specs and executor is not None and provider.supports_tools():
-            req.tools = specs
-        else:
+        # Blocked-topics guardrail: refuse pre-LLM when the message touches a blocked topic.
+        topics = guardrails.blocked_topics_for(self.version.persona)
+        if topics and guardrails.matches_blocked_topic(self.message, topics):
+            provider = RefusalProvider(self.version.fallback_message or _DEFAULT_REFUSAL)
+            citations = []
             executor = None
+        else:
+            specs, executor = await build_tooling(session, org_id, self.agent, self.version, conv.id)
+            if specs and executor is not None and provider.supports_tools():
+                req.tools = specs
+            else:
+                executor = None
 
         t0 = time.perf_counter()
         async for ev in run_turn(

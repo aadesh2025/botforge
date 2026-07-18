@@ -66,7 +66,8 @@ async def test_usage_grouping(client: AsyncClient) -> None:
     assert buckets[0]["tokens_prompt"] == 10
 
     by_day = await client.get("/v1/analytics/usage?group_by=day", headers=headers)
-    assert by_day.json()[0]["key"] == dt.date.today().isoformat()
+    # Analytics groups by UTC date (matches how timestamps are stored) — compare in UTC, not local.
+    assert by_day.json()[0]["key"] == dt.datetime.now(dt.UTC).date().isoformat()
 
 
 async def test_latency_and_top_questions(client: AsyncClient) -> None:
@@ -118,7 +119,7 @@ async def test_rollup_matches_live_totals(client: AsyncClient, db_session: Async
     await client.post(f"/v1/agents/{aid}/chat", json={"message": "one", "stream": False}, headers=headers)
     await client.post(f"/v1/agents/{aid}/chat", json={"message": "two", "stream": False}, headers=headers)
 
-    written = await rollup_usage(db_session, uuid.UUID(org_id), dt.date.today())
+    written = await rollup_usage(db_session, uuid.UUID(org_id), dt.datetime.now(dt.UTC).date())
     assert written == 1  # one (agent, provider, model) bucket
 
     total = (

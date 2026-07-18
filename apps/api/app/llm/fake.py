@@ -67,6 +67,34 @@ class FakeChatProvider:
         return [ModelInfo(id="fake-1", provider=self.name)]
 
 
+class RefusalProvider:
+    """Streams a fixed refusal message. Used when a guardrail blocks the turn pre-LLM."""
+
+    def __init__(self, message: str, name: str = "guardrail") -> None:
+        self.name = name
+        self._message = message
+
+    async def chat(self, req: ChatRequest) -> ChatResponse:
+        return ChatResponse(
+            content=self._message,
+            model=req.model,
+            provider=self.name,
+            usage=Usage(prompt_tokens=0, completion_tokens=0),
+            finish_reason="stop",
+        )
+
+    async def stream(self, req: ChatRequest) -> AsyncIterator[StreamEvent]:
+        for word in self._message.split():
+            yield StreamEvent(type="token", delta=word + " ")
+        yield StreamEvent(type="done", usage=Usage(prompt_tokens=0, completion_tokens=0), finish_reason="stop")
+
+    def supports_tools(self) -> bool:
+        return False
+
+    async def list_models(self) -> list[ModelInfo]:
+        return [ModelInfo(id="guardrail", provider=self.name)]
+
+
 class ScriptedToolProvider:
     """Requests a tool call on the first turn, then answers using the tool result.
 

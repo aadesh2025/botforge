@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.chat.guardrails import neutralize_injections
 from app.llm.base import ChatProvider, ProviderError
 from app.llm.pricing import compute_cost_micros
 from app.llm.types import ChatRequest, Message, StreamEvent, ToolCall, Usage
@@ -102,12 +103,15 @@ async def run_turn(
                         "error": out.get("error"),
                     },
                 )
+                # Tool output is untrusted: neutralize instruction-override attempts before
+                # feeding it back to the model as a tool message (treat it as data, not commands).
+                tool_content = neutralize_injections(json.dumps(out.get("output") or {}))
                 messages.append(
                     Message(
                         role="tool",
                         tool_call_id=call.id,
                         name=call.name,
-                        content=json.dumps(out.get("output") or {}),
+                        content=tool_content,
                     )
                 )
             continue
