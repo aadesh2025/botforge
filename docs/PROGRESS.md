@@ -33,6 +33,12 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
 ## Waiting on human (missing secrets)
 List any provider/channel/billing key that is stubbed and needs a real value. (See `ENV.md`.)
 
-## Roadmap / out of scope for v1
+## Roadmap / deferred enhancements
+- **Async n8n late-result re-injection** (from ADR-025): async n8n tools resolve the `tool_run`
+  record via the signed callback, but a late result is not re-injected into the same generation
+  turn. Options: a "pending → notify" follow-up message on the conversation, or a short bounded
+  wait on the callback before the turn ends. Deferred; the callback + record resolution work.
+
+## Out of scope for v1
 Full visual flow builder (ship minimal first), voice/telephony, native mobile apps, bot
 marketplace, SSO/SAML, fine-tuning UI, MCP tool bridge, Qdrant swap, Kubernetes/Helm.
