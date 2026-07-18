@@ -67,6 +67,38 @@ class FakeChatProvider:
         return [ModelInfo(id="fake-1", provider=self.name)]
 
 
+class ScriptedToolProvider:
+    """Requests a tool call on the first turn, then answers using the tool result.
+
+    Used to exercise the tool-calling loop deterministically.
+    """
+
+    def __init__(self, tool_call: ToolCall, answer: str = "done using the tool", name: str = "scripted") -> None:
+        self.name = name
+        self._tool_call = tool_call
+        self._answer = answer
+        self._calls = 0
+
+    async def chat(self, req: ChatRequest) -> ChatResponse:  # pragma: no cover - stream path used
+        return ChatResponse(content=self._answer, model=req.model, provider=self.name, finish_reason="stop")
+
+    async def stream(self, req: ChatRequest) -> AsyncIterator[StreamEvent]:
+        self._calls += 1
+        if self._calls == 1:
+            yield StreamEvent(type="tool_call", tool_call=self._tool_call)
+            yield StreamEvent(type="done", usage=Usage(prompt_tokens=8), finish_reason="tool_calls")
+            return
+        for word in self._answer.split():
+            yield StreamEvent(type="token", delta=word + " ")
+        yield StreamEvent(type="done", usage=Usage(prompt_tokens=5, completion_tokens=4), finish_reason="stop")
+
+    def supports_tools(self) -> bool:
+        return True
+
+    async def list_models(self) -> list[ModelInfo]:
+        return [ModelInfo(id="scripted-1", provider=self.name)]
+
+
 class FailingProvider:
     """Always raises — used to exercise the fallback chain."""
 

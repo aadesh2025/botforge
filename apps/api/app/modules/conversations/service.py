@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat import memory
 from app.chat.assembly import build_messages
-from app.chat.runtime import TurnResult, stream_turn
+from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
 from app.core.config import settings
 from app.core.errors import AppError
@@ -27,6 +27,7 @@ from app.models import Agent, AgentVersion, Conversation, Message
 from app.modules.conversations import schemas
 from app.modules.orgs.deps import OrgContext
 from app.rag.agent_retrieval import retrieve_for_version
+from app.tools.service import build_tooling
 
 log = get_logger("conversations")
 
@@ -187,7 +188,7 @@ async def _maybe_summarize(session: AsyncSession, ctx: OrgContext, conv: Convers
 # ── Chat runtime ─────────────────────────────────────────────────────────────────
 async def _prepare_turn(
     session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID, data: schemas.ChatRequest, stream: bool
-) -> tuple[Agent, Conversation, ChatProvider, ChatRequest, list[dict[str, Any]]]:
+) -> tuple[Conversation, ChatProvider, ChatRequest, list[dict[str, Any]], ToolExecutor | None]:
     agent = await _get_agent(session, ctx, agent_id)
     version = await _live_version(session, agent)
     conv = await _get_or_create_conversation(session, ctx, agent, data.conversation_id)
@@ -208,7 +209,14 @@ async def _prepare_turn(
     provider_name = (version.model_config_json or {}).get("provider", "fake")
     provider = await _resolve_provider(session, ctx, agent, provider_name)
     req = _build_chat_request(version, messages, stream=stream)
-    return agent, conv, provider, req, [c.model_dump(mode="json") for c in citations]
+
+    # Tool calling: attach the agent's enabled tools when the provider supports them.
+    specs, executor = await build_tooling(session, ctx, agent, version, conv.id)
+    if specs and executor is not None and provider.supports_tools():
+        req.tools = specs
+    else:
+        executor = None
+    return conv, provider, req, [c.model_dump(mode="json") for c in citations], executor
 
 
 async def _finalize_turn(
@@ -228,14 +236,16 @@ async def chat_events(
 ) -> AsyncIterator[StreamEvent]:
     """Yield StreamEvents for one turn, persisting user + assistant messages. SSE/WS format upstream."""
     rbac.require_permission(ctx.role, rbac.READ)
-    _agent, conv, provider, req, citations = await _prepare_turn(session, ctx, agent_id, data, stream=True)
+    conv, provider, req, citations, executor = await _prepare_turn(session, ctx, agent_id, data, stream=True)
 
     # Tell the client which conversation this is (esp. for a freshly created one).
     yield StreamEvent(type="conversation", conversation_id=str(conv.id))
 
     result = TurnResult()
     t0 = time.perf_counter()
-    async for ev in stream_turn(provider, req, citations, result):
+    async for ev in run_turn(
+        provider, req, citations, result, executor=executor, max_iters=settings.tool_max_iterations
+    ):
         yield ev
     latency_ms = int((time.perf_counter() - t0) * 1000)
 
@@ -254,11 +264,13 @@ async def chat_once(
     session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID, data: schemas.ChatRequest
 ) -> dict[str, Any]:
     rbac.require_permission(ctx.role, rbac.READ)
-    _agent, conv, provider, req, citations = await _prepare_turn(session, ctx, agent_id, data, stream=False)
+    conv, provider, req, citations, executor = await _prepare_turn(session, ctx, agent_id, data, stream=False)
 
     result = TurnResult()
     t0 = time.perf_counter()
-    async for _ev in stream_turn(provider, req, citations, result):
+    async for _ev in run_turn(
+        provider, req, citations, result, executor=executor, max_iters=settings.tool_max_iterations
+    ):
         pass
     latency_ms = int((time.perf_counter() - t0) * 1000)
 
@@ -268,6 +280,7 @@ async def chat_once(
         "message_id": str(msg.id),
         "content": (result.content or "").strip(),
         "citations": result.citations,
+        "tool_runs": result.tool_runs,
         "provider": result.provider,
         "model": result.model,
         "usage": {"prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens},

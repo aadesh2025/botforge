@@ -63,11 +63,15 @@ limiter = RateLimiter(settings.redis_url)
 
 
 def rate_limit(scope: str, limit: int | None = None, window: int | None = None) -> Callable[..., Awaitable[None]]:
-    """Dependency factory: throttle a route by client IP."""
-    lim = limit or settings.auth_rate_limit
-    win = window or settings.auth_rate_window
+    """Dependency factory: throttle a route by client IP.
+
+    Limit/window are resolved per-request (not at import time) so runtime overrides — e.g. the
+    test suite raising `auth_rate_limit` — actually take effect.
+    """
 
     async def _dep(request: Request) -> None:
+        lim = limit or settings.auth_rate_limit
+        win = window or settings.auth_rate_window
         ip = request.client.host if request.client else "unknown"
         allowed, retry_after = await limiter.hit(f"rl:{scope}:{ip}", lim, win)
         if not allowed:

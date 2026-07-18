@@ -12,18 +12,21 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
+from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.llm.base import ChatProvider, ProviderError
+from app.llm.base import ChatProvider
 from app.llm.fake import FakeChatProvider
 from app.llm.registry import get_chat_provider
-from app.llm.types import ChatRequest, Message, StreamEvent
+from app.llm.types import ChatRequest, Message
 from app.models import Agent, AgentVersion
 from app.modules.agents import schemas
 from app.modules.orgs.deps import OrgContext
 from app.rag.agent_retrieval import retrieve_for_version
 from app.rag.retrieval import Citation
+from app.tools.service import build_tooling
 
 log = get_logger("agents")
 
@@ -376,6 +379,15 @@ async def _resolve_playground_provider(
         return FakeChatProvider()
 
 
+async def _playground_tooling(
+    session: AsyncSession, ctx: OrgContext, agent: Agent, version: AgentVersion, provider: ChatProvider
+) -> tuple[list[Any], ToolExecutor | None]:
+    specs, executor = await build_tooling(session, ctx, agent, version, None)
+    if specs and executor is not None and provider.supports_tools():
+        return specs, executor
+    return [], None
+
+
 async def playground_stream(
     session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID, data: schemas.PlaygroundRequest
 ) -> AsyncIterator[str]:
@@ -386,15 +398,15 @@ async def playground_stream(
     provider = await _resolve_playground_provider(session, ctx, agent, provider_name)
     context_block, citations = await _retrieve_context(session, ctx, version, data.message)
     req = _build_request(version, data, stream=True, context_block=context_block)
-    if citations:
-        cite_event = StreamEvent(type="citations", citations=[c.model_dump(mode="json") for c in citations])
-        yield f"data: {cite_event.model_dump_json()}\n\n"
-    try:
-        async for event in provider.stream(req):
-            yield f"data: {event.model_dump_json()}\n\n"
-    except ProviderError as exc:
-        err = StreamEvent(type="error", error=str(exc))
-        yield f"data: {err.model_dump_json()}\n\n"
+    specs, executor = await _playground_tooling(session, ctx, agent, version, provider)
+    if specs:
+        req.tools = specs
+    result = TurnResult()
+    async for ev in run_turn(
+        provider, req, [c.model_dump(mode="json") for c in citations], result,
+        executor=executor, max_iters=settings.tool_max_iterations,
+    ):
+        yield f"data: {ev.model_dump_json()}\n\n"
 
 
 async def playground_once(
@@ -407,13 +419,25 @@ async def playground_once(
     provider = await _resolve_playground_provider(session, ctx, agent, provider_name)
     context_block, citations = await _retrieve_context(session, ctx, version, data.message)
     req = _build_request(version, data, stream=False, context_block=context_block)
-    try:
-        result = await provider.chat(req)
-    except ProviderError as exc:
-        raise AppError("llm.provider_error", str(exc), 502) from exc
-    payload = result.model_dump()
-    payload["citations"] = [c.model_dump(mode="json") for c in citations]
-    return payload
+    specs, executor = await _playground_tooling(session, ctx, agent, version, provider)
+    if specs:
+        req.tools = specs
+    result = TurnResult()
+    async for _ev in run_turn(
+        provider, req, [c.model_dump(mode="json") for c in citations], result,
+        executor=executor, max_iters=settings.tool_max_iterations,
+    ):
+        pass
+    if result.error:
+        raise AppError("llm.provider_error", result.error, 502)
+    return {
+        "content": result.content.strip(),
+        "citations": result.citations,
+        "tool_runs": result.tool_runs,
+        "provider": result.provider,
+        "model": result.model,
+        "usage": {"prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens},
+    }
 
 
 async def agent_count(session: AsyncSession, org_id: uuid.UUID) -> int:

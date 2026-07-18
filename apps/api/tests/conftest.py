@@ -55,3 +55,17 @@ def _clear_email_outbox() -> AsyncIterator[None]:
     get_email_backend().outbox.clear()
     yield
     get_email_backend().outbox.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter() -> None:
+    """Reset the rate limiter between tests.
+
+    Clears the in-memory buckets and drops any cached async Redis client so it rebinds to the
+    current test's event loop (the sync-TestClient WS test closes the previous one).
+    """
+    from app.core.ratelimit import limiter
+
+    limiter._mem.clear()
+    limiter._redis = None
+    limiter._checked = False

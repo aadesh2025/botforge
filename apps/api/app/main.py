@@ -20,6 +20,7 @@ from app.modules.conversations.router import router as conversations_router
 from app.modules.credentials.router import router as credentials_router
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.orgs.router import router as orgs_router
+from app.tools.router import router as tools_router
 
 log = get_logger("app")
 
@@ -70,6 +71,7 @@ def create_app() -> FastAPI:
     app.include_router(agents_router)
     app.include_router(knowledge_router)
     app.include_router(conversations_router)
+    app.include_router(tools_router)
 
     return app
 
