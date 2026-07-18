@@ -4,6 +4,7 @@ import {
   BookOpen,
   Inbox,
   BarChart3,
+  MessagesSquare,
   Workflow,
   Settings,
   type LucideIcon,
@@ -36,6 +37,7 @@ export const nav: NavGroup[] = [
   {
     heading: "Operate",
     items: [
+      { label: "Conversations", href: "/conversations", icon: MessagesSquare },
       { label: "Inbox", href: "/inbox", icon: Inbox, badge: 3 },
       { label: "Analytics", href: "/analytics", icon: BarChart3 },
     ],
