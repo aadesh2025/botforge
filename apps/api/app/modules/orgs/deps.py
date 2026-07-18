@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import rbac
 from app.core.errors import AppError
 from app.core.security import decode_access_token
 from app.db.session import get_session
@@ -26,9 +27,16 @@ class OrgContext:
     user: User
     via: str = "jwt"  # jwt | apikey
     scopes: list[str] = field(default_factory=list)
+    role_override: str | None = None  # set for scoped API keys (least-privilege effective role)
 
     @property
     def role(self) -> str:
+        """The effective role used for RBAC — a scoped API key downgrades this."""
+        return self.role_override or self.membership.role
+
+    @property
+    def member_role(self) -> str:
+        """The underlying membership role, ignoring any API-key scope downgrade."""
         return self.membership.role
 
 
@@ -85,6 +93,8 @@ async def current_org(
         ctx = await _load_context(session, user, key.organization_id)
         ctx.via = "apikey"
         ctx.scopes = list(key.scopes)
+        # Enforce scopes: the key acts with a role capped by its scope tier (least privilege).
+        ctx.role_override = rbac.scope_effective_role(ctx.membership.role, ctx.scopes)
         return ctx
 
     # JWT path.

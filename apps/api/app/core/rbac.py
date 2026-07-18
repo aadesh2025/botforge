@@ -33,6 +33,41 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
 # Roles that can be assigned via member management (owner is set only via transfer).
 ASSIGNABLE_ROLES = ("admin", "editor", "viewer", "operator")
 
+# ── API-key scopes ────────────────────────────────────────────────────────────────
+# Scopes are coarse tiers issued on API keys. Each tier grants the permission set of a
+# role; the key's *effective* role is the tier bounded by (never exceeding) the creating
+# member's role — least privilege wins. `admin` deliberately maps to the `admin` role, not
+# `owner`, so an API key can never perform owner-only actions (e.g. deleting the org).
+SCOPES = ("read", "write", "admin")
+_SCOPE_TIER_ROLE = {"read": "viewer", "write": "editor", "admin": "admin"}
+_ROLE_RANK = {"viewer": 1, "operator": 1, "editor": 2, "admin": 3, "owner": 4}
+
+
+def scope_effective_role(creator_role: str, scopes: list[str]) -> str:
+    """The role an API key acts as: its scope tier, capped by the creating member's role.
+
+    No scopes ⇒ the key acts with the creator's full role (backward compatible). Unknown
+    scope strings are treated as the ``write`` tier unless they clearly denote read-only.
+    """
+    if not scopes:
+        return creator_role
+    tier = "read"
+    for raw in scopes:
+        s = raw.strip().lower()
+        if s in ("admin", "*", "owner"):
+            tier = "admin"
+            break
+        if s == "read" or s.endswith(":read"):
+            continue
+        # any non-read scope ("write", "agents:write", "tools:manage", …) grants the write tier
+        if tier != "admin":
+            tier = "write"
+    scope_role = _SCOPE_TIER_ROLE[tier]
+    # Least privilege: never grant more than the creating member already has.
+    if _ROLE_RANK.get(scope_role, 4) <= _ROLE_RANK.get(creator_role, 0):
+        return scope_role
+    return creator_role
+
 
 def has_permission(role: str, permission: str) -> bool:
     return permission in ROLE_PERMISSIONS.get(role, set())

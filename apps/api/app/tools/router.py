@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.core.ratelimit import rate_limit
 from app.db.session import get_session
 from app.integrations.n8n_client import verify_callback
 from app.modules.orgs.deps import OrgContext, current_org
@@ -33,7 +34,7 @@ async def bind_n8n_workflow(
     return await service.bind_n8n_workflow(session, ctx, data)
 
 
-@router.post("/n8n/callback")
+@router.post("/n8n/callback", dependencies=[Depends(rate_limit("n8n_callback", limit=120, window=60))])
 async def n8n_callback(
     request: Request, session: AsyncSession = Depends(get_session)
 ) -> dict[str, bool]:

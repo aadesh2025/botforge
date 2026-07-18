@@ -15,12 +15,16 @@ from app.channels.base import get_channel
 from app.channels.whatsapp import WhatsAppChannel
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.core.ratelimit import rate_limit
 from app.db.session import get_session
 from app.modules.orgs.deps import OrgContext, current_org
 
 log = get_logger("channels.router")
 
 router = APIRouter(prefix="/v1/channels", tags=["channels"])
+
+# Public inbound webhooks are unauthenticated (signature-verified): throttle per source IP.
+_webhook_rl = Depends(rate_limit("channel_webhook", limit=120, window=60))
 
 
 # ── Authenticated CRUD ──────────────────────────────────────────────────────────
@@ -113,7 +117,7 @@ async def _run_and_send(session: AsyncSession, channel: Any, adapter: Any, paylo
         await adapter.send(channel, msg.external_user_id, reply)
 
 
-@router.post("/telegram/{channel_id}/webhook")
+@router.post("/telegram/{channel_id}/webhook", dependencies=[_webhook_rl])
 async def telegram_webhook(
     channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
 ) -> dict[str, bool]:
@@ -122,7 +126,7 @@ async def telegram_webhook(
     return {"ok": True}
 
 
-@router.get("/whatsapp/{channel_id}/webhook")
+@router.get("/whatsapp/{channel_id}/webhook", dependencies=[_webhook_rl])
 async def whatsapp_verify(
     channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
 ) -> PlainTextResponse:
@@ -137,7 +141,7 @@ async def whatsapp_verify(
     return PlainTextResponse(challenge)
 
 
-@router.post("/whatsapp/{channel_id}/webhook")
+@router.post("/whatsapp/{channel_id}/webhook", dependencies=[_webhook_rl])
 async def whatsapp_webhook(
     channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
 ) -> dict[str, bool]:
@@ -146,7 +150,7 @@ async def whatsapp_webhook(
     return {"ok": True}
 
 
-@router.post("/slack/{channel_id}/events")
+@router.post("/slack/{channel_id}/events", dependencies=[_webhook_rl])
 async def slack_events(
     channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
 ) -> dict[str, Any]:
@@ -157,7 +161,7 @@ async def slack_events(
     return {"ok": True}
 
 
-@router.post("/discord/{channel_id}/interactions")
+@router.post("/discord/{channel_id}/interactions", dependencies=[_webhook_rl])
 async def discord_interactions(
     channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
 ) -> dict[str, Any]:

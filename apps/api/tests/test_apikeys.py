@@ -59,6 +59,36 @@ async def test_revoked_and_invalid_keys_rejected(client: AsyncClient) -> None:
     assert (await client.get("/v1/agents", headers={"X-API-Key": "bf_totally_invalid"})).status_code == 401
 
 
+async def test_read_scoped_key_cannot_write(client: AsyncClient) -> None:
+    headers = await _headers(client, "akscope@example.com")
+    read_key = (
+        await client.post("/v1/apikeys", json={"name": "ro", "scopes": ["read"]}, headers=headers)
+    ).json()["key"]
+    write_key = (
+        await client.post("/v1/apikeys", json={"name": "rw", "scopes": ["write"]}, headers=headers)
+    ).json()["key"]
+
+    # Read scope: list (READ) works, create-agent (AGENTS_WRITE) is forbidden.
+    assert (await client.get("/v1/agents", headers={"X-API-Key": read_key})).status_code == 200
+    denied = await client.post("/v1/agents", json={"name": "X"}, headers={"X-API-Key": read_key})
+    assert denied.status_code == 403, denied.text
+    assert denied.json()["error"]["code"] == "org.forbidden"
+
+    # Write scope: create-agent succeeds.
+    ok = await client.post("/v1/agents", json={"name": "Y"}, headers={"X-API-Key": write_key})
+    assert ok.status_code == 201, ok.text
+
+    # A write-scoped key still cannot manage members: org-admin routes are JWT-only
+    # (path-scoped org_context), so an API key is rejected there entirely — least privilege.
+    org_id = headers["X-Org-Id"]
+    forbidden = await client.post(
+        f"/v1/orgs/{org_id}/invitations",
+        json={"email": "nope@example.com", "role": "viewer"},
+        headers={"X-API-Key": write_key},
+    )
+    assert forbidden.status_code in (401, 403)
+
+
 async def test_viewer_cannot_create_api_key(client: AsyncClient) -> None:
     owner = await _headers(client, "akowner@example.com")
     org_id = owner["X-Org-Id"]

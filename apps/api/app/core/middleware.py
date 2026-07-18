@@ -10,9 +10,45 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.core.config import settings
 from app.core.logging import get_logger
 
 log = get_logger("http")
+
+# A conservative API-only CSP: the API serves JSON, not HTML, so nothing needs to load.
+# (The Next.js frontend sets its own CSP; the embeddable widget is served from /widget.js.)
+_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    "Content-Security-Policy": _CSP,
+}
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Attach security headers to every response (docs/02 §Security, docs/SECURITY.md).
+
+    HSTS is only emitted in production (behind TLS) — it would wrongly pin http:// in dev.
+    """
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        # Swagger/ReDoc need to load their own JS/CSS; skip the strict CSP for the docs UIs only.
+        is_docs = request.url.path in ("/docs", "/redoc") or request.url.path.startswith("/docs/")
+        for header, value in _SECURITY_HEADERS.items():
+            if is_docs and header in ("Content-Security-Policy", "X-Frame-Options"):
+                continue
+            response.headers.setdefault(header, value)
+        if settings.is_prod:
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+            )
+        return response
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
