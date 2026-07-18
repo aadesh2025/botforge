@@ -99,6 +99,29 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   return (await res.json()) as T;
 }
 
+/** Upload multipart form data (used for document file uploads). */
+export async function apiForm<T>(path: string, form: FormData): Promise<T> {
+  const headers: Record<string, string> = {};
+  const token = getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const orgId = getActiveOrgId();
+  if (orgId) headers["X-Org-Id"] = orgId;
+  // Note: no Content-Type — the browser sets the multipart boundary itself.
+
+  const send = () => fetch(`${API_BASE}${path}`, { method: "POST", headers, body: form });
+  let res = await send();
+  if (res.status === 401 && getRefreshToken()) {
+    if (await tryRefresh()) {
+      const token2 = getAccessToken();
+      if (token2) headers.Authorization = `Bearer ${token2}`;
+      res = await send();
+    }
+  }
+  if (!res.ok) throw await toError(res);
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
 /** Open an SSE stream (used by the playground). Yields parsed data objects. */
 export async function* apiStream(
   path: string,

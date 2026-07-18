@@ -36,6 +36,36 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-021: RAG pipeline shape — char-based chunking, hybrid RRF, fake-embed KBs for tests
+- **Date:** 2026-07-18
+- **Status:** accepted
+- **Context:** Phase 7 knowledge base & RAG.
+- **Decisions:**
+  - **Ingestion is a plain async function** (`app/rag/ingest.ingest_document`) that the Celery
+    task (`app/worker/tasks`) wraps with its own committing session. This keeps the whole
+    pipeline directly testable against the transaction-rolled-back test session (call it
+    inline) without a broker, exactly mirroring how playground tests inject a fake provider.
+  - **`chunk_size`/`chunk_overlap` are interpreted in characters** (not tokens). The spec cited
+    "~800 tokens/100 overlap" but the KB model ships `1000/150`; treating those as characters is
+    predictable, tokenizer-free, and good enough for retrieval. `token_count` uses a ~4-chars/token
+    estimate to avoid a heavy tokenizer dependency.
+  - **Retrieval = pgvector cosine top-k, optional hybrid** merging a Postgres full-text
+    (`ts_rank`) list via reciprocal rank fusion (k=60). `score_threshold` filters vector
+    candidates; lexical (FTS) hits bypass it, so hybrid still surfaces exact-term matches whose
+    vector similarity is below threshold (their displayed `score` is the vector similarity, 0.0
+    when they were an FTS-only hit). Note: `plainto_tsquery` ANDs terms, so a query only
+    lexically matches when *all* its non-stopword tokens appear in a chunk.
+  - **Embedding provider per KB**, resolved by `build_embedding_provider(kb.embedding_provider,
+    …)`. `"fake"` returns a deterministic `FakeEmbeddingProvider(dim=768)` matching the
+    `chunks.embedding vector(768)` column, so DB-backed ingestion/retrieval/RAG tests need no
+    Ollama/network. Real KBs default to Ollama `nomic-embed-text` (dim 768).
+  - **Indexes** added in migration `0004`: HNSW `vector_cosine_ops` on `chunks.embedding` and a
+    GIN index on `to_tsvector('english', content)`.
+  - **Citations over the wire:** `StreamEvent` gained a `citations` field + a `"citations"`
+    event type (plain dicts, so the LLM layer stays independent of the RAG package); the
+    playground emits one `citations` event before the provider stream and includes citations in
+    the non-streaming response.
+
 ### ADR-020: Two streaming/credential bugs found via the live integration test
 - **Date:** 2026-07-17
 - **Status:** accepted

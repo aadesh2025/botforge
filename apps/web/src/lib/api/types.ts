@@ -88,3 +88,56 @@ export interface ApiCredential {
   is_default: boolean;
   created_at: string;
 }
+
+export interface ApiKnowledgeBase {
+  id: string;
+  name: string;
+  description: string | null;
+  embedding_provider: string;
+  embedding_model: string;
+  chunk_size: number;
+  chunk_overlap: number;
+  document_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ApiDocStatus = "queued" | "processing" | "ready" | "failed";
+
+export interface ApiDocument {
+  id: string;
+  knowledge_base_id: string;
+  source_type: "file" | "url" | "text";
+  filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  source_url: string | null;
+  status: ApiDocStatus;
+  error_message: string | null;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiChunk {
+  id: string;
+  ordinal: number;
+  content: string;
+  token_count: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface ApiCitation {
+  chunk_id: string;
+  document_id: string;
+  knowledge_base_id: string;
+  ordinal: number;
+  content: string;
+  score: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface ApiSearchResponse {
+  query: string;
+  citations: ApiCitation[];
+}
