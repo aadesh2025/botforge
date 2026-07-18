@@ -1,14 +1,25 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, MessageSquare } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Copy, Hash, Loader2, MessageSquare, Phone, Plus, Send, Trash2 } from "lucide-react";
 import { Field, SectionCard } from "@/components/builder/field";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useBuilder } from "@/lib/store/builder";
 import { getAgent } from "@/lib/api/agents";
 import { API_BASE } from "@/lib/api/config";
+import {
+  createChannel,
+  deleteChannel,
+  disableChannel,
+  enableChannel,
+  listChannels,
+  type ChannelType,
+} from "@/lib/api/channels";
 
 export function ChannelsTab() {
   const draft = useBuilder((s) => s.draft);
@@ -39,6 +50,7 @@ export function ChannelsTab() {
   };
 
   return (
+    <div className="space-y-6">
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <div className="space-y-6">
         <SectionCard title="Web widget" description="An embeddable chat bubble for any website.">
@@ -132,6 +144,181 @@ export function ChannelsTab() {
         </div>
       </div>
     </div>
+
+    {agentId && <MessagingChannels agentId={agentId} />}
+    </div>
+  );
+}
+
+const CHANNEL_SPECS: Record<
+  ChannelType,
+  { label: string; icon: typeof Send; fields: { key: string; label: string; secret?: boolean }[]; hint: string }
+> = {
+  telegram: {
+    label: "Telegram",
+    icon: Send,
+    fields: [{ key: "bot_token", label: "Bot token (from @BotFather)", secret: true }],
+    hint: "On enable, BotForge auto-registers the webhook with Telegram — nothing else to do.",
+  },
+  whatsapp: {
+    label: "WhatsApp (Meta)",
+    icon: Phone,
+    fields: [
+      { key: "phone_number_id", label: "Phone number ID" },
+      { key: "access_token", label: "Access token", secret: true },
+      { key: "verify_token", label: "Verify token (you choose)" },
+      { key: "app_secret", label: "App secret", secret: true },
+    ],
+    hint: "Set the webhook URL below in Meta → WhatsApp → Configuration, using your verify token.",
+  },
+  slack: {
+    label: "Slack",
+    icon: Hash,
+    fields: [
+      { key: "bot_token", label: "Bot token (xoxb-…)", secret: true },
+      { key: "signing_secret", label: "Signing secret", secret: true },
+    ],
+    hint: "Set the Event Subscriptions request URL below and subscribe to message / app_mention events.",
+  },
+  discord: {
+    label: "Discord",
+    icon: MessageSquare,
+    fields: [
+      { key: "public_key", label: "Application public key" },
+      { key: "bot_token", label: "Bot token (optional)", secret: true },
+    ],
+    hint: "Set the Interactions Endpoint URL below in the Discord developer portal.",
+  },
+};
+
+function MessagingChannels({ agentId }: { agentId: string }) {
+  const qc = useQueryClient();
+  const [connecting, setConnecting] = useState<ChannelType | null>(null);
+
+  const { data: channels } = useQuery({
+    queryKey: ["channels", agentId],
+    queryFn: () => listChannels(agentId),
+    enabled: Boolean(agentId),
+  });
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["channels", agentId] });
+  const toggle = useMutation({
+    mutationFn: ({ id, on }: { id: string; on: boolean }) => (on ? enableChannel(id) : disableChannel(id)),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({ mutationFn: (id: string) => deleteChannel(id), onSuccess: invalidate });
+
+  const byType = new Map((channels ?? []).map((c) => [c.type, c]));
+
+  return (
+    <SectionCard title="Messaging channels" description="Connect your agent to chat platforms.">
+      <ul className="space-y-2">
+        {(Object.keys(CHANNEL_SPECS) as ChannelType[]).map((type) => {
+          const spec = CHANNEL_SPECS[type];
+          const ch = byType.get(type);
+          const Icon = spec.icon;
+          return (
+            <li key={type} className="rounded-md border border-border bg-surface-2/50 p-3">
+              <div className="flex items-center gap-3">
+                <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+                  <Icon className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-text">{spec.label}</span>
+                    {ch && <Badge variant={ch.enabled ? "success" : "default"}>{ch.enabled ? "Live" : "Connected"}</Badge>}
+                  </div>
+                </div>
+                {ch ? (
+                  <div className="flex items-center gap-2">
+                    <Switch checked={ch.enabled} onCheckedChange={(on) => toggle.mutate({ id: ch.id, on })} />
+                    <button
+                      onClick={() => remove.mutate(ch.id)}
+                      className="rounded-md p-1.5 text-faint transition-colors hover:bg-surface-2 hover:text-error"
+                      title="Disconnect"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={() => setConnecting(type)}>
+                    <Plus /> Connect
+                  </Button>
+                )}
+              </div>
+              {ch?.webhook_url && (
+                <div className="mt-2 truncate rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[11px] text-faint">
+                  {ch.webhook_url}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <ConnectDialog
+        type={connecting}
+        agentId={agentId}
+        onClose={() => setConnecting(null)}
+        onConnected={invalidate}
+      />
+    </SectionCard>
+  );
+}
+
+function ConnectDialog({
+  type,
+  agentId,
+  onClose,
+  onConnected,
+}: {
+  type: ChannelType | null;
+  agentId: string;
+  onClose: () => void;
+  onConnected: () => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const spec = type ? CHANNEL_SPECS[type] : null;
+
+  const create = useMutation({
+    mutationFn: () => createChannel({ agent_id: agentId, type: type!, config: values }),
+    onSuccess: () => {
+      setValues({});
+      onClose();
+      onConnected();
+    },
+  });
+
+  return (
+    <Dialog open={Boolean(type)} onOpenChange={(o) => !o && (setValues({}), onClose())}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Connect {spec?.label}</DialogTitle>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            create.mutate();
+          }}
+          className="space-y-3"
+        >
+          {spec?.fields.map((f) => (
+            <div key={f.key}>
+              <label className="mb-1 block text-xs text-muted">{f.label}</label>
+              <Input
+                type={f.secret ? "password" : "text"}
+                value={values[f.key] ?? ""}
+                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              />
+            </div>
+          ))}
+          <p className="text-xs text-faint">{spec?.hint}</p>
+          {create.isError && <p className="text-sm text-error">{(create.error as Error).message}</p>}
+          <Button type="submit" variant="primary" className="w-full" disabled={create.isPending}>
+            {create.isPending && <Loader2 className="size-4 animate-spin" />} Connect
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
