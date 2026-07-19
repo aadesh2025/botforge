@@ -3,7 +3,14 @@
 > **Read this first, then continue the build.** This file is the pick-up point for the next
 > session. It records what's done, what's half-done, and exactly what to do next.
 
-Last updated: **2026-07-19** · Latest tag: `phase-17-complete` (commit `b6d562c`) · Branch: `master`
+Last updated: **2026-07-19** · Latest tag: `phase-20-complete` · Branch: `master`
+
+> ## ✅ BUILD COMPLETE — all phases 0–20 done (18 = billing, deferred by design).
+> Phases 19 (E2E/docs/polish + Next 16 upgrade) and 20 (production deploy) shipped this run.
+> **162 backend tests pass; 10/10 Playwright E2E green; ruff+mypy+tsc+eslint clean; `npm audit` 0.**
+> See the FINAL PROJECT SUMMARY at the end of the run and `docs/PROGRESS.md`. What a human must
+> still do to deploy: supply real secrets (`SECRET_KEY`, one LLM key, channel/OAuth keys as needed),
+> a domain + DNS for `$DOMAIN`/`$API_DOMAIN`, and run `docker compose -f infra/docker-compose.prod.yml up -d`.
 
 ---
 
