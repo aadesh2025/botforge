@@ -8,10 +8,19 @@
 - ✅ **JWT access + refresh**: HS256 signed with `SECRET_KEY`. We do **not** use asymmetric/ECDSA
   JWTs (see the `ecdsa` advisory in §8).
 - ✅ **Magic links / OAuth**: tokens are single-use / signed; provider secrets read from env only.
-- ⚠️ **Web token storage**: the Next.js client stores the access token in a **JS-readable cookie**,
-  not `httpOnly`. Moving to httpOnly (via a Next route-handler BFF proxy) is **deferred** — tracked
-  as required prod hardening (ADR-019, PROGRESS roadmap). Mitigations in place: short access-token
-  TTL + refresh rotation, strict CORS, and the API never reflects tokens.
+- ✅ **Web token storage (refresh) — httpOnly (Phase 20).** The long-lived **refresh token** now
+  lives in an `httpOnly`, `SameSite=Lax` (`Secure` in prod) cookie set by a Next BFF
+  (`/api/auth/{login,signup,refresh,logout}`, `src/app/api/auth`). JS never touches it, so an XSS
+  can no longer exfiltrate the persistent credential; refresh + rotation happen server-side.
+- ⚠️ **Web token storage (access) — remains JS-readable, by architecture.** The short-lived access
+  token stays in a JS cookie because the browser calls the FastAPI API **cross-origin** with a
+  `Bearer` header, streams SSE, and opens the operator-inbox **WebSocket** with the token as a query
+  param (`/v1/inbox/ws?token=`). A full httpOnly migration would require proxying **all** API calls,
+  SSE, and WebSockets through Next (the API is a separate origin and cross-origin WS handshakes don't
+  send the web-origin cookie) — a larger re-architecture than the marginal gain warrants. Residual
+  risk is bounded: the access token is short-TTL (~15–30 min) and rotates, CORS is strict, and the
+  most damaging credential (refresh) is now out of JS reach. Revisit if the web app and API are ever
+  co-located behind one origin.
 
 ## 2. Authorization & multi-tenancy
 - ✅ **Tenant isolation**: every org-scoped query is filtered by `organization_id`; org resolved via
@@ -79,7 +88,8 @@ Advisory (non-blocking) `pip-audit` + `npm audit` run in CI. Results as of 2026-
   vulnerabilities.**
 
 ## 9. Known gaps / follow-ups (tracked in PROGRESS roadmap)
-- httpOnly cookie migration for web auth tokens (§1).
+- ~~httpOnly cookie migration for web auth tokens (§1).~~ **Refresh token DONE (Phase 20);** access
+  token stays JS-readable by cross-origin+WS architecture (documented in §1).
 - ~~Next.js major upgrade to clear the web advisories (§8).~~ **DONE — Phase 19.**
 - Realtime hub → Redis pub/sub before multi-node prod (ADR-028).
 - Webhook retry beat-sweep for `pending` deliveries past `next_retry_at`.

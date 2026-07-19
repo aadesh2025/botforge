@@ -2,9 +2,11 @@
 
 import { COOKIE } from "./config";
 
-// Cookie-backed token storage. Non-httpOnly so the SPA can read them and the
-// middleware can gate routes. For production, move to httpOnly cookies set by a
-// Next route handler (see docs/05 §1).
+// Client-side token storage. The long-lived REFRESH token is NOT here — it lives in an
+// httpOnly cookie set by the Next BFF (`/api/auth/*`), unreadable by JS. Only the short-lived
+// access token + active org are kept as JS-readable cookies, because the cross-origin API
+// calls, SSE streams, and the operator-inbox WebSocket (`?token=`) all need the access token
+// in JS. See docs/SECURITY.md §1 / ADR-019.
 
 function setCookie(name: string, value: string, maxAgeSec: number) {
   if (typeof document === "undefined") return;
@@ -25,16 +27,12 @@ function delCookie(name: string) {
 export function getAccessToken() {
   return getCookie(COOKIE.access);
 }
-export function getRefreshToken() {
-  return getCookie(COOKIE.refresh);
-}
 export function getActiveOrgId() {
   return getCookie(COOKIE.org);
 }
 
-export function setTokens(access: string, refresh: string) {
-  setCookie(COOKIE.access, access, 60 * 30); // access ~30m window on the client
-  setCookie(COOKIE.refresh, refresh, 60 * 60 * 24 * 30);
+export function setAccessToken(access: string) {
+  setCookie(COOKIE.access, access, 60 * 30); // ~30m client window; rotated via the BFF refresh
 }
 
 export function setActiveOrgId(orgId: string) {
@@ -43,6 +41,6 @@ export function setActiveOrgId(orgId: string) {
 
 export function clearAuth() {
   delCookie(COOKIE.access);
-  delCookie(COOKIE.refresh);
   delCookie(COOKIE.org);
+  // The httpOnly refresh cookie is cleared server-side by POST /api/auth/logout.
 }

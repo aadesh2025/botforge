@@ -1,7 +1,7 @@
 "use client";
 
 import { API_BASE } from "./config";
-import { clearAuth, getAccessToken, getActiveOrgId, getRefreshToken, setTokens } from "./tokens";
+import { clearAuth, getAccessToken, getActiveOrgId, setAccessToken } from "./tokens";
 
 export class ApiError extends Error {
   code: string;
@@ -42,22 +42,17 @@ async function toError(res: Response): Promise<ApiError> {
 let refreshing: Promise<boolean> | null = null;
 
 async function tryRefresh(): Promise<boolean> {
-  const refresh = getRefreshToken();
-  if (!refresh) return false;
+  // Refresh through the same-origin BFF; the httpOnly refresh cookie rides along automatically.
   if (!refreshing) {
     refreshing = (async () => {
       try {
-        const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: refresh }),
-        });
+        const res = await fetch(`/api/auth/refresh`, { method: "POST" });
         if (!res.ok) {
           clearAuth();
           return false;
         }
         const data = await res.json();
-        setTokens(data.access_token, data.refresh_token);
+        setAccessToken(data.access_token);
         return true;
       } finally {
         refreshing = null;
@@ -88,7 +83,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   };
 
   let res = await fetch(`${API_BASE}${path}`, init);
-  if (res.status === 401 && getRefreshToken()) {
+  if (res.status === 401) {
     if (await tryRefresh()) {
       init.headers = buildHeaders(orgScoped);
       res = await fetch(`${API_BASE}${path}`, init);
@@ -110,7 +105,7 @@ export async function apiForm<T>(path: string, form: FormData): Promise<T> {
 
   const send = () => fetch(`${API_BASE}${path}`, { method: "POST", headers, body: form });
   let res = await send();
-  if (res.status === 401 && getRefreshToken()) {
+  if (res.status === 401) {
     if (await tryRefresh()) {
       const token2 = getAccessToken();
       if (token2) headers.Authorization = `Bearer ${token2}`;
