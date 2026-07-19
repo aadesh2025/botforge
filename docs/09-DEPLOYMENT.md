@@ -63,11 +63,15 @@ cd infra && docker compose -f docker-compose.prod.yml up -d --build
   no PII); a no-op otherwise.
 - LLM call tracing (provider/model/tokens/latency/cost/fallback) recorded on every message.
 
-## 6. CI/CD (`.github/workflows/`)
-- **ci.yml**: on push/PR — install, lint (`ruff`,`eslint`), typecheck (`mypy`,`tsc`), unit
-  tests (`pytest`,`vitest`), build web, spin compose + run Playwright E2E, upload artifacts.
-- **release.yml**: on tag — build & push api/web images to registry, run migrations, deploy
-  (compose over SSH or к8s), smoke test `/readyz`.
+## 6. CI/CD (`.github/workflows/`)  *(implemented)*
+- **ci.yml**: on push/PR — API lint (`ruff`) + typecheck (`mypy`) + `pytest` (pg+redis service
+  containers), web lint (`eslint`) + typecheck (`tsc`) + `next build`, a dependency audit, and the
+  **e2e** job (boots api+worker+web, runs the Playwright PRD suite, uploads the report + logs).
+- **release.yml**: on push to `main` + `v*` tags — **build & push** `botforge-api`/`botforge-web`
+  images to **GHCR** (`docker/build-push-action`, gha cache); a **smoke** job builds the API image,
+  runs `alembic upgrade head`, starts it against pg+redis and asserts **`/readyz` → 200**; a
+  **deploy** job (tags/dispatch, `environment: production`) is an SSH template gated on a
+  `DEPLOY_HOST` secret that runs the prod compose (one-shot migrate) + a post-deploy `/readyz` smoke.
 - Cache deps; fail the pipeline on any lint/type/test error (matches Definition of Done).
 
 ## 7. Scaling notes
