@@ -143,6 +143,9 @@ async def get_chat_provider(
     agent_id: uuid.UUID | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> ChatProvider:
+    # E2E/CI override: run every agent on the deterministic Fake provider (no keys).
+    if settings.llm_force_fake:
+        return FakeChatProvider()
     api_key, base_url = await resolve_credential(session, org_id, provider, agent_id=agent_id)
     meta = PROVIDER_CATALOG.get(provider, {})
     if meta.get("requires_key", True) and not api_key:
@@ -162,6 +165,9 @@ def build_embedding_provider(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> EmbeddingProvider:
     """Resolve an embedding provider by name. `fake` is used by tests (matches the KB dim)."""
+    # E2E/CI override: deterministic keyless embeddings for the whole pipeline.
+    if settings.llm_force_fake:
+        return FakeEmbeddingProvider(dim=dim)
     if provider in ("ollama", "openai", "gemini"):
         # All non-fake providers currently route through Ollama's local endpoint (free-first).
         # Real OpenAI/Gemini embedding adapters can be added later behind this same factory.

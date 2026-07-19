@@ -61,6 +61,9 @@ for prod; local default in dev.
   injected into a prompt (token budgeting; oldest/lowest-ranked citations are trimmed first).
 - `CELERY_TASK_ALWAYS_EAGER` (default `false`) — when true, Celery tasks (document ingestion)
   run inline in-process instead of via the worker/broker. Handy for dev/tests; never in prod.
+- `LLM_FORCE_FAKE` (default `false`) — when true, every chat and embedding call is forced onto
+  the deterministic Fake provider regardless of the agent's configured provider. Used by the
+  Playwright E2E suite so CI needs no paid keys and no local model pulls. **Never set in prod.**
 
 ## Chat runtime, memory & tools
 - `MEMORY_WINDOW_MESSAGES` (default `12`) — how many recent turns stay verbatim in the prompt.

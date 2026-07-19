@@ -61,6 +61,7 @@ def _channel_out(channel: Channel, adapter: BaseChannel) -> schemas.ChannelOut:
         enabled=channel.enabled,
         config=_mask(adapter, channel.config),
         webhook_url=_webhook_url(channel),
+        webhook_secret=channel.webhook_secret,
         created_at=channel.created_at,
     )
 

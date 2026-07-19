@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     rag_context_char_budget: int = 8000
     # Run Celery tasks inline (no broker/worker) — handy in dev/tests. Off in prod.
     celery_task_always_eager: bool = False
+    # Force every chat + embedding call onto the deterministic Fake provider,
+    # regardless of the agent's configured provider. Test/E2E only — lets CI run
+    # the full product flows with no paid keys and no local model pulls. Never in prod.
+    llm_force_fake: bool = False
 
     # --- Chat runtime / memory ---
     # How many recent turns (user+assistant messages) to keep verbatim in the prompt.

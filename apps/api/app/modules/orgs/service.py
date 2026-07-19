@@ -233,6 +233,7 @@ async def create_invitation(
         role=invitation.role,
         expires_at=invitation.expires_at,
         created_at=invitation.created_at,
+        accept_token=None if settings.is_prod else raw,
     )
 
 

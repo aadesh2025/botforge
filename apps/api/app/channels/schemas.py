@@ -32,4 +32,7 @@ class ChannelOut(BaseModel):
     enabled: bool
     config: dict[str, Any]  # secrets masked
     webhook_url: str | None
+    # Shared secret the provider echoes back to prove an inbound webhook is genuine.
+    # Shown to the channel owner so they can configure the provider side (and verify).
+    webhook_secret: str | None
     created_at: dt.datetime

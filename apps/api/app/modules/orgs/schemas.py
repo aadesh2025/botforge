@@ -57,6 +57,9 @@ class InvitationOut(BaseModel):
     role: str
     expires_at: dt.datetime
     created_at: dt.datetime
+    # Raw accept token — returned ONLY outside production (email delivers it in prod).
+    # Lets local/dev/CI accept an invite without a live SMTP inbox.
+    accept_token: str | None = None
 
 
 class TransferOwnershipRequest(BaseModel):
