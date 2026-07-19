@@ -2,15 +2,24 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { nav } from "@/lib/nav";
+import { ShieldAlert } from "lucide-react";
+import { nav, type NavGroup } from "@/lib/nav";
+import { useSession } from "@/lib/store/session";
 import { cn } from "@/lib/utils";
+
+const STAFF_GROUP: NavGroup = {
+  heading: "Platform",
+  items: [{ label: "Admin", href: "/admin", icon: ShieldAlert }],
+};
 
 export function SidebarNav({ collapsed }: { collapsed: boolean }) {
   const pathname = usePathname();
+  const isStaff = useSession((s) => Boolean(s.user?.is_staff));
+  const groups = isStaff ? [...nav, STAFF_GROUP] : nav;
 
   return (
     <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 py-4 no-scrollbar">
-      {nav.map((group, gi) => (
+      {groups.map((group, gi) => (
         <div key={gi} className="flex flex-col gap-1">
           {group.heading && !collapsed && (
             <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-faint">

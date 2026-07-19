@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-const PROTECTED = ["/dashboard", "/agents", "/knowledge", "/inbox", "/analytics", "/automations", "/settings"];
+const PROTECTED = ["/dashboard", "/agents", "/knowledge", "/inbox", "/analytics", "/automations", "/settings", "/admin"];
 const AUTH_ROUTES = ["/login", "/signup"];
 
 export function middleware(request: NextRequest) {
@@ -33,6 +33,7 @@ export const config = {
     "/analytics/:path*",
     "/automations/:path*",
     "/settings/:path*",
+    "/admin/:path*",
     "/login",
     "/signup",
   ],
