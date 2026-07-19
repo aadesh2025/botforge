@@ -116,3 +116,104 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  e2e:
+    name: E2E (Playwright · PRD criteria 1–7)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: botforge
+          POSTGRES_PASSWORD: botforge
+          POSTGRES_DB: botforge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U botforge"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      SECRET_KEY: ci-e2e-secret-key
+      DATABASE_URL: postgresql+asyncpg://botforge:botforge@localhost:5432/botforge
+      REDIS_URL: redis://localhost:6379/0
+      # Deterministic + keyless: every LLM/embedding call runs on the Fake provider.
+      LLM_FORCE_FAKE: "true"
+      # The suite creates many tenants; lift the auth throttle so it isn't rate-limited.
+      AUTH_RATE_LIMIT: "100000"
+      ENV: dev
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      E2E_API_URL: http://localhost:8000
+      E2E_WEB_URL: http://localhost:3001
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install API deps
+        working-directory: apps/api
+        run: uv sync
+
+      - name: Migrate database
+        working-directory: apps/api
+        run: uv run alembic upgrade head
+
+      - name: Start API + worker (Fake provider)
+        working-directory: apps/api
+        run: |
+          uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/api.log 2>&1 &
+          uv run celery -A app.worker.celery_app worker --pool=solo --loglevel=warning > /tmp/worker.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:8000/readyz > /dev/null; then echo "API ready"; break; fi
+            sleep 1
+          done
+          curl -sf http://localhost:8000/readyz
+
+      - name: Install web deps + browser
+        working-directory: apps/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Build + start web
+        working-directory: apps/web
+        run: |
+          npm run build
+          npx next start -p 3001 > /tmp/web.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:3001/login > /dev/null; then echo "Web ready"; break; fi
+            sleep 1
+          done
+
+      - name: Run Playwright E2E
+        working-directory: apps/web
+        run: npx playwright test
+
+      - name: Upload report + service logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+            /tmp/api.log
+            /tmp/worker.log
+            /tmp/web.log
+          retention-days: 7
+          if-no-files-found: ignore

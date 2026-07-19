@@ -44,6 +44,41 @@ recorded/mock provider so CI needs no paid keys). Journeys (mirror `01 §6`):
 Capture screenshots/video on failure. These specs must pass in CI before a phase that claims
 them is tagged.
 
+### 4.1 Implemented suite (Phase 19.1)
+
+Specs live in `apps/web/e2e/*.spec.ts` (config `apps/web/playwright.config.ts`, helpers
+`e2e/helpers.ts`, PDF fixture `e2e/fixtures/botforge-facts.pdf`). One spec per PRD criterion:
+
+| Spec | Criterion | Coverage |
+|---|---|---|
+| `01-onboarding-chat` | 1 | Full UI: signup → create org → create agent (Groq default) → playground chat. |
+| `02-knowledge-citations` | 2 | UI upload path + poll to **ready**; grounded chat returns non-empty **citations**. |
+| `03-widget` | 3 | Injects the real `/widget.js` on the web origin with a live public key; sends + asserts a reply. |
+| `04-telegram-channel` | 4 | Connect + enable a Telegram channel; **signed** inbound → persisted agent reply; bad secret → 401. |
+| `05-n8n-tool` | 5 | Bind an n8n workflow (by webhook URL) as an agent tool; assert it's attached + enabled.¹ |
+| `06-teammate-isolation` | 6 | Invite a viewer → accept → sees only org A's agents, never org B's; viewer create → 403. |
+| `07-analytics` | 7 | Generate turns; overview reports conversations + non-zero token usage; page renders. |
+
+**Keyless determinism.** The API under test runs with `LLM_FORCE_FAKE=true` (every chat +
+embedding call routes to the deterministic Fake provider — no paid keys, no model pulls) and a
+lifted `AUTH_RATE_LIMIT` (the suite mints many tenants). A **Celery worker** runs alongside the
+API so real ingestion (fake embeddings) drives criterion 2. `ENV=dev` exposes the invitation
+`accept_token` in the API response so criterion 6 can accept without SMTP.
+
+¹ The live n8n webhook **trigger** roundtrip (model decides to call → n8n runs → result fed back)
+requires a running n8n and the model emitting a tool call; it is covered by the backend suite
+(`tests/test_n8n.py`, verified live in Phase 10) rather than re-run in keyless CI. The E2E covers
+the binding + attachment surface.
+
+Run locally against a booted stack:
+```
+# API (fake provider) on :8000, a worker, and web on :3001, then:
+cd apps/web && E2E_API_URL=http://localhost:8000 E2E_WEB_URL=http://localhost:3001 npx playwright test
+```
+In CI the `e2e` job (`.github/workflows/ci.yml`) boots postgres+redis (service containers),
+migrates, starts the API + worker + `next start`, installs the chromium browser, and runs the
+suite; the HTML report + service logs upload as an artifact on every run.
+
 ## 5. Per-phase gates
 Each phase's "Gate" in `08-PHASES.md` must be green before tagging `phase-NN-complete`:
 run `make test` (unit+integration) + the relevant Playwright specs. If a gate can't be met
