@@ -136,6 +136,7 @@ function BindDialog({ workflow, onClose }: { workflow: ApiN8nWorkflow | null; on
 
   // Seed the tool name from the workflow when the dialog opens.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (workflow) setName(toToolName(workflow.name));
   }, [workflow]);
 

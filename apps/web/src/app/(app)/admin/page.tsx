@@ -74,8 +74,8 @@ export default function AdminPage() {
   );
 }
 
-function HealthPanel({ health }: { health: { database: boolean; redis: boolean } | undefined }) {
-  const Pill = ({ ok, label, icon: Icon }: { ok: boolean; label: string; icon: typeof Database }) => (
+function HealthPill({ ok, label, icon: Icon }: { ok: boolean; label: string; icon: typeof Database }) {
+  return (
     <div className="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2">
       <Icon className="size-4 text-faint" />
       <span className="text-sm text-text">{label}</span>
@@ -84,6 +84,9 @@ function HealthPanel({ health }: { health: { database: boolean; redis: boolean }
       </Badge>
     </div>
   );
+}
+
+function HealthPanel({ health }: { health: { database: boolean; redis: boolean } | undefined }) {
   return (
     <section className="rounded-lg border border-border bg-surface p-5">
       <div className="mb-4 flex items-center gap-2">
@@ -91,8 +94,8 @@ function HealthPanel({ health }: { health: { database: boolean; redis: boolean }
         <h3 className="font-display text-base font-semibold text-text">System health</h3>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Pill ok={Boolean(health?.database)} label="PostgreSQL" icon={Database} />
-        <Pill ok={Boolean(health?.redis)} label="Redis" icon={Server} />
+        <HealthPill ok={Boolean(health?.database)} label="PostgreSQL" icon={Database} />
+        <HealthPill ok={Boolean(health?.redis)} label="Redis" icon={Server} />
       </div>
     </section>
   );

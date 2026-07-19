@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 const PROTECTED = ["/dashboard", "/agents", "/knowledge", "/inbox", "/analytics", "/automations", "/settings", "/admin"];
 const AUTH_ROUTES = ["/login", "/signup"];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const authed = Boolean(request.cookies.get("bf_access")?.value);
 

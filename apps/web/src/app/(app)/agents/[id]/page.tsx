@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -21,16 +21,17 @@ import { useSession } from "@/lib/store/session";
 const TABS = ["persona", "model", "knowledge", "tools", "channels", "versions", "settings"] as const;
 type Tab = (typeof TABS)[number];
 
-export default function AgentBuilderPage({ params }: { params: { id: string } }) {
+export default function AgentBuilderPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const activeOrgId = useSession((s) => s.activeOrgId);
   const { draft, agentId, versionNumber, init, dirty, beginSave, markSaved, retarget } = useBuilder();
   const [tab, setTab] = useState<Tab>("persona");
   const loadedFor = useRef<string | null>(null);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["agent", params.id, activeOrgId],
+    queryKey: ["agent", id, activeOrgId],
     queryFn: async () => {
-      const [agent, versions] = await Promise.all([getAgent(params.id), listVersions(params.id)]);
+      const [agent, versions] = await Promise.all([getAgent(id), listVersions(id)]);
       const latest = versions.reduce((a, b) => (b.version > a.version ? b : a), versions[0]);
       return { agent, latest };
     },
@@ -39,15 +40,17 @@ export default function AgentBuilderPage({ params }: { params: { id: string } })
 
   // Seed the builder store once the agent loads.
   useEffect(() => {
-    if (data && loadedFor.current !== params.id) {
-      loadedFor.current = params.id;
+    if (data && loadedFor.current !== id) {
+      loadedFor.current = id;
       init(versionToDraft(data.agent, data.latest), data.agent.id, data.latest.version, data.latest.is_published);
     }
-  }, [data, params.id, init]);
+  }, [data, id, init]);
 
   // Restore the active tab from the URL on mount.
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
+    // One-time mount read of the URL (window is unavailable during SSR).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (t && (TABS as readonly string[]).includes(t)) setTab(t as Tab);
   }, []);
 
