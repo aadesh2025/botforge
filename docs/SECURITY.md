@@ -72,15 +72,15 @@ Advisory (non-blocking) `pip-audit` + `npm audit` run in CI. Results as of 2026-
 - ⚠️ **Python — `ecdsa 0.19.2` (PYSEC-2026-1325, no fix available)**: transitive via `python-jose`.
   **Not exploitable in our config** — we sign JWTs with HS256 (symmetric) and perform no ECDSA
   operations. Follow-up: migrate JWT handling to `PyJWT`/`authlib` to drop `python-jose`/`ecdsa`.
-- ❌ **Web — 5 advisories (4 high, 1 moderate) in Next.js 14 + bundled postcss**: Image-Optimization
-  DoS, WebSocket-upgrade SSRF, RSC cache poisoning, i18n middleware bypass, postcss stringify XSS. The
-  fix requires a **Next.js 14 → 16 major upgrade** (breaking). **Deferred to Phase 19/20** to avoid
-  destabilizing the app mid-build. Partial applicability: we don't use i18n; realtime WS runs on the
-  FastAPI backend, not Next; image optimization is minimal. Tracked in the PROGRESS roadmap.
+- ✅ **Web — RESOLVED (Phase 19).** The 5 Next.js-14 advisories (4 high + 1 moderate: Image-Opt DoS,
+  WS-upgrade SSRF, RSC cache poisoning, i18n middleware bypass, postcss stringify XSS) were cleared by
+  the **Next.js 14 → 16 + React 19 + ESLint 9** upgrade, plus pinning `postcss ^8.5.10` (direct dep +
+  override) to replace the vulnerable copy bundled under `next`. **`npm audit` now reports 0
+  vulnerabilities.**
 
 ## 9. Known gaps / follow-ups (tracked in PROGRESS roadmap)
 - httpOnly cookie migration for web auth tokens (§1).
-- Next.js major upgrade to clear the web advisories (§8).
+- ~~Next.js major upgrade to clear the web advisories (§8).~~ **DONE — Phase 19.**
 - Realtime hub → Redis pub/sub before multi-node prod (ADR-028).
 - Webhook retry beat-sweep for `pending` deliveries past `next_retry_at`.
 - Replace `python-jose` to drop the `ecdsa` advisory (§8).

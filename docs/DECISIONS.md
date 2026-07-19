@@ -36,6 +36,31 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-033: Phase 19 — Next 16 upgrade, keyless E2E, NullPool worker engine, a11y contrast
+- **Date:** 2026-07-19
+- **Status:** accepted
+- **Context:** Phase 19 — E2E, docs, polish, plus the twice-deferred Next.js major upgrade.
+- **Decisions:**
+  - **Next.js 14 → 16 + React 18 → 19 + ESLint 9 (flat config).** Clears all 5 web advisories
+    (`npm audit` → 0). Migrated: async route `params` (`use()`/`await`), `middleware.ts`→`proxy.ts`,
+    `next lint`→ESLint CLI with native `eslint-config-next` flat presets; pinned `postcss ^8.5.10`
+    (direct dep + override) to replace the copy bundled under `next`. New react-hooks rules handled
+    with surgical disables on 3 documented mount/open idioms.
+  - **Keyless, deterministic E2E via `LLM_FORCE_FAKE`.** A single settings flag forces every chat +
+    embedding onto the Fake provider, so the Playwright suite exercises all 7 PRD flows against the
+    real stack (web+api+worker+db+redis) with no paid keys or model pulls. `ENV=dev` also exposes the
+    invitation `accept_token` (accept without SMTP) and a lifted `AUTH_RATE_LIMIT` for the tenant churn.
+    The n8n *trigger* roundtrip stays in the backend suite (needs live n8n + a tool-calling model).
+  - **Worker gets a dedicated NullPool engine.** Celery runs each task on a fresh `asyncio.run` loop;
+    the shared pooled async engine cached asyncpg connections bound to a closed loop, silently breaking
+    every task after the first (ingestion + webhook delivery). A worker-local engine with `NullPool`
+    (no cross-loop connection reuse) fixes it. A real production bug found via E2E, not just a test fix.
+  - **Outbound channel-delivery failure is non-fatal.** A provider send failure in an inbound webhook
+    is caught + logged instead of 500-ing (a 500 makes Telegram/Meta re-deliver → duplicate turns).
+  - **A11y contrast via luminance.** The widget derives a WCAG-compliant foreground from the accent
+    (was white-on-ember 3.6:1 → black-on-ember 5.9:1); the `--faint` design token lightened to pass AA.
+    An axe (WCAG 2.1 A/AA) Playwright gate on key pages + the widget fails on serious/critical findings.
+
 ### ADR-032: Platform-staff admin console (is_staff, org-agnostic, two-layer route guard)
 - **Date:** 2026-07-19
 - **Status:** accepted
