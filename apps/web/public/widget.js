@@ -76,8 +76,23 @@
   }
 
   // ── Styles (injected into the shadow root) ─────────────────────────────────
+  // Pick a foreground (near-black or white) that meets WCAG contrast on the given bg color.
+  function onColor(hex) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+    if (!m) return "#ffffff";
+    var n = parseInt(m[1], 16);
+    var srgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(function (c) {
+      c /= 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    var lum = 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+    // Contrast vs white = 1.05/(lum+0.05); vs black = (lum+0.05)/0.05. Choose the stronger.
+    return 1.05 / (lum + 0.05) >= (lum + 0.05) / 0.05 ? "#ffffff" : "#111318";
+  }
+
   function styles(theme) {
     var accent = theme.primary_color || "#E8590C";
+    var onAccent = onColor(accent);
     var dark = theme.mode !== "light";
     var bg = dark ? "#16181D" : "#FFFFFF";
     var bg2 = dark ? "#1E2127" : "#F4F5F7";
@@ -89,7 +104,7 @@
       ":host{all:initial}" +
       "*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}" +
       ".bf-launcher{position:fixed;bottom:20px;" + side + ":20px;z-index:2147483000;display:flex;align-items:center;gap:10px;" +
-      "height:56px;padding:0 18px 0 16px;border:none;border-radius:28px;cursor:pointer;color:#fff;background:" + accent + ";" +
+      "height:56px;padding:0 18px 0 16px;border:none;border-radius:28px;cursor:pointer;color:" + onAccent + ";background:" + accent + ";" +
       "box-shadow:0 8px 24px rgba(0,0,0,.28);font-size:15px;font-weight:600;transition:transform .15s}" +
       ".bf-launcher:hover{transform:translateY(-2px)}" +
       ".bf-launcher svg{width:22px;height:22px}" +
@@ -97,15 +112,15 @@
       "height:600px;max-height:calc(100vh - 120px);background:" + bg + ";color:" + text + ";border:1px solid " + border + ";" +
       "border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.35);display:none;flex-direction:column;overflow:hidden}" +
       ".bf-panel.bf-show{display:flex}" +
-      ".bf-head{display:flex;align-items:center;gap:10px;padding:14px 16px;background:" + accent + ";color:#fff}" +
+      ".bf-head{display:flex;align-items:center;gap:10px;padding:14px 16px;background:" + accent + ";color:" + onAccent + "}" +
       ".bf-head .bf-title{font-weight:700;font-size:15px;flex:1}" +
-      ".bf-x{background:transparent;border:none;color:#fff;cursor:pointer;font-size:20px;line-height:1;opacity:.9}" +
+      ".bf-x{background:transparent;border:none;color:" + onAccent + ";cursor:pointer;font-size:20px;line-height:1;opacity:.9}" +
       ".bf-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;background:" + bg + "}" +
       ".bf-row{display:flex;gap:8px;max-width:100%}" +
       ".bf-row.bf-user{flex-direction:row-reverse}" +
       ".bf-bubble{max-width:80%;padding:9px 12px;border-radius:12px;font-size:14px;line-height:1.5;white-space:normal;word-wrap:break-word}" +
       ".bf-bot .bf-bubble{background:" + bg2 + ";color:" + text + ";border:1px solid " + border + "}" +
-      ".bf-user .bf-bubble{background:" + accent + ";color:#fff}" +
+      ".bf-user .bf-bubble{background:" + accent + ";color:" + onAccent + "}" +
       ".bf-bubble pre{background:rgba(0,0,0,.25);padding:8px;border-radius:8px;overflow-x:auto;margin:6px 0}" +
       ".bf-bubble code{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}" +
       ".bf-bubble a{color:" + accent + "}" +
@@ -123,7 +138,7 @@
       ".bf-ta{flex:1;resize:none;max-height:120px;min-height:38px;padding:9px 11px;border-radius:9px;border:1px solid " + border + ";" +
       "background:" + bg2 + ";color:" + text + ";font-size:14px;outline:none}" +
       ".bf-ta:focus{border-color:" + accent + "}" +
-      ".bf-send{flex:0 0 auto;width:38px;height:38px;border-radius:9px;border:none;cursor:pointer;background:" + accent + ";color:#fff;font-size:16px}" +
+      ".bf-send{flex:0 0 auto;width:38px;height:38px;border-radius:9px;border:none;cursor:pointer;background:" + accent + ";color:" + onAccent + ";font-size:16px}" +
       ".bf-send:disabled{opacity:.5;cursor:default}" +
       ".bf-attach{font-size:12px;color:" + muted + ";padding:0 2px}" +
       ".bf-brand{text-align:center;font-size:11px;color:" + muted + ";padding:2px}" +

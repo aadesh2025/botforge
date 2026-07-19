@@ -19,7 +19,7 @@
   /* Text */
   --text: 237 238 240; /* #EDEEF0 */
   --muted: 138 143 152; /* #8A8F98 */
-  --faint: 92 97 106; /* #5C616A */
+  --faint: 139 145 155; /* #8B919B — WCAG AA (5.7:1 on surface) */
 
   /* Signature ember accent */
   --ember: 255 106 61; /* #FF6A3D */
@@ -45,7 +45,7 @@
   --border-strong: 205 210 218;
   --text: 24 27 33;
   --muted: 96 102 112;
-  --faint: 150 156 165;
+  --faint: 107 112 120; /* #6B7078 — WCAG AA (4.8:1 on white) */
   --ember: 234 88 12;
   --ember-2: 217 119 6;
   --ember-soft: 234 88 12;
