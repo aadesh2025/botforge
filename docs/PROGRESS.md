@@ -26,7 +26,7 @@ stubbed/deferred, and any gaps waiting on human secrets.
 | 17 | Admin console | ✅ | **17.1** platform-staff API (`app/modules/admin`, `require_staff`/`is_staff`, org-agnostic — no `X-Org-Id`): `GET /v1/admin/{orgs,users,usage,health,feature-flags}` + `PUT /v1/admin/feature-flags/{key}` (Postgres upsert). New `FeatureFlag` model + migration `0005`. **17.2** `/admin` console UI (platform usage cards, live system-health pills, top-orgs, feature-flag toggles, orgs + users tables), a `is_staff`-gated "Platform › Admin" sidebar item, and a client route guard + middleware. **Verified live (curl + Playwright): staff → 200 + full console; non-staff → 403 on every endpoint **and** redirected off `/admin` to `/dashboard` with no Admin nav; unauth → 401.** 157 tests pass; ruff+mypy clean. Tagged phase-17-complete. |
 | 18 | Billing (optional) | ⏸️ | **DEFERRED** — optional/stretch in the spec (PRD §7, Phase 18 header), no `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` supplied, and the platform is not monetising yet. Metering plumbing (`usage_records`, `quotas`, `subscriptions` table, `Organization.plan`) already exists, so billing can be layered on later without rework. Not built. |
 | 19 | E2E/docs/polish | ✅ | **19.1** Playwright E2E — one spec per PRD §6 criterion 1–7 (`apps/web/e2e`), driven against the real stack with the Fake provider (`LLM_FORCE_FAKE`), **all 7 green**; new CI `e2e` job boots services + runs them (closes the Phase-0 Playwright item). Also the **Next.js 14→16 + React 18→19 + ESLint 9** upgrade (**0 npm-audit advisories**, was 4 high + 1 moderate) and a real **worker bug fix** (NullPool engine so async tasks survive across Celery loops). **19.2** README + self-host / API-usage / widget-install / n8n-setup guides; widget-demo.html rewritten. **19.3** axe a11y gate (spec 08) on key pages + widget — fixed widget accent contrast + `--faint` token. Throwaway `@example.com` dev rows + `live_demo` flag cleaned (`make clean-devdata`). 157 backend tests pass; ruff+mypy+tsc+eslint clean. Tagged phase-19-complete. |
-| 20 | Production deployment | ⬜ | |
+| 20 | Production deployment | ✅ | **20.1** `docker-compose.prod.yml` (Caddy auto-TLS for `$DOMAIN`+`$API_DOMAIN`, non-root api+web images, healthchecks, **one-shot migrate job** so replicas never re-migrate, nightly backup service) + a production **web Dockerfile** (Next standalone, non-root). **Realtime hub → Redis pub/sub** (ADR-028, same interface, cross-node delivery test). **Webhook retry beat sweep** (`webhooks.sweep_pending` + beat service). **Refresh token → httpOnly cookie** via a Next BFF (`/api/auth/*`, ADR-019); access token stays JS-readable by cross-origin+WS architecture (documented). **20.2** `pg_dump` backup + restore scripts, **`/metrics`** (Prometheus), **Sentry** hook, JSON-log aggregation. **20.3** K8s manifests (`infra/k8s/`). **20.4** `release.yml`: build+push images to GHCR + **smoke-test `/readyz`** on the built image + deploy template. 162 backend tests pass; ruff+mypy+tsc+eslint clean; **10/10 Playwright E2E green**. Tagged phase-20-complete. |
 
 Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
 
@@ -41,23 +41,18 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
 List any provider/channel/billing key that is stubbed and needs a real value. (See `ENV.md`.)
 
 ## Roadmap / deferred enhancements
-- **Realtime hub → Redis pub/sub (blocking for Phase 20 prod).** The inbox + widget realtime
-  fan-out (ADR-028, `app/realtime/hub`) is an **in-process** pub/sub — it only works on a single
-  API process. Before the multi-node production deploy (Phase 20), swap the hub body for Redis
-  pub/sub behind the same `subscribe`/`unsubscribe`/`publish` interface. Same applies to any
-  future horizontal scaling of the WebSocket endpoints.
-- **Webhook retry sweep**: failed deliveries set `status=pending` + `next_retry_at`, and the
-  Celery task retries; a periodic beat sweep for `pending` deliveries past `next_retry_at` (for
-  when the process was down at retry time) is not yet scheduled — add a beat entry in Phase 20.
+- ✅ ~~**Realtime hub → Redis pub/sub.**~~ **DONE (Phase 20, ADR-028).** The hub bridges over Redis
+  behind the same `subscribe`/`unsubscribe`/`publish` interface; cross-node delivery is tested.
+- ✅ ~~**Webhook retry sweep.**~~ **DONE (Phase 20).** `webhooks.sweep_pending` Celery beat job
+  re-enqueues `pending` deliveries past `next_retry_at`; a `beat` service runs it.
 - **Async n8n late-result re-injection** (from ADR-025): async n8n tools resolve the `tool_run`
   record via the signed callback, but a late result is not re-injected into the same generation
   turn. Options: a "pending → notify" follow-up message on the conversation, or a short bounded
   wait on the callback before the turn ends. Deferred; the callback + record resolution work.
-- **httpOnly cookie migration for web auth tokens (required prod hardening, ADR-019).** The Next.js
-  client still keeps the access token in a **JS-readable cookie** (XSS-exfiltratable). Deferred in
-  Phase 16.2 (needs a Next route-handler BFF proxy that sets `httpOnly`+`Secure`+`SameSite` cookies
-  and forwards the Bearer server-side). Mitigations in place: short access TTL + refresh rotation,
-  strict CORS, no token reflection. Do before Phase 20. See `docs/SECURITY.md §1`.
+- ✅ ~~**httpOnly cookie migration for web auth tokens (ADR-019).**~~ **Refresh token DONE (Phase
+  20)** — moved to an httpOnly/Secure/SameSite cookie set by a Next BFF (`/api/auth/*`). The
+  **access token remains JS-readable by architectural necessity** (cross-origin Bearer + SSE + the
+  inbox WebSocket's `?token=` query param). Documented in `docs/SECURITY.md §1`.
 - ~~**Next.js 14 → 16 major upgrade (clears 5 web advisories).**~~ **DONE (Phase 19).** Upgraded to
   Next 16.2 + React 19.2 + ESLint 9 flat config; migrated async route params, `middleware.ts`→`proxy.ts`,
   and `next lint`→ESLint CLI; pinned `postcss ^8.5.10` to clear the nested-next copy. `npm audit` now

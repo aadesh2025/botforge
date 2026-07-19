@@ -36,6 +36,33 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-034: Phase 20 — Redis-bridged hub, httpOnly refresh via BFF, prod compose/K8s/CD
+- **Date:** 2026-07-19
+- **Status:** accepted
+- **Context:** Phase 20 — make the platform multi-node production-ready.
+- **Decisions:**
+  - **Realtime hub bridged over Redis (ADR-028 realized).** Same `subscribe`/`unsubscribe`/`publish`
+    interface. `publish` delivers to local subscribers **and** fans out over one Redis channel tagged
+    with a per-process node id; a reader delivers other nodes' events (skipping our own → no
+    double-delivery). Degrades to single-node in-process if Redis is down. So an operator reply on
+    replica A reaches a widget socket on replica B. Verified with a two-node cross-delivery test.
+  - **Refresh token → httpOnly; access token stays JS-readable.** A same-origin Next BFF
+    (`/api/auth/{login,signup,refresh,logout}`) holds the long-lived refresh token in an
+    httpOnly/Secure/SameSite cookie (XSS can't exfiltrate it; rotation is server-side). The
+    short-lived access token remains a JS cookie because the browser calls the FastAPI API
+    **cross-origin** (Bearer), streams SSE, and opens the inbox WebSocket with `?token=`. A full BFF
+    would proxy all of that through Next across a separate origin — a larger re-architecture than the
+    marginal gain; the residual (short TTL + rotation + strict CORS) is documented in SECURITY §1.
+  - **Webhook retry beat sweep.** A `webhooks.sweep_pending` Celery beat job re-enqueues `pending`
+    deliveries past `next_retry_at` — the safety net for retries lost while worker/broker were down.
+  - **Prod compose = Caddy auto-TLS + non-root images + one-shot migrate.** A dedicated `migrate`
+    service runs `alembic upgrade head` once; api/worker gate on `service_completed_successfully`, so
+    scaling replicas never re-runs migrations. Web ships as a Next **standalone** non-root image.
+  - **/metrics is dependency-free**, Sentry initializes only when `SENTRY_DSN` is set, logs are JSON
+    to stdout (drop-in for any aggregator). K8s manifests provided; Helm/HPA remain the stretch.
+  - **CD builds+pushes images to GHCR and smoke-tests `/readyz`** on the built API image; the
+    host-deploy step is an SSH template gated on a `DEPLOY_HOST` secret.
+
 ### ADR-033: Phase 19 — Next 16 upgrade, keyless E2E, NullPool worker engine, a11y contrast
 - **Date:** 2026-07-19
 - **Status:** accepted
