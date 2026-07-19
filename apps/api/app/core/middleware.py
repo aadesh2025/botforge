@@ -62,8 +62,14 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
         finally:
             structlog.contextvars.unbind_contextvars("request_id")
-        elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+        elapsed = time.perf_counter() - start
+        elapsed_ms = round(elapsed * 1000, 2)
         response.headers["x-request-id"] = request_id
+        # Record for /metrics (skip the metrics endpoint itself).
+        if request.url.path != "/metrics":
+            from app.core.metrics import observe_request
+
+            observe_request(request.method, response.status_code, elapsed)
         # Skip noise from health probes.
         if not request.url.path.startswith(("/healthz", "/readyz")):
             log.info(

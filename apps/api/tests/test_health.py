@@ -35,6 +35,21 @@ async def test_request_id_header(client: AsyncClient) -> None:
     assert resp.headers.get("x-request-id")
 
 
+async def test_metrics_prometheus_exposition(client: AsyncClient) -> None:
+    await client.get("/version")  # generate at least one observation
+    resp = await client.get("/metrics")
+    assert resp.status_code == 200
+    assert "text/plain" in resp.headers["content-type"]
+    body = resp.text
+    assert "botforge_build_info" in body
+    assert "botforge_http_requests_total" in body
+    assert "botforge_http_request_duration_seconds_bucket" in body
+    # +Inf bucket must equal the histogram count (monotonic, well-formed).
+    inf = [ln for ln in body.splitlines() if 'le="+Inf"' in ln][0].split()[-1]
+    count = [ln for ln in body.splitlines() if ln.startswith("botforge_http_request_duration_seconds_count")][0].split()[-1]
+    assert inf == count
+
+
 @pytest.mark.parametrize("path", ["/does-not-exist"])
 async def test_typed_error_shape(client: AsyncClient, path: str) -> None:
     resp = await client.get(path)

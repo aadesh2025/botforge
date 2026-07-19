@@ -32,16 +32,24 @@ observability (`SENTRY_DSN`). Every var: name, purpose, required?, default, "nee
 - Run migrations as a one-shot job on deploy (not on every replica start).
 - Resource limits, restart policies, healthchecks, log driver (json/loki).
 
-## 4. Backups & data
-- `pg_dump` nightly cron (containerized) to a mounted/backup volume; document restore steps.
-- Uploaded files: local volume in dev; S3-compatible bucket in prod (env-configurable
-  storage backend behind an interface). Retention + delete-per-org honored (NFR-8).
+## 4. Backups & data  *(implemented)*
+- **`infra/scripts/backup.sh`** — `pg_dump | gzip` to a timestamped file with N-day rotation.
+  Run it nightly via cron (example in the script header) or as a one-shot container that can
+  reach Postgres. The prod compose ships a `backup` service (cron-driven) writing to a `backups` volume.
+- **`infra/scripts/restore.sh <file.sql.gz>`** — documented, confirmation-gated restore (with an
+  optional drop+recreate). Verify with `SELECT count(*) FROM organizations;`.
+- Uploaded files: local volume (`UPLOAD_DIR`) in dev; back that path up alongside the DB (or point
+  it at an S3-compatible bucket in prod). Retention + delete-per-org honored (NFR-8).
 
-## 5. Observability
-- `/healthz` (liveness), `/readyz` (DB+Redis), `/metrics` (Prometheus). Optional Prometheus+
-  Grafana in a `monitoring` compose profile.
-- Structured JSON logs with request/org/user ids; Sentry via `SENTRY_DSN` if set.
-- LLM call tracing (provider/model/tokens/latency/cost/fallback).
+## 5. Observability  *(implemented)*
+- `/healthz` (liveness), `/readyz` (DB+Redis), **`/metrics` (Prometheus exposition** — request
+  counts by method/status, a latency histogram, build info + uptime; scrape it from Prometheus).
+- **Structured JSON logs** to stdout with request/org/user ids (`configure_logging`) — 12-factor,
+  so any aggregator (Loki/Promtail, CloudWatch, ELK, Datadog) collects them from the container's
+  stdout with no app change. Set `LOG_LEVEL` per environment.
+- **Sentry** error tracking auto-initialized when `SENTRY_DSN` is set (`_init_sentry`, 10% traces,
+  no PII); a no-op otherwise.
+- LLM call tracing (provider/model/tokens/latency/cost/fallback) recorded on every message.
 
 ## 6. CI/CD (`.github/workflows/`)
 - **ci.yml**: on push/PR — install, lint (`ruff`,`eslint`), typecheck (`mypy`,`tsc`), unit

@@ -48,3 +48,11 @@ async def readyz(response: Response) -> ReadyResponse:
 @router.get("/version", response_model=VersionResponse)
 async def version() -> VersionResponse:
     return VersionResponse(name="botforge-api", version=__version__, env=settings.env)
+
+
+@router.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    """Prometheus exposition — request counts, latency histogram, build info + uptime."""
+    from app.core.metrics import render
+
+    return Response(content=render(), media_type="text/plain; version=0.0.4")

@@ -56,7 +56,27 @@ def _warn_missing_secrets() -> None:
         log.warning("missing_key", service="n8n", effect="disabled; set N8N_API_KEY")
 
 
+def _init_sentry() -> None:
+    """Wire Sentry error tracking when a DSN is configured (no-op otherwise)."""
+    if not settings.sentry_dsn:
+        return
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.env,
+            release=__version__,
+            traces_sample_rate=0.1,
+            send_default_pii=False,
+        )
+        log.info("sentry_enabled", env=settings.env)
+    except Exception as exc:  # never let observability wiring break startup
+        log.warning("sentry_init_failed", error=str(exc))
+
+
 def create_app() -> FastAPI:
+    _init_sentry()
     app = FastAPI(
         title="BotForge API",
         version=__version__,
