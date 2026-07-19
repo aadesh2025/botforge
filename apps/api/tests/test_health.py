@@ -45,8 +45,10 @@ async def test_metrics_prometheus_exposition(client: AsyncClient) -> None:
     assert "botforge_http_requests_total" in body
     assert "botforge_http_request_duration_seconds_bucket" in body
     # +Inf bucket must equal the histogram count (monotonic, well-formed).
-    inf = [ln for ln in body.splitlines() if 'le="+Inf"' in ln][0].split()[-1]
-    count = [ln for ln in body.splitlines() if ln.startswith("botforge_http_request_duration_seconds_count")][0].split()[-1]
+    lines = body.splitlines()
+    inf = next(ln for ln in lines if 'le="+Inf"' in ln).split()[-1]
+    prefix = "botforge_http_request_duration_seconds_count"
+    count = next(ln for ln in lines if ln.startswith(prefix)).split()[-1]
     assert inf == count
 
 
