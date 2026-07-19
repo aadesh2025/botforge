@@ -36,6 +36,29 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-032: Platform-staff admin console (is_staff, org-agnostic, two-layer route guard)
+- **Date:** 2026-07-19
+- **Status:** accepted
+- **Context:** Phase 17 — a cross-tenant operations console for platform staff (orgs/users/usage/
+  health/feature flags).
+- **Decisions:**
+  - **`is_staff` gate, org-agnostic.** Admin endpoints (`app/modules/admin`) depend on
+    `require_staff` (checks `User.is_staff`) and deliberately take **no `X-Org-Id`** — staff span
+    all tenants, so the queries are unscoped aggregates (this is the one place tenant filtering is
+    intentionally absent, and it's guarded by `is_staff`, not org membership). Distinct from
+    org-level RBAC (owner/admin/…): a tenant "admin" is **not** platform staff.
+  - **Feature flags are a first-class table** (`FeatureFlag`, migration `0005`), upserted via
+    Postgres `on_conflict_do_update` on `key` — chosen over a JSON blob so flags are queryable and
+    have their own `updated_at`. `PUT` is idempotent (create-or-update).
+  - **Two-layer route protection for `/admin`.** (1) The API's 403 is the real enforcement.
+    (2) The UI adds a client route guard (redirect non-staff to `/dashboard`) + `is_staff`-gated
+    nav so non-staff never see or reach the console. Middleware can't check `is_staff` (not in the
+    cookie), so it only enforces "authenticated"; staff-gating is client + API. Verified live:
+    non-staff redirected off the route **and** 403 from every endpoint.
+  - **Staff still belong to an org.** The console lives under the `(app)` shell (which requires an
+    org for the topbar/org-switcher), so a staff user also has their own workspace org. Accepted as
+    a minor constraint rather than building a separate org-less shell for one route.
+
 ### ADR-031: Guardrails as data-not-instruction, scope downgrade for API keys, security headers
 - **Date:** 2026-07-19
 - **Status:** accepted
