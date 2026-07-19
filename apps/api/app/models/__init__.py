@@ -20,6 +20,7 @@ from app.models.knowledge import Chunk, Document, KnowledgeBase
 from app.models.platform import (
     ApiKey,
     AuditLog,
+    FeatureFlag,
     Quota,
     Subscription,
     UsageRecord,
@@ -38,6 +39,7 @@ __all__ = [
     "Conversation",
     "Document",
     "EmailVerificationToken",
+    "FeatureFlag",
     "Handoff",
     "Invitation",
     "KnowledgeBase",

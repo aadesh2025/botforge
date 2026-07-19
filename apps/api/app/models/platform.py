@@ -123,6 +123,16 @@ class Quota(Base, UUIDPrimaryKey):
     resets_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class FeatureFlag(Base, UUIDPrimaryKey, TimestampMixin):
+    """Platform-wide feature flag, toggled by platform staff (docs/08 §17)."""
+
+    __tablename__ = "feature_flags"
+
+    key: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(255))
+
+
 class Subscription(Base, UUIDPrimaryKey, TimestampMixin):
     __tablename__ = "subscriptions"
 

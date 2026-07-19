@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from app.modules.admin.router import router as admin_router
 from app.modules.agents.router import router as agents_router
 from app.modules.analytics.router import router as analytics_router
 from app.modules.apikeys.router import router as apikeys_router
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(apikeys_router)
     app.include_router(webhooks_router)
     app.include_router(audit_router)
+    app.include_router(admin_router)
 
     return app
 

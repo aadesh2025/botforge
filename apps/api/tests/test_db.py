@@ -22,6 +22,7 @@ EXPECTED_TABLES = {
     "tools", "tool_runs", "channels", "handoffs",
     "api_keys", "webhook_endpoints", "webhook_deliveries",
     "audit_logs", "usage_records", "quotas", "subscriptions",
+    "feature_flags",
 }
 
 
