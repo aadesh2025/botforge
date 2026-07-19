@@ -9,6 +9,57 @@ Postgres. Assumes Windows + Docker Desktop + PowerShell. Compose file lives at
 > models per `DECISIONS.md` ADR-014). A fresh DB now just needs `alembic upgrade head` +
 > `seed` (Step 6); no autogenerate needed unless you change the models.
 
+## Running the dev stack (host processes — the fast path)
+
+Run the datastores in Docker, but the **API and web on the host** (fastest reload). The commands
+**must** be run from the right directory or they fail (`ModuleNotFoundError: No module named 'app'`
+from the wrong dir for the API; `npm ENOENT` for web). **Canonical dev ports: API `8000`, web `3001`.**
+
+```powershell
+# 0) Datastores only (from repo root)
+cd "E:\AUROZEN AGENCY\own_chatbot\infra"; docker compose up -d postgres redis
+
+# 1) API — MUST cd into apps/api first
+cd "E:\AUROZEN AGENCY\own_chatbot\apps\api"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+#   verify (new terminal):  curl http://localhost:8000/readyz   → {"status":"ready",...}
+
+# 2) Celery worker (REQUIRED for document ingestion) — also from apps/api, --pool=solo on Windows
+cd "E:\AUROZEN AGENCY\own_chatbot\apps\api"
+.\.venv\Scripts\python.exe -m celery -A app.worker.celery_app worker --pool=solo --loglevel=info
+
+# 3) Web — MUST cd into apps/web first
+cd "E:\AUROZEN AGENCY\own_chatbot\apps\web"; npm run dev -- -p 3001
+```
+
+**Open → http://localhost:3001** (the root `/` 307-redirects to `/dashboard`, then to `/login` when
+signed out). If the web app calls a non-default API URL, set `NEXT_PUBLIC_API_BASE_URL` before `npm run dev`.
+
+### Finding and killing stale processes (ports 8000 / 3001 already in use)
+
+A stale server (e.g. a Next dev server started **before** the Next 16 upgrade) shows up as a plain
+`Internal Server Error` on 3001, or `[Errno 10048] only one usage of each socket address` when the
+API can't bind 8000. Find the real owner by port and kill it — don't guess the PID:
+
+```powershell
+# who owns the port?
+Get-NetTCPConnection -LocalPort 8000 -State Listen | Select-Object OwningProcess
+Get-CimInstance Win32_Process -Filter "ProcessId=<PID>" | Select-Object CommandLine   # confirm it's ours
+Stop-Process -Id <PID> -Force
+
+# same for the web port
+Get-NetTCPConnection -LocalPort 3001 -State Listen | Select-Object OwningProcess
+Stop-Process -Id <PID> -Force
+```
+
+After killing a stale **web** server, clear the build cache before restarting (stale `.next` from an
+older Next version SSR-crashes): `Remove-Item -Recurse -Force apps\web\.next`, then `npm run dev`.
+
+> **One lockfile only.** The web app's lockfile is `apps/web/package-lock.json`. Never run
+> `npm install` from the **repo root** — it creates a stray root `package-lock.json` that makes
+> Turbopack infer the wrong workspace root. `next.config.mjs` pins `turbopack.root` to `apps/web` to
+> guard against this; if a root `package-lock.json` reappears, delete it.
+
 ## Prerequisites
 - **Docker Desktop** running (whale icon = "running"; WSL2 backend enabled).
 - Repo at `E:\AUROZEN AGENCY\own_chatbot`.
