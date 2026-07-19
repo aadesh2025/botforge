@@ -83,3 +83,18 @@ def deliver_webhook_task(self: object, delivery_id: str) -> bool:
     if not ok:
         raise self.retry(countdown=min(3600, 30), exc=RuntimeError("delivery not confirmed"))  # type: ignore[attr-defined]
     return ok
+
+
+async def _run_sweep() -> int:
+    from app.webhooks.dispatch import sweep_due_deliveries
+
+    async with SessionFactory() as session:
+        n = await sweep_due_deliveries(session)
+        await session.commit()
+        return n
+
+
+@celery_app.task(name="webhooks.sweep_pending")  # type: ignore[untyped-decorator]
+def sweep_pending_webhooks_task() -> int:
+    """Periodic (Celery beat) safety-net: re-enqueue due `pending` webhook deliveries."""
+    return _run(_run_sweep())

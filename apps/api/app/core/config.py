@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # Per-tool execution timeout (seconds) for HTTP / built-in tools.
     tool_timeout_seconds: float = 15.0
 
+    # How often (seconds) the Celery beat sweep re-enqueues due `pending` webhook deliveries.
+    webhook_sweep_interval_seconds: float = 60.0
+
     # --- n8n ---
     n8n_base_url: str = "http://localhost:5678"
     n8n_api_key: str | None = None

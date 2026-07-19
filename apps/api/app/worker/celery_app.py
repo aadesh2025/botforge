@@ -21,4 +21,14 @@ celery_app.conf.update(
     task_track_started=True,
     timezone="UTC",
     enable_utc=True,
+    # Periodic jobs (run a beat process alongside the worker:
+    #   celery -A app.worker.celery_app beat)
+    beat_schedule={
+        "webhook-retry-sweep": {
+            # Re-enqueue `pending` webhook deliveries whose next_retry_at is due — the safety
+            # net for retries lost while the worker/broker was down (see dispatch.sweep_due_deliveries).
+            "task": "webhooks.sweep_pending",
+            "schedule": settings.webhook_sweep_interval_seconds,
+        },
+    },
 )

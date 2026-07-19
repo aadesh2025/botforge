@@ -130,3 +130,40 @@ async def test_message_created_event_emitted_on_chat(client: AsyncClient) -> Non
 
     deliveries = await client.get(f"/v1/webhooks/{eid}/deliveries", headers=headers)
     assert any(d["event"] == "message.created" for d in deliveries.json())
+
+
+async def test_sweep_requeues_only_due_pending(client: AsyncClient, db_session: AsyncSession, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The beat sweep re-enqueues pending deliveries past next_retry_at, and only those."""
+    import datetime as dt
+
+    from app.models import WebhookDelivery
+    from app.webhooks import dispatch
+
+    headers, _ = await _headers(client, "wh6@example.com")
+    ep = await client.post(
+        "/v1/webhooks", json={"url": "https://example.com/hook", "events": ["message.created"]}, headers=headers
+    )
+    endpoint_id = uuid.UUID(ep.json()["id"])
+    now = dt.datetime.now(tz=dt.UTC)
+
+    due = WebhookDelivery(
+        webhook_endpoint_id=endpoint_id, event="message.created", payload={}, status="pending",
+        attempts=1, next_retry_at=now - dt.timedelta(minutes=5),
+    )
+    future = WebhookDelivery(
+        webhook_endpoint_id=endpoint_id, event="message.created", payload={}, status="pending",
+        attempts=1, next_retry_at=now + dt.timedelta(minutes=5),
+    )
+    delivered = WebhookDelivery(
+        webhook_endpoint_id=endpoint_id, event="message.created", payload={}, status="delivered",
+        attempts=1, next_retry_at=None,
+    )
+    db_session.add_all([due, future, delivered])
+    await db_session.flush()
+
+    requeued: list[uuid.UUID] = []
+    monkeypatch.setattr(dispatch, "_enqueue", lambda did: requeued.append(did))
+
+    count = await dispatch.sweep_due_deliveries(db_session)
+    assert count == 1
+    assert requeued == [due.id]

@@ -27,6 +27,7 @@ from app.modules.inbox.router import router as inbox_router
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.orgs.router import router as orgs_router
 from app.modules.public.router import router as public_router
+from app.realtime.hub import hub
 from app.tools.router import router as tools_router
 from app.webhooks.router import router as webhooks_router
 
@@ -38,7 +39,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     log.info("startup", env=settings.env, version=__version__)
     _warn_missing_secrets()
+    # Bridge the realtime hub over Redis so operator↔widget delivery works across API replicas.
+    await hub.connect(settings.redis_url)
     yield
+    await hub.close()
     log.info("shutdown")
 
 

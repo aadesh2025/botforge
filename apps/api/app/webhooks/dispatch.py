@@ -75,6 +75,34 @@ def _enqueue(delivery_id: uuid.UUID) -> None:
         pass
 
 
+async def sweep_due_deliveries(session: Any, *, limit: int = 200) -> int:
+    """Re-enqueue every `pending` delivery whose `next_retry_at` is due.
+
+    The per-task Celery retry handles the common case; this periodic sweep (Celery beat) is the
+    safety net for retries that were lost because the worker/broker was down at retry time, so a
+    failed webhook never gets stuck `pending` forever.
+    """
+    from sqlalchemy import select
+
+    now = dt.datetime.now(tz=dt.UTC)
+    stmt = (
+        select(WebhookDelivery.id)
+        .where(
+            WebhookDelivery.status == "pending",
+            WebhookDelivery.next_retry_at.is_not(None),
+            WebhookDelivery.next_retry_at <= now,
+        )
+        .order_by(WebhookDelivery.next_retry_at)
+        .limit(limit)
+    )
+    ids = list((await session.execute(stmt)).scalars().all())
+    for delivery_id in ids:
+        _enqueue(delivery_id)
+    if ids:
+        log.info("webhook_sweep", requeued=len(ids))
+    return len(ids)
+
+
 async def deliver_delivery(
     session: Any, delivery_id: uuid.UUID, *, transport: httpx.AsyncBaseTransport | None = None
 ) -> bool:
