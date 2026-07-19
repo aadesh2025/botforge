@@ -1,0 +1,28 @@
+# Non-secret config shared by api/worker/beat. Secrets live in the Secret below —
+# replace the placeholder values (or create it with `kubectl create secret` / an external
+# secrets operator) before applying. NEVER commit real secrets.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: botforge-config
+  namespace: botforge
+data:
+  ENV: "prod"
+  LOG_LEVEL: "info"
+  DATABASE_URL: "postgresql+asyncpg://botforge:$(POSTGRES_PASSWORD)@postgres:5432/botforge"
+  REDIS_URL: "redis://redis:6379/0"
+  N8N_BASE_URL: "http://n8n:5678"
+  OLLAMA_BASE_URL: "http://ollama:11434"
+  CORS_ORIGINS: "https://app.example.com"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: botforge-secrets
+  namespace: botforge
+type: Opaque
+stringData:
+  # REPLACE THESE. Generate SECRET_KEY: python -c "import secrets;print(secrets.token_urlsafe(48))"
+  SECRET_KEY: "REPLACE_ME_LONG_RANDOM"
+  POSTGRES_PASSWORD: "REPLACE_ME"
+  GROQ_API_KEY: ""

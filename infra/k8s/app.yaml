@@ -1,0 +1,140 @@
+# API + worker + beat + web. Replace image refs with your registry (see CI/CD in ci.yml).
+# The migration Job runs once per deploy; the api waits for it (initContainer gate below).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: botforge-migrate
+  namespace: botforge
+  annotations:
+    # Re-run on each deploy by templating a unique name, or delete+apply this Job in CD.
+    "botforge/note": "one-shot: alembic upgrade head"
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ghcr.io/OWNER/botforge-api:latest
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: { name: botforge-config }
+            - secretRef: { name: botforge-secrets }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: botforge
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/OWNER/botforge-api:latest
+          command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports: [{ containerPort: 8000 }]
+          envFrom:
+            - configMapRef: { name: botforge-config }
+            - secretRef: { name: botforge-secrets }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: botforge
+spec:
+  selector: { app: api }
+  ports: [{ port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: botforge
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: worker }
+  template:
+    metadata:
+      labels: { app: worker }
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/OWNER/botforge-api:latest
+          command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+          envFrom:
+            - configMapRef: { name: botforge-config }
+            - secretRef: { name: botforge-secrets }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: beat
+  namespace: botforge
+spec:
+  replicas: 1 # exactly one beat scheduler
+  selector:
+    matchLabels: { app: beat }
+  template:
+    metadata:
+      labels: { app: beat }
+    spec:
+      containers:
+        - name: beat
+          image: ghcr.io/OWNER/botforge-api:latest
+          command: ["celery", "-A", "app.worker.celery_app", "beat", "--loglevel=info"]
+          envFrom:
+            - configMapRef: { name: botforge-config }
+            - secretRef: { name: botforge-secrets }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: botforge
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+        - name: web
+          image: ghcr.io/OWNER/botforge-web:latest
+          ports: [{ containerPort: 3000 }]
+          env:
+            - name: API_INTERNAL_URL
+              value: http://api:8000
+          readinessProbe:
+            httpGet: { path: /login, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: botforge
+spec:
+  selector: { app: web }
+  ports: [{ port: 3000, targetPort: 3000 }]

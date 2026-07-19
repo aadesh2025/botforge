@@ -1,0 +1,32 @@
+# Ingress with TLS via cert-manager (install cert-manager + a ClusterIssuer named letsencrypt).
+# Dashboard on $DOMAIN, API on $API_DOMAIN — mirrors the Caddy setup in the compose stack.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: botforge
+  namespace: botforge
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  tls:
+    - hosts: [app.example.com, api.example.com]
+      secretName: botforge-tls
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port: { number: 3000 }
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port: { number: 8000 }
