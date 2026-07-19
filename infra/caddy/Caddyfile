@@ -1,0 +1,28 @@
+# BotForge reverse proxy with automatic HTTPS (Let's Encrypt).
+# Two hostnames — the dashboard and the API — both TLS-terminated by Caddy.
+# Set DOMAIN, API_DOMAIN and ACME_EMAIL in ../.env (see docker-compose.prod.yml).
+
+{
+	email {$ACME_EMAIL}
+	# For local testing without public DNS, uncomment to use Caddy's internal CA:
+	# local_certs
+}
+
+# ── Dashboard (Next.js) ─────────────────────────────────────────────────────────
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:3000
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+}
+
+# ── API (FastAPI) ───────────────────────────────────────────────────────────────
+{$API_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:8000
+	# API sets its own strict CSP + security headers (SecurityHeadersMiddleware); don't duplicate.
+}

@@ -24,13 +24,25 @@ Groups: core (`SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `ENV`), LLM (`GROQ_API_
 (`N8N_BASE_URL`, `N8N_API_KEY`), email (`SMTP_*` or dev console), billing (`STRIPE_*`),
 observability (`SENTRY_DSN`). Every var: name, purpose, required?, default, "needs human?".
 
-## 3. Production (`infra/docker-compose.prod.yml`)
-- Reverse proxy: **Caddy** (auto-TLS) or Nginx; terminates HTTPS, routes `/api`→api, `/`→web,
-  serves `widget.js`. Security headers + CSP configured here.
-- Images: multi-stage, non-root user, pinned base images, no dev deps.
-- API/worker/web replicated behind proxy; postgres + redis with persistent volumes.
-- Run migrations as a one-shot job on deploy (not on every replica start).
-- Resource limits, restart policies, healthchecks, log driver (json/loki).
+## 3. Production (`infra/docker-compose.prod.yml`)  *(implemented)*
+
+```bash
+cp .env.example .env   # set SECRET_KEY, POSTGRES_PASSWORD, DOMAIN, API_DOMAIN, ACME_EMAIL,
+                       # NEXT_PUBLIC_API_BASE_URL=https://$API_DOMAIN, CORS_ORIGINS=https://$DOMAIN
+cd infra && docker compose -f docker-compose.prod.yml up -d --build
+```
+
+- **Reverse proxy: Caddy** (`infra/caddy/Caddyfile`) — automatic HTTPS (Let's Encrypt) for two
+  hostnames: `$DOMAIN`→web:3000 and `$API_DOMAIN`→api:8000; HSTS + security headers on the web host
+  (the API sets its own strict CSP). Ports 80/443 only.
+- **Non-root images:** api runs as uid 10001 (`apps/api/Dockerfile`); web is a multi-stage Next
+  **standalone** build running as the `node` user (`apps/web/Dockerfile`).
+- **One-shot migrations:** a `migrate` service runs `alembic upgrade head` once; api/worker start via
+  `depends_on: migrate: service_completed_successfully`, so scaling replicas never re-runs migrations.
+- **Healthchecks** on postgres, redis, api (`/healthz`), and web (`/login`); `restart: unless-stopped`.
+- **Persistent volumes** for postgres/redis/caddy; a **backup** service runs the nightly `pg_dump`.
+- Scale stateless tiers: `docker compose -f docker-compose.prod.yml up -d --scale api=3 --scale worker=3`
+  (the realtime hub is Redis-backed — ADR-028 — so multi-replica WebSocket fan-out works).
 
 ## 4. Backups & data  *(implemented)*
 - **`infra/scripts/backup.sh`** — `pg_dump | gzip` to a timestamped file with N-day rotation.

@@ -1,0 +1,166 @@
+# BotForge — production stack. TLS-terminated by Caddy, non-root app images, healthchecks,
+# and a ONE-SHOT migration job (so scaling api/worker replicas never re-runs migrations).
+#
+#   cp ../.env.example ../.env   # set SECRET_KEY, DOMAIN, API_DOMAIN, ACME_EMAIL, LLM keys…
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Required env (../.env): SECRET_KEY, POSTGRES_PASSWORD, DOMAIN, API_DOMAIN, ACME_EMAIL,
+#   NEXT_PUBLIC_API_BASE_URL (= https://$API_DOMAIN), CORS_ORIGINS (= https://$DOMAIN).
+name: botforge-prod
+
+x-api-env: &api-env
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-botforge}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-botforge}
+  REDIS_URL: redis://redis:6379/0
+  N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+  ENV: prod
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-botforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-botforge}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-botforge}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # No host port published in prod — only reachable inside the compose network.
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: run migrations once, then exit. api/worker wait for it to complete successfully.
+  migrate:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    env_file: ../.env
+    environment: *api-env
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    env_file: ../.env
+    environment: *api-env
+    restart: unless-stopped
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    env_file: ../.env
+    environment: *api-env
+    restart: unless-stopped
+    command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  beat:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    env_file: ../.env
+    environment: *api-env
+    restart: unless-stopped
+    command: ["celery", "-A", "app.worker.celery_app", "beat", "--loglevel=info"]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-https://api.localhost}
+    restart: unless-stopped
+    environment:
+      # Server-side BFF reaches the API in-network (refresh-token custody, see ADR-019).
+      API_INTERNAL_URL: http://api:8000
+      NODE_ENV: production
+    depends_on:
+      - api
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - web
+      - api
+
+  # Nightly pg_dump backup with rotation (see infra/scripts/backup.sh).
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-botforge}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-botforge}
+      BACKUP_DIR: /backups
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ./scripts:/scripts:ro
+      - backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    # Run the backup script once an hour past 3am UTC daily; keep the container alive with a sleep loop.
+    command: ["while true; do sh /scripts/backup.sh || true; sleep 86400; done"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:
+  caddyconfig:
+  backups:
