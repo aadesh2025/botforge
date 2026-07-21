@@ -68,6 +68,14 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   builder-only **preview backdrop** swatch (local state, applied to the preview page via
   `postMessage`, never persisted). Regression tests: a config change never changes the panel's
   open/closed state; the transparent header has no solid backdrop. Widget still one file. See ADR-035.
+- **Widget mobile-collision bug fix (2026-07-21).** On viewports under 768px the floating launcher
+  and the fullscreen panel shared the same `z-index`, so an open panel painted over the launcher
+  and could swallow clicks meant for the send button (a real bug for phone visitors). `api.open`/
+  `close` now toggle a `bf-open` host class and `@media (max-width:767px){:host(.bf-open)
+  .bf-launcher{display:none}}` hides the launcher while open at phone widths, relying on the panel's
+  own header close button; ≥768px the launcher stays visible and still doubles as close. Playwright
+  covers both breakpoints. (The preview-layout widening from the same original change was reverted
+  per request; only the bug fix was re-applied.)
 
 ## Roadmap / deferred enhancements
 List any provider/channel/billing key that is stubbed and needs a real value. (See `ENV.md`.)

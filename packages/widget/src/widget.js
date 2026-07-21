@@ -235,7 +235,12 @@
       ".bf-attach{font-size:12px;color:var(--bf-muted);padding:0 2px}" +
       ".bf-brand{text-align:center;font-size:11px;color:var(--bf-muted);padding:2px}" +
       ".bf-brand a{color:var(--bf-muted);text-decoration:none}" +
-      "@media (max-width:480px){.bf-panel,:host(.bf-left) .bf-panel{width:100vw;height:100vh;max-height:100vh;bottom:0;right:0;left:0;border-radius:0}}"
+      "@media (max-width:480px){.bf-panel,:host(.bf-left) .bf-panel{width:100vw;height:100vh;max-height:100vh;bottom:0;right:0;left:0;border-radius:0}}" +
+      // Below 768px an open panel (fullscreen or nearly so) would paint over the equal-z-index
+      // launcher and intercept clicks meant for the input's send button — so hide the launcher
+      // while open at phone widths and rely on the panel's own header close button (.bf-x). Above
+      // 768px nothing changes: the launcher stays visible and doubles as the close control.
+      "@media (max-width:767px){:host(.bf-open) .bf-launcher{display:none}}"
     );
   }
 
@@ -613,6 +618,7 @@
       if (!els.panel) return;
       state.open = true;
       els.panel.classList.add("bf-show");
+      root.host.classList.add("bf-open"); // drives the <768px hide-launcher rule
       els.launcher.setAttribute("aria-expanded", "true");
       launcherContent(state.config.theme || {}, true);
       setTimeout(function () {
@@ -624,6 +630,7 @@
       if (!els.panel) return;
       state.open = false;
       els.panel.classList.remove("bf-show");
+      root.host.classList.remove("bf-open");
       els.launcher.setAttribute("aria-expanded", "false");
       launcherContent(state.config.theme || {}, false);
       emit("close");
