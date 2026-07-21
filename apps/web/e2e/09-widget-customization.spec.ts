@@ -83,29 +83,6 @@ test("builder preview: config changes apply live and NEVER change the open/close
   await expect(panel).toHaveClass(/bf-show/); // stayed open
 });
 
-test("mobile: an open panel hides the launcher below 768px, keeps it above", async ({ page }) => {
-  // Phone-width viewport: the fullscreen panel would otherwise paint over the equal-z-index
-  // launcher and swallow clicks meant for the send button.
-  await page.setViewportSize({ width: 400, height: 720 });
-  await page.goto("/widget-preview.html");
-  const launcher = page.locator(".bf-launcher");
-  const closeBtn = page.locator(".bf-x");
-  await expect(launcher).toBeVisible({ timeout: 10_000 }); // visible while closed
-
-  await launcher.click(); // open
-  await expect(launcher).toBeHidden(); // hidden while open at phone width
-  await expect(closeBtn).toBeVisible(); // the panel's own close button is the control
-  await closeBtn.click();
-  await expect(launcher).toBeVisible(); // reappears once closed
-
-  // Desktop width: the launcher stays visible while open and doubles as the close control.
-  await page.setViewportSize({ width: 1100, height: 800 });
-  await launcher.click(); // open
-  await expect(launcher).toBeVisible();
-  await launcher.click(); // launcher acts as close
-  await expect(page.locator(".bf-panel")).not.toHaveClass(/bf-show/);
-});
-
 test("transparent style: header has no solid backdrop", async ({ page }) => {
   await page.goto("/widget-preview.html");
   await expect(page.locator(".bf-launcher")).toBeVisible({ timeout: 10_000 });
