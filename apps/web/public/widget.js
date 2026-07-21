@@ -3,6 +3,11 @@
  * Embed:
  *   <script src="https://YOUR_HOST/widget.js" data-agent="PUBLIC_KEY" data-api="https://API_HOST" defer></script>
  * SDK: window.BotForge = { open, close, toggle, sendMessage, on, setUser }
+ *
+ * All theming is applied via CSS custom properties set from the fetched config, so the
+ * stylesheet is static and never needs a per-agent rebuild. In preview mode
+ * (data-preview-mode="true") the parent page posts { type: "bf-preview-config", config }
+ * to update the live widget instantly without saving.
  */
 (function () {
   "use strict";
@@ -16,11 +21,12 @@
       return s[s.length - 1];
     })();
   var PUBLIC_KEY = script && script.getAttribute("data-agent");
+  var PREVIEW = script && script.getAttribute("data-preview-mode") === "true";
   var API =
     (script && script.getAttribute("data-api")) ||
     (location.protocol + "//" + location.hostname + ":8000");
   API = API.replace(/\/$/, "");
-  if (!PUBLIC_KEY) {
+  if (!PUBLIC_KEY && !PREVIEW) {
     console.error("[BotForge] missing data-agent (public key) on the widget script tag");
     return;
   }
@@ -75,7 +81,7 @@
     return html;
   }
 
-  // ── Styles (injected into the shadow root) ─────────────────────────────────
+  // ── Theme helpers ──────────────────────────────────────────────────────────
   // Pick a foreground (near-black or white) that meets WCAG contrast on the given bg color.
   function onColor(hex) {
     var m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
@@ -86,71 +92,190 @@
       return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
     });
     var lum = 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
-    // Contrast vs white = 1.05/(lum+0.05); vs black = (lum+0.05)/0.05. Choose the stronger.
     return 1.05 / (lum + 0.05) >= (lum + 0.05) / 0.05 ? "#ffffff" : "#111318";
   }
 
-  function styles(theme) {
-    var accent = theme.primary_color || "#E8590C";
-    var onAccent = onColor(accent);
+  var FONT_STACKS = {
+    system: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif",
+    inter: "Inter,-apple-system,'Segoe UI',Roboto,sans-serif",
+    arial: "Arial,Helvetica,sans-serif",
+    georgia: "Georgia,'Times New Roman',serif",
+    courier: "'Courier New',Courier,monospace",
+  };
+
+  function logoUrl(theme) {
+    var u = theme.logo_url;
+    if (!u) return "";
+    return u.charAt(0) === "/" ? API + u : u;
+  }
+
+  // Resolve the full palette from a theme, honoring mode defaults + explicit overrides.
+  function palette(theme) {
+    theme = theme || {};
     var dark = theme.mode !== "light";
-    var bg = dark ? "#16181D" : "#FFFFFF";
-    var bg2 = dark ? "#1E2127" : "#F4F5F7";
-    var text = dark ? "#E7E9EE" : "#14161A";
-    var muted = dark ? "#9AA0AB" : "#5A616B";
-    var border = dark ? "#2A2E37" : "#E3E6EA";
-    var side = theme.position === "bottom-left" ? "left" : "right";
+    var accent = theme.primary_color || "#E8590C";
+    var btn = theme.floating_button_color || accent;
+    return {
+      accent: accent,
+      onAccent: onColor(accent),
+      bg: theme.background_color || (dark ? "#16181D" : "#FFFFFF"),
+      bg2: dark ? "#1E2127" : "#F4F5F7",
+      text: theme.text_color || (dark ? "#E7E9EE" : "#14161A"),
+      muted: dark ? "#9AA0AB" : "#5A616B",
+      border: dark ? "#2A2E37" : "#E3E6EA",
+      bubble: theme.bubble_color || accent,
+      onBubble: onColor(theme.bubble_color || accent),
+      input: theme.typing_area_color || (dark ? "#1E2127" : "#F4F5F7"),
+      btn: btn,
+      onBtn: onColor(btn),
+      font: FONT_STACKS[theme.font_family] || FONT_STACKS.system,
+      dark: dark,
+    };
+  }
+
+  // Apply a theme to the (already built) widget via CSS custom properties + classes — no rebuild.
+  function applyTheme(theme) {
+    if (!host) return;
+    var p = palette(theme);
+    var vars = {
+      "--bf-accent": p.accent,
+      "--bf-on-accent": p.onAccent,
+      "--bf-bg": p.bg,
+      "--bf-bg2": p.bg2,
+      "--bf-text": p.text,
+      "--bf-muted": p.muted,
+      "--bf-border": p.border,
+      "--bf-bubble": p.bubble,
+      "--bf-on-bubble": p.onBubble,
+      "--bf-input": p.input,
+      "--bf-btn": p.btn,
+      "--bf-on-btn": p.onBtn,
+      "--bf-font": p.font,
+    };
+    for (var k in vars) host.style.setProperty(k, vars[k]);
+    root.host.classList.toggle("bf-transparent", theme.widget_style === "transparent");
+    root.host.classList.toggle("bf-left", theme.position === "bottom-left");
+  }
+
+  // ── Static stylesheet (references CSS vars set by applyTheme) ───────────────
+  function styles() {
     return (
       ":host{all:initial}" +
-      "*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}" +
-      ".bf-launcher{position:fixed;bottom:20px;" + side + ":20px;z-index:2147483000;display:flex;align-items:center;gap:10px;" +
-      "height:56px;padding:0 18px 0 16px;border:none;border-radius:28px;cursor:pointer;color:" + onAccent + ";background:" + accent + ";" +
-      "box-shadow:0 8px 24px rgba(0,0,0,.28);font-size:15px;font-weight:600;transition:transform .15s}" +
+      "*{box-sizing:border-box;font-family:var(--bf-font)}" +
+      // launcher (right by default; :host(.bf-left) flips to the left)
+      ".bf-launcher{position:fixed;bottom:20px;right:20px;z-index:2147483000;" +
+      "display:flex;align-items:center;justify-content:center;gap:10px;min-width:56px;height:56px;" +
+      "padding:0;border:none;border-radius:50%;cursor:pointer;color:var(--bf-on-btn);background:var(--bf-btn);" +
+      "box-shadow:0 8px 24px rgba(0,0,0,.28);font-size:15px;font-weight:600;transition:transform .15s;overflow:hidden}" +
+      ".bf-launcher.bf-pill{border-radius:28px;padding:0 18px 0 16px}" +
+      ".bf-launcher.bf-square{border-radius:18px}" +
       ".bf-launcher:hover{transform:translateY(-2px)}" +
-      ".bf-launcher svg{width:22px;height:22px}" +
-      ".bf-panel{position:fixed;bottom:88px;" + side + ":20px;z-index:2147483000;width:380px;max-width:calc(100vw - 32px);" +
-      "height:600px;max-height:calc(100vh - 120px);background:" + bg + ";color:" + text + ";border:1px solid " + border + ";" +
-      "border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.35);display:none;flex-direction:column;overflow:hidden}" +
+      ".bf-launcher svg{width:24px;height:24px}" +
+      ".bf-launcher img.bf-logo{width:34px;height:34px;border-radius:50%;object-fit:cover}" +
+      ".bf-launcher .bf-lbl{white-space:nowrap}" +
+      ".bf-launcher .bf-chip-logo{width:26px;height:26px;border-radius:50%;object-fit:cover}" +
+      // pulse-ring animation
+      ".bf-launcher.bf-pulse::after{content:'';position:absolute;inset:0;border-radius:50%;" +
+      "box-shadow:0 0 0 0 var(--bf-btn);animation:bfpulse 1.8s cubic-bezier(.66,0,0,1) infinite;z-index:-1}" +
+      "@keyframes bfpulse{to{box-shadow:0 0 0 16px rgba(0,0,0,0)}}" +
+      "@media (prefers-reduced-motion:reduce){.bf-launcher.bf-pulse::after{animation:none}}" +
+      // panel
+      ".bf-panel{position:fixed;bottom:88px;right:20px;z-index:2147483000;width:380px;" +
+      "max-width:calc(100vw - 32px);height:600px;max-height:calc(100vh - 120px);background:var(--bf-bg);" +
+      "color:var(--bf-text);border:1px solid var(--bf-border);border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.35);" +
+      "display:none;flex-direction:column;overflow:hidden}" +
       ".bf-panel.bf-show{display:flex}" +
-      ".bf-head{display:flex;align-items:center;gap:10px;padding:14px 16px;background:" + accent + ";color:" + onAccent + "}" +
+      ":host(.bf-left) .bf-launcher,:host(.bf-left) .bf-panel{right:auto;left:20px}" +
+      ":host(.bf-transparent) .bf-panel{background:transparent;border-color:transparent;box-shadow:none}" +
+      ":host(.bf-transparent) .bf-msgs{background:transparent}" +
+      ":host(.bf-transparent) .bf-foot{background:rgba(127,127,127,.14);backdrop-filter:blur(10px);border-radius:12px;margin:8px;border:1px solid var(--bf-border)}" +
+      ":host(.bf-transparent) .bf-bot .bf-bubble{backdrop-filter:blur(10px);background:rgba(127,127,127,.18)}" +
+      ".bf-head{display:flex;align-items:center;gap:10px;padding:14px 16px;background:var(--bf-accent);color:var(--bf-on-accent)}" +
+      ".bf-head .bf-avatar{width:26px;height:26px;border-radius:50%;object-fit:cover}" +
       ".bf-head .bf-title{font-weight:700;font-size:15px;flex:1}" +
-      ".bf-x{background:transparent;border:none;color:" + onAccent + ";cursor:pointer;font-size:20px;line-height:1;opacity:.9}" +
-      ".bf-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;background:" + bg + "}" +
+      ".bf-x{background:transparent;border:none;color:var(--bf-on-accent);cursor:pointer;font-size:20px;line-height:1;opacity:.9}" +
+      ".bf-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;background:var(--bf-bg)}" +
       ".bf-row{display:flex;gap:8px;max-width:100%}" +
       ".bf-row.bf-user{flex-direction:row-reverse}" +
+      ".bf-avatar-sm{width:24px;height:24px;border-radius:50%;object-fit:cover;flex:0 0 auto;align-self:flex-end}" +
       ".bf-bubble{max-width:80%;padding:9px 12px;border-radius:12px;font-size:14px;line-height:1.5;white-space:normal;word-wrap:break-word}" +
-      ".bf-bot .bf-bubble{background:" + bg2 + ";color:" + text + ";border:1px solid " + border + "}" +
-      ".bf-user .bf-bubble{background:" + accent + ";color:" + onAccent + "}" +
+      ".bf-bot .bf-bubble{background:var(--bf-bg2);color:var(--bf-text);border:1px solid var(--bf-border)}" +
+      ".bf-user .bf-bubble{background:var(--bf-bubble);color:var(--bf-on-bubble)}" +
       ".bf-bubble pre{background:rgba(0,0,0,.25);padding:8px;border-radius:8px;overflow-x:auto;margin:6px 0}" +
       ".bf-bubble code{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}" +
-      ".bf-bubble a{color:" + accent + "}" +
-      ".bf-typing{display:inline-flex;gap:3px}.bf-typing i{width:6px;height:6px;border-radius:50%;background:" + muted + ";animation:bfb 1s infinite}" +
+      ".bf-bubble a{color:var(--bf-accent)}" +
+      ".bf-typing{display:inline-flex;gap:3px}.bf-typing i{width:6px;height:6px;border-radius:50%;background:var(--bf-muted);animation:bfb 1s infinite}" +
       ".bf-typing i:nth-child(2){animation-delay:.2s}.bf-typing i:nth-child(3){animation-delay:.4s}" +
       "@keyframes bfb{0%,60%,100%{opacity:.3}30%{opacity:1}}" +
+      "@media (prefers-reduced-motion:reduce){.bf-typing i{animation:none;opacity:.6}}" +
       ".bf-chips{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 8px}" +
-      ".bf-chip{border:1px solid " + border + ";background:" + bg2 + ";color:" + text + ";border-radius:14px;padding:6px 10px;" +
-      "font-size:12.5px;cursor:pointer}" +
-      ".bf-chip:hover{border-color:" + accent + "}" +
-      ".bf-foot{border-top:1px solid " + border + ";padding:10px;display:flex;flex-direction:column;gap:6px;background:" + bg + "}" +
-      ".bf-inrow{display:flex;align-items:flex-end;gap:8px}" +
-      ".bf-file{flex:0 0 auto;width:36px;height:36px;border-radius:9px;border:1px solid " + border + ";background:" + bg2 + ";" +
-      "color:" + muted + ";cursor:pointer;font-size:17px}" +
-      ".bf-ta{flex:1;resize:none;max-height:120px;min-height:38px;padding:9px 11px;border-radius:9px;border:1px solid " + border + ";" +
-      "background:" + bg2 + ";color:" + text + ";font-size:14px;outline:none}" +
-      ".bf-ta:focus{border-color:" + accent + "}" +
-      ".bf-send{flex:0 0 auto;width:38px;height:38px;border-radius:9px;border:none;cursor:pointer;background:" + accent + ";color:" + onAccent + ";font-size:16px}" +
+      ".bf-chip{border:1px solid var(--bf-border);background:var(--bf-bg2);color:var(--bf-text);border-radius:14px;padding:6px 10px;font-size:12.5px;cursor:pointer}" +
+      ".bf-chip:hover{border-color:var(--bf-accent)}" +
+      ".bf-foot{border-top:1px solid var(--bf-border);padding:10px;display:flex;flex-direction:column;gap:6px;background:var(--bf-bg)}" +
+      ".bf-inrow{display:flex;align-items:flex-end;gap:8px;position:relative}" +
+      ".bf-iconbtn{flex:0 0 auto;width:36px;height:36px;border-radius:9px;border:1px solid var(--bf-border);background:var(--bf-input);color:var(--bf-muted);cursor:pointer;font-size:17px}" +
+      ".bf-emoji-pop{position:absolute;bottom:44px;left:0;display:flex;flex-wrap:wrap;gap:4px;width:220px;padding:8px;border:1px solid var(--bf-border);background:var(--bf-bg2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.3)}" +
+      ".bf-emoji-pop button{border:none;background:transparent;cursor:pointer;font-size:18px;line-height:1;padding:3px;border-radius:6px}" +
+      ".bf-emoji-pop button:hover{background:var(--bf-input)}" +
+      ".bf-ta{flex:1;resize:none;max-height:120px;min-height:38px;padding:9px 11px;border-radius:9px;border:1px solid var(--bf-border);" +
+      "background:var(--bf-input);color:var(--bf-text);font-size:14px;outline:none;font-family:var(--bf-font)}" +
+      ".bf-ta:focus{border-color:var(--bf-accent)}" +
+      ".bf-send{flex:0 0 auto;width:38px;height:38px;border-radius:9px;border:none;cursor:pointer;background:var(--bf-accent);color:var(--bf-on-accent);font-size:16px}" +
       ".bf-send:disabled{opacity:.5;cursor:default}" +
-      ".bf-attach{font-size:12px;color:" + muted + ";padding:0 2px}" +
-      ".bf-brand{text-align:center;font-size:11px;color:" + muted + ";padding:2px}" +
-      ".bf-brand a{color:" + muted + ";text-decoration:none}" +
-      "@media (max-width:480px){.bf-panel{width:100vw;height:100vh;max-height:100vh;bottom:0;" + side + ":0;border-radius:0}}"
+      ".bf-attach{font-size:12px;color:var(--bf-muted);padding:0 2px}" +
+      ".bf-brand{text-align:center;font-size:11px;color:var(--bf-muted);padding:2px}" +
+      ".bf-brand a{color:var(--bf-muted);text-decoration:none}" +
+      "@media (max-width:480px){.bf-panel,:host(.bf-left) .bf-panel{width:100vw;height:100vh;max-height:100vh;bottom:0;right:0;left:0;border-radius:0}}"
     );
   }
 
+  // ── Icons (inline SVG, no icon library) ────────────────────────────────────
   var ICON_CHAT =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+  var ICON_MESSAGE =
+    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><rect x="6" y="8" width="12" height="1.8" rx=".9" fill="var(--bf-btn)"/><rect x="6" y="11.4" width="8" height="1.8" rx=".9" fill="var(--bf-btn)"/></svg>';
+  var ICON_DOTS =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><circle cx="8" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1" fill="currentColor" stroke="none"/></svg>';
 
   var root, host, els = {};
+
+  // Build the launcher's inner content + shape class for a given design (or the close button).
+  function launcherContent(theme, open) {
+    var l = els.launcher;
+    l.className = "bf-launcher";
+    if (open) {
+      l.setAttribute("aria-label", "Close chat");
+      l.innerHTML = "&times;";
+      l.style.fontSize = "26px";
+      return;
+    }
+    l.setAttribute("aria-label", "Open chat");
+    l.style.fontSize = "";
+    var style = theme.floating_button_style || null; // null → legacy pill
+    var logo = logoUrl(theme);
+    var logoImg = logo ? '<img class="bf-logo" src="' + logo + '" alt="" />' : "";
+    var label = escapeHtml(theme.launcher_text || "Chat with us");
+    if (style === "pill-text" || style === null) {
+      l.classList.add("bf-pill");
+      l.innerHTML = (logo ? '<img class="bf-chip-logo" src="' + logo + '" alt="" />' : ICON_CHAT) +
+        '<span class="bf-lbl">' + label + "</span>";
+    } else if (style === "rounded-square") {
+      l.classList.add("bf-square");
+      l.innerHTML = logoImg || ICON_CHAT;
+    } else if (style === "circle-message") {
+      l.innerHTML = logoImg || ICON_MESSAGE;
+    } else if (style === "circle-dots") {
+      l.innerHTML = logoImg || ICON_DOTS;
+    } else if (style === "pulse-ring") {
+      l.classList.add("bf-pulse");
+      l.innerHTML = logoImg || ICON_CHAT;
+    } else {
+      // circle-chat (default design)
+      l.innerHTML = logoImg || ICON_CHAT;
+    }
+  }
+
+  var EMOJIS = ["😀", "😄", "😊", "👍", "🙏", "🎉", "❤️", "🔥", "😎", "🤔", "😅", "🙌", "👏", "✅", "⭐", "💡", "😍", "🚀"];
 
   function build() {
     var theme = state.config.theme || {};
@@ -160,28 +285,34 @@
     root = host.attachShadow({ mode: "open" });
 
     var style = document.createElement("style");
-    style.textContent = styles(theme);
+    style.textContent = styles();
     root.appendChild(style);
 
     var launcher = document.createElement("button");
     launcher.className = "bf-launcher";
-    launcher.setAttribute("aria-label", "Open chat");
-    launcher.innerHTML = ICON_CHAT + "<span>" + escapeHtml(theme.launcher_text || "Chat") + "</span>";
-    launcher.addEventListener("click", api.toggle);
     root.appendChild(launcher);
     els.launcher = launcher;
+    launcher.addEventListener("click", api.toggle);
+
+    var buttons = theme.input_bar_buttons || ["attachment"];
+    var hasAttach = buttons.indexOf("attachment") !== -1;
+    var hasEmoji = buttons.indexOf("emoji") !== -1;
+    var logo = logoUrl(theme);
 
     var panel = document.createElement("div");
     panel.className = "bf-panel";
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-label", "Chat window");
     panel.innerHTML =
-      '<div class="bf-head"><div class="bf-title"></div><button class="bf-x" aria-label="Close chat">&times;</button></div>' +
+      '<div class="bf-head">' +
+      (logo ? '<img class="bf-avatar" src="' + logo + '" alt="" />' : "") +
+      '<div class="bf-title"></div><button class="bf-x" aria-label="Close chat">&times;</button></div>' +
       '<div class="bf-msgs"></div>' +
       '<div class="bf-chips"></div>' +
       '<div class="bf-foot"><div class="bf-attach" style="display:none"></div>' +
       '<div class="bf-inrow">' +
-      '<button class="bf-file" aria-label="Attach file">📎</button>' +
+      (hasAttach ? '<button class="bf-iconbtn bf-file" aria-label="Attach file">📎</button>' : "") +
+      (hasEmoji ? '<button class="bf-iconbtn bf-emoji" aria-label="Insert emoji">🙂</button>' : "") +
       '<textarea class="bf-ta" rows="1" placeholder="Type a message…" aria-label="Message"></textarea>' +
       '<button class="bf-send" aria-label="Send">➤</button>' +
       "</div>" +
@@ -198,8 +329,13 @@
     els.send = panel.querySelector(".bf-send");
     els.attach = panel.querySelector(".bf-attach");
     els.fileBtn = panel.querySelector(".bf-file");
+    els.emojiBtn = panel.querySelector(".bf-emoji");
+    els.inrow = panel.querySelector(".bf-inrow");
     els.fileInput = panel.querySelector('input[type="file"]');
     els.title.textContent = state.config.name || "Chat";
+
+    applyTheme(theme);
+    launcherContent(theme, false);
 
     panel.querySelector(".bf-x").addEventListener("click", api.close);
     els.send.addEventListener("click", function () {
@@ -214,16 +350,41 @@
       }
     });
     els.ta.addEventListener("input", autoGrow);
-    els.fileBtn.addEventListener("click", function () {
-      els.fileInput.click();
-    });
-    els.fileInput.addEventListener("change", onFile);
+    if (els.fileBtn) {
+      els.fileBtn.addEventListener("click", function () {
+        els.fileInput.click();
+      });
+      els.fileInput.addEventListener("change", onFile);
+    }
+    if (els.emojiBtn) els.emojiBtn.addEventListener("click", toggleEmoji);
 
     renderChips();
     if (state.config.welcome_message) {
       addMessage("bot", state.config.welcome_message);
     }
     emit("ready", { config: state.config });
+  }
+
+  function toggleEmoji() {
+    var existing = els.inrow.querySelector(".bf-emoji-pop");
+    if (existing) {
+      existing.remove();
+      return;
+    }
+    var pop = document.createElement("div");
+    pop.className = "bf-emoji-pop";
+    EMOJIS.forEach(function (e) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = e;
+      b.addEventListener("click", function () {
+        els.ta.value += e;
+        els.ta.focus();
+        pop.remove();
+      });
+      pop.appendChild(b);
+    });
+    els.inrow.appendChild(pop);
   }
 
   function autoGrow() {
@@ -258,6 +419,16 @@
   function addMessage(who, text) {
     var row = document.createElement("div");
     row.className = "bf-row " + (who === "user" ? "bf-user" : "bf-bot");
+    if (who === "bot") {
+      var logo = logoUrl(state.config.theme || {});
+      if (logo) {
+        var av = document.createElement("img");
+        av.className = "bf-avatar-sm";
+        av.src = logo;
+        av.alt = "";
+        row.appendChild(av);
+      }
+    }
     var bubble = document.createElement("div");
     bubble.className = "bf-bubble";
     if (who === "bot") bubble.innerHTML = text ? renderMarkdown(text) : "";
@@ -290,6 +461,12 @@
 
   async function sendMessage(text) {
     if (!text || state.sending) return;
+    if (PREVIEW) {
+      // In preview mode there's no live backend turn — just echo locally so the design shows.
+      addMessage("user", text);
+      addMessage("bot", "This is a preview. Your real agent will reply here.");
+      return;
+    }
     if (!state.open) api.open();
     state.sending = true;
     els.send.disabled = true;
@@ -405,6 +582,7 @@
       state.open = true;
       els.panel.classList.add("bf-show");
       els.launcher.setAttribute("aria-expanded", "true");
+      launcherContent(state.config.theme || {}, true);
       setTimeout(function () {
         els.ta && els.ta.focus();
       }, 50);
@@ -414,6 +592,8 @@
       if (!els.panel) return;
       state.open = false;
       els.panel.classList.remove("bf-show");
+      els.launcher.setAttribute("aria-expanded", "false");
+      launcherContent(state.config.theme || {}, false);
       emit("close");
     },
     toggle: function () {
@@ -430,7 +610,44 @@
     },
   };
 
+  // ── Preview mode: apply live config overrides posted by the builder ─────────
+  function rebuildForPreview(config) {
+    if (host && host.parentNode) host.parentNode.removeChild(host);
+    els = {};
+    state.config = config;
+    build();
+    api.open();
+  }
+
+  function previewListener(ev) {
+    var d = ev && ev.data;
+    if (!d || d.type !== "bf-preview-config" || !d.config) return;
+    var incoming = d.config;
+    var base = state.config || { theme: {} };
+    // Merge posted config over the base (theme is replaced wholesale from the builder's full state).
+    state.config = {
+      agent_id: base.agent_id,
+      name: incoming.name != null ? incoming.name : base.name,
+      welcome_message: incoming.welcome_message != null ? incoming.welcome_message : base.welcome_message,
+      suggested_prompts: incoming.suggested_prompts || base.suggested_prompts || [],
+      theme: incoming.theme || base.theme || {},
+    };
+    rebuildForPreview(state.config);
+  }
+
   async function init() {
+    if (PREVIEW) {
+      // Start from an empty/default config; the parent posts the real one immediately.
+      state.config = { agent_id: null, name: "Assistant", welcome_message: "Hi! How can I help you today?", suggested_prompts: [], theme: {} };
+      build();
+      api.open();
+      window.addEventListener("message", previewListener);
+      try {
+        parent.postMessage({ type: "bf-preview-ready" }, "*");
+      } catch (e) {}
+      window.BotForge = api;
+      return;
+    }
     try {
       var r = await fetch(API + "/v1/public/agents/" + PUBLIC_KEY + "/config");
       if (!r.ok) throw new Error("config " + r.status);

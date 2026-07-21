@@ -36,6 +36,29 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-035: Widget customization parity — config-driven, CSS-vars, merge-on-write
+- **Date:** 2026-07-21
+- **Status:** accepted
+- **Context:** bring the embeddable widget's theming to full parity with a richer sibling product,
+  natively in BotForge's stack, without ever changing an already-pasted embed snippet.
+- **Decisions:**
+  - **Everything flows through the live config fetch.** All new controls extend the existing
+    `WidgetTheme` returned by `GET /v1/public/agents/{key}/config` (fetched on every widget load), so
+    a saved change reaches every deployed embed on the next page load with zero re-copying.
+  - **Nullable-everywhere = today's look.** Every new field defaults to null/legacy so an untouched
+    agent renders exactly as before. `floating_button_style: null` = the current text pill.
+  - **CSS custom properties, not a per-agent rebuild.** The widget applies colors/font/style via
+    `--bf-*` variables set at mount, so `widget.js`/`widget.css` stay static; the same mechanism lets
+    `data-preview-mode` apply posted config instantly for the builder's live preview.
+  - **Merge-on-write.** The version PATCH deep-merges `persona.widget` (validated hex/enums → typed
+    error), so a partial update (e.g. a logo) never nulls previously-set colors — reusing the
+    existing debounced autosave rather than a bespoke endpoint.
+  - **Logo storage reuses the KB upload path** (`UPLOAD_DIR`, no new env var); SVG is rejected
+    outright and both MIME and extension are checked (either alone is spoofable). Served public +
+    cross-origin because the widget embeds on arbitrary sites.
+  - **Real-widget iframe preview** over a fake CSS mock: the builder loads the actual bundle in
+    preview mode and posts config via `postMessage` — the preview is exactly what a visitor sees.
+
 ### ADR-034: Phase 20 — Redis-bridged hub, httpOnly refresh via BFF, prod compose/K8s/CD
 - **Date:** 2026-07-19
 - **Status:** accepted

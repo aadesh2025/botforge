@@ -34,13 +34,46 @@ def _theme(version: AgentVersion) -> schemas.WidgetTheme:
     persona = version.persona or {}
     widget = persona.get("widget") if isinstance(persona.get("widget"), dict) else {}
     widget = widget or {}
+    buttons = widget.get("inputBarButtons")
     return schemas.WidgetTheme(
         primary_color=widget.get("primaryColor", "#E8590C"),
         position=widget.get("position", "bottom-right"),
         launcher_text=widget.get("launcherText", "Chat with us"),
         branding=widget.get("branding", True),
         mode=widget.get("mode", "dark"),
+        widget_style=widget.get("widgetStyle", "solid"),
+        background_color=widget.get("backgroundColor"),
+        text_color=widget.get("textColor"),
+        bubble_color=widget.get("bubbleColor"),
+        typing_area_color=widget.get("typingAreaColor"),
+        font_family=widget.get("fontFamily", "system"),
+        logo_url=widget.get("logoUrl"),
+        floating_button_style=widget.get("floatingButtonStyle"),
+        floating_button_color=widget.get("floatingButtonColor"),
+        input_bar_buttons=buttons if isinstance(buttons, list) else ["attachment"],
     )
+
+
+_LOGO_MEDIA = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
+
+def widget_logo_file(org_id: uuid.UUID, agent_id: uuid.UUID) -> tuple[str, str] | None:
+    """Return (path, media_type) for an agent's stored widget logo, or None."""
+    from pathlib import Path
+
+    from app.core.config import settings
+
+    matches = sorted(Path(settings.upload_dir, str(org_id)).glob(f"widget-logo-{agent_id}.*"))
+    if not matches:
+        return None
+    path = matches[0]
+    return str(path), _LOGO_MEDIA.get(path.suffix.lower(), "application/octet-stream")
 
 
 async def get_config(session: AsyncSession, public_key: str) -> schemas.PublicConfig:

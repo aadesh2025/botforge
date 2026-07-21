@@ -5,8 +5,9 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
@@ -14,6 +15,10 @@ from app.modules.agents import schemas, service
 from app.modules.orgs.deps import OrgContext, current_org
 
 router = APIRouter(prefix="/v1/agents", tags=["agents"])
+
+
+class WidgetLogoResponse(BaseModel):
+    logo_url: str
 
 
 @router.post("", response_model=schemas.AgentOut, status_code=status.HTTP_201_CREATED)
@@ -49,6 +54,22 @@ async def update_agent(
     ctx: OrgContext = Depends(current_org),
 ) -> schemas.AgentOut:
     return await service.update_agent(session, ctx, agent_id, data)
+
+
+@router.post("/{agent_id}/widget/logo", response_model=WidgetLogoResponse)
+async def upload_widget_logo(
+    agent_id: uuid.UUID,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> WidgetLogoResponse:
+    """Upload a widget/assistant logo (png/jpg/webp/gif, ≤2MB). Returns its public URL; the
+    caller stores it in the draft's persona.widget.logoUrl and autosaves like any other field."""
+    data = await file.read()
+    result = await service.save_widget_logo(
+        session, ctx, agent_id, filename=file.filename, content_type=file.content_type, data=data
+    )
+    return WidgetLogoResponse(**result)
 
 
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -35,12 +35,34 @@ export interface FeatureToggles {
   handoff: boolean;
 }
 
+export type FloatingButtonStyle =
+  | "circle-chat"
+  | "circle-message"
+  | "circle-dots"
+  | "rounded-square"
+  | "pill-text"
+  | "pulse-ring";
+
+export type WidgetFont = "system" | "inter" | "arial" | "georgia" | "courier";
+export type InputBarButton = "attachment" | "emoji";
+
 export interface WidgetConfig {
   primaryColor: string;
   position: "bottom-right" | "bottom-left";
   launcherText: string;
   branding: boolean;
   mode: "dark" | "light";
+  // Extended customization — null/defaults keep the current look for untouched agents.
+  widgetStyle: "solid" | "transparent";
+  backgroundColor: string | null;
+  textColor: string | null;
+  bubbleColor: string | null;
+  typingAreaColor: string | null;
+  fontFamily: WidgetFont;
+  logoUrl: string | null;
+  floatingButtonStyle: FloatingButtonStyle | null;
+  floatingButtonColor: string | null;
+  inputBarButtons: InputBarButton[];
 }
 
 export interface AgentDraft {
@@ -162,6 +184,16 @@ export function makeDraft(id: string): AgentDraft {
       launcherText: "Chat with us",
       branding: true,
       mode: "dark",
+      widgetStyle: "solid",
+      backgroundColor: null,
+      textColor: null,
+      bubbleColor: null,
+      typingAreaColor: null,
+      fontFamily: "system",
+      logoUrl: null,
+      floatingButtonStyle: null,
+      floatingButtonColor: null,
+      inputBarButtons: ["attachment"],
     },
   };
 }

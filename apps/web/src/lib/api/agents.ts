@@ -1,7 +1,14 @@
 "use client";
 
-import { api, apiStream } from "./client";
+import { api, apiForm, apiStream } from "./client";
 import type { ApiAgent, ApiVersion } from "./types";
+
+/** Upload a widget/assistant logo for an agent. Returns the public logo URL (a relative API path). */
+export function uploadWidgetLogo(agentId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return apiForm<{ logo_url: string }>(`/v1/agents/${agentId}/widget/logo`, form);
+}
 
 export function listAgents() {
   return api<ApiAgent[]>("/v1/agents", { orgScoped: true });

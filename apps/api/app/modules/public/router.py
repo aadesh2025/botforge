@@ -6,9 +6,10 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.ratelimit import rate_limit
 from app.db.session import SessionFactory, get_session
@@ -26,6 +27,23 @@ async def get_config(
     public_key: str, session: AsyncSession = Depends(get_session)
 ) -> schemas.PublicConfig:
     return await service.get_config(session, public_key)
+
+
+@router.get("/agents/{public_key}/widget-logo")
+async def get_widget_logo(
+    public_key: str, session: AsyncSession = Depends(get_session)
+) -> FileResponse:
+    """Serve an agent's widget logo. Public + cross-origin (the widget embeds on any site)."""
+    agent, _version = await service._resolve_agent(session, public_key)
+    found = service.widget_logo_file(agent.organization_id, agent.id)
+    if found is None:
+        raise AppError("widget.logo_not_found", "No logo set for this agent.", 404)
+    path, media_type = found
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*"},
+    )
 
 
 @router.post(

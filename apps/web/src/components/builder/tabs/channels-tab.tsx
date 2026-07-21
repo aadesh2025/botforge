@@ -1,8 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, Hash, Loader2, MessageSquare, Phone, Plus, Send, Trash2 } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Hash,
+  Loader2,
+  MessageCircle,
+  MessageSquare,
+  MoreHorizontal,
+  Phone,
+  Send,
+  Square,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { Field, SectionCard } from "@/components/builder/field";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -10,8 +23,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useBuilder } from "@/lib/store/builder";
-import { getAgent } from "@/lib/api/agents";
+import { getAgent, uploadWidgetLogo } from "@/lib/api/agents";
 import { API_BASE } from "@/lib/api/config";
+import type { AgentDraft, FloatingButtonStyle, InputBarButton, WidgetFont } from "@/lib/mock/builder";
 import {
   createChannel,
   deleteChannel,
@@ -20,6 +34,53 @@ import {
   listChannels,
   type ChannelType,
 } from "@/lib/api/channels";
+
+type Widget = AgentDraft["widget"];
+
+const FONT_OPTIONS: { value: WidgetFont; label: string }[] = [
+  { value: "system", label: "System default" },
+  { value: "inter", label: "Inter" },
+  { value: "arial", label: "Arial" },
+  { value: "georgia", label: "Georgia" },
+  { value: "courier", label: "Courier New" },
+];
+
+const LAUNCHER_OPTIONS: { value: FloatingButtonStyle | null; label: string; icon: typeof MessageSquare; square?: boolean; pill?: boolean }[] = [
+  { value: null, label: "Text (default)", icon: MessageSquare, pill: true },
+  { value: "circle-chat", label: "Chat circle", icon: MessageSquare },
+  { value: "circle-message", label: "Message", icon: MessageCircle },
+  { value: "circle-dots", label: "Dots", icon: MoreHorizontal },
+  { value: "rounded-square", label: "Square", icon: Square },
+  { value: "pill-text", label: "Pill + text", icon: MessageSquare, pill: true },
+  { value: "pulse-ring", label: "Pulse ring", icon: MessageSquare },
+];
+
+/** Map the builder draft into the snake_case config the widget bundle expects. */
+function toPreviewConfig(draft: AgentDraft) {
+  const w = draft.widget;
+  return {
+    name: draft.persona.displayName || draft.name,
+    welcome_message: draft.persona.welcomeMessage || "Hi! How can I help you today?",
+    suggested_prompts: draft.persona.suggestedPrompts ?? [],
+    theme: {
+      primary_color: w.primaryColor,
+      position: w.position,
+      launcher_text: w.launcherText,
+      branding: w.branding,
+      mode: w.mode,
+      widget_style: w.widgetStyle,
+      background_color: w.backgroundColor,
+      text_color: w.textColor,
+      bubble_color: w.bubbleColor,
+      typing_area_color: w.typingAreaColor,
+      font_family: w.fontFamily,
+      logo_url: w.logoUrl,
+      floating_button_style: w.floatingButtonStyle,
+      floating_button_color: w.floatingButtonColor,
+      input_bar_buttons: w.inputBarButtons,
+    },
+  };
+}
 
 export function ChannelsTab() {
   const draft = useBuilder((s) => s.draft);
@@ -35,6 +96,7 @@ export function ChannelsTab() {
 
   if (!draft) return null;
   const w = draft.widget;
+  const setW = (fn: (widget: Widget) => void) => update((d) => fn(d.widget));
   const publicKey = agent?.public_key ?? "YOUR_PUBLIC_KEY";
   const webOrigin = typeof window !== "undefined" ? window.location.origin : "";
   const snippet = `<script\n  src="${webOrigin}/widget.js"\n  data-agent="${publicKey}"\n  data-api="${API_BASE}"\n  defer></script>`;
@@ -49,103 +111,355 @@ export function ChannelsTab() {
     }
   };
 
+  const transparent = w.widgetStyle === "transparent";
+
   return (
     <div className="space-y-6">
-    <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-      <div className="space-y-6">
-        <SectionCard title="Web widget" description="An embeddable chat bubble for any website.">
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Accent color">
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={w.primaryColor}
-                  onChange={(e) => update((d) => void (d.widget.primaryColor = e.target.value))}
-                  className="h-9 w-12 cursor-pointer rounded-md border border-border bg-surface-2"
-                />
-                <Input
-                  value={w.primaryColor}
-                  onChange={(e) => update((d) => void (d.widget.primaryColor = e.target.value))}
-                  className="font-mono"
-                />
+      <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="space-y-6">
+          <SectionCard title="Web widget" description="Design an embeddable chat bubble for any website.">
+            {/* Style + font */}
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field label="Widget style">
+                <div className="flex rounded-md border border-border bg-surface-2 p-0.5">
+                  {(["solid", "transparent"] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setW((x) => void (x.widgetStyle = s))}
+                      className={`flex-1 rounded px-2 py-1.5 text-xs capitalize transition-colors ${
+                        w.widgetStyle === s ? "bg-ember text-[#0A0B0D]" : "text-muted hover:text-text"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="Font">
+                <select
+                  value={w.fontFamily}
+                  onChange={(e) => setW((x) => void (x.fontFamily = e.target.value as WidgetFont))}
+                  className="h-9 w-full rounded-md border border-border bg-surface-2 px-2 text-sm text-text"
+                >
+                  {FONT_OPTIONS.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            {/* Colors */}
+            <div className="grid gap-5 sm:grid-cols-2">
+              <ColorInput label="Accent / launcher bubble" value={w.primaryColor} onChange={(v) => setW((x) => void (x.primaryColor = v))} />
+              <NullableColor label="Bubble (user messages)" value={w.bubbleColor} fallback={w.primaryColor} onChange={(v) => setW((x) => void (x.bubbleColor = v))} />
+              <NullableColor
+                label="Background"
+                value={w.backgroundColor}
+                fallback={w.mode === "light" ? "#FFFFFF" : "#16181D"}
+                onChange={(v) => setW((x) => void (x.backgroundColor = v))}
+                disabled={transparent}
+                disabledHint="No panel to color in transparent style"
+              />
+              <NullableColor label="Text" value={w.textColor} fallback={w.mode === "light" ? "#14161A" : "#E7E9EE"} onChange={(v) => setW((x) => void (x.textColor = v))} />
+              <NullableColor label="Typing area" value={w.typingAreaColor} fallback={w.mode === "light" ? "#F4F5F7" : "#1E2127"} onChange={(v) => setW((x) => void (x.typingAreaColor = v))} />
+              <Field label="Theme mode">
+                <select
+                  value={w.mode}
+                  onChange={(e) => setW((x) => void (x.mode = e.target.value as "dark" | "light"))}
+                  className="h-9 w-full rounded-md border border-border bg-surface-2 px-2 text-sm text-text"
+                >
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </Field>
+            </div>
+
+            {/* Launcher design gallery */}
+            <Field label="Floating button design">
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+                {LAUNCHER_OPTIONS.map((opt) => {
+                  const selected = w.floatingButtonStyle === opt.value;
+                  const Icon = opt.icon;
+                  const btnColor = w.floatingButtonColor ?? w.primaryColor;
+                  return (
+                    <button
+                      key={String(opt.value)}
+                      onClick={() => setW((x) => void (x.floatingButtonStyle = opt.value))}
+                      title={opt.label}
+                      className={`flex flex-col items-center gap-1.5 rounded-lg border p-2 transition-colors ${
+                        selected ? "border-ember bg-ember/[0.06]" : "border-border hover:border-border-strong"
+                      }`}
+                    >
+                      <span
+                        className={`grid size-9 place-items-center text-white ${
+                          opt.square ? "rounded-lg" : opt.pill ? "rounded-full px-2" : "rounded-full"
+                        } ${opt.value === "pulse-ring" ? "ring-2 ring-offset-1 ring-offset-transparent" : ""}`}
+                        style={{ background: btnColor }}
+                      >
+                        <Icon className="size-4" />
+                      </span>
+                      <span className="text-[10px] leading-tight text-faint">{opt.label}</span>
+                    </button>
+                  );
+                })}
               </div>
             </Field>
-            <Field label="Launcher text">
-              <Input
-                value={w.launcherText}
-                onChange={(e) => update((d) => void (d.widget.launcherText = e.target.value))}
-              />
-            </Field>
-            <Field label="Position">
-              <select
-                value={w.position}
-                onChange={(e) =>
-                  update((d) => void (d.widget.position = e.target.value as "bottom-right" | "bottom-left"))
-                }
-                className="h-9 w-full rounded-md border border-border bg-surface-2 px-2 text-sm text-text"
-              >
-                <option value="bottom-right">Bottom right</option>
-                <option value="bottom-left">Bottom left</option>
-              </select>
-            </Field>
-            <Field label="Theme">
-              <select
-                value={w.mode}
-                onChange={(e) => update((d) => void (d.widget.mode = e.target.value as "dark" | "light"))}
-                className="h-9 w-full rounded-md border border-border bg-surface-2 px-2 text-sm text-text"
-              >
-                <option value="dark">Dark</option>
-                <option value="light">Light</option>
-              </select>
-            </Field>
-          </div>
-          <div className="flex items-center gap-3 rounded-md border border-border bg-surface-2/50 p-3">
-            <div className="flex-1">
-              <div className="text-sm font-medium text-text">“Powered by BotForge” badge</div>
-              <div className="text-xs text-muted">Show a small attribution in the widget footer.</div>
+
+            <div className="grid gap-5 sm:grid-cols-2">
+              <NullableColor label="Launcher button color" value={w.floatingButtonColor} fallback={w.primaryColor} onChange={(v) => setW((x) => void (x.floatingButtonColor = v))} />
+              <Field label="Launcher text (pill designs)">
+                <Input value={w.launcherText} onChange={(e) => setW((x) => void (x.launcherText = e.target.value))} />
+              </Field>
+              <Field label="Position">
+                <select
+                  value={w.position}
+                  onChange={(e) => setW((x) => void (x.position = e.target.value as "bottom-right" | "bottom-left"))}
+                  className="h-9 w-full rounded-md border border-border bg-surface-2 px-2 text-sm text-text"
+                >
+                  <option value="bottom-right">Bottom right</option>
+                  <option value="bottom-left">Bottom left</option>
+                </select>
+              </Field>
             </div>
-            <Switch checked={w.branding} onCheckedChange={(v) => update((d) => void (d.widget.branding = v))} />
-          </div>
-        </SectionCard>
 
-        <SectionCard title="Embed snippet" description="Paste this before </body> on any page.">
-          <div className="relative">
-            <pre className="overflow-x-auto rounded-md border border-border bg-surface-2/60 p-3 font-mono text-xs text-muted">
-              {snippet}
-            </pre>
-            <button
-              onClick={copy}
-              className="absolute right-2 top-2 flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-xs text-muted transition-colors hover:text-text"
-            >
-              {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-          <p className="text-xs text-faint">
-            The widget loads its theme, welcome message, and quick replies from this agent’s public config.
-          </p>
-        </SectionCard>
-      </div>
+            {/* Logo */}
+            {agentId && <LogoUpload agentId={agentId} logoUrl={w.logoUrl} onChange={(v) => setW((x) => void (x.logoUrl = v))} />}
 
-      {/* Live preview */}
-      <div>
-        <div className="sticky top-32 rounded-lg border border-border bg-surface p-4">
-          <div className="mb-3 text-xs font-medium uppercase tracking-wide text-faint">Live preview</div>
-          <WidgetPreview
-            name={draft.persona.displayName || draft.name}
-            welcome={draft.persona.welcomeMessage}
-            prompts={draft.persona.suggestedPrompts}
-            primaryColor={w.primaryColor}
-            launcherText={w.launcherText}
-            branding={w.branding}
-            mode={w.mode}
-            position={w.position}
-          />
+            {/* Input-bar buttons */}
+            <Field label="Input bar buttons">
+              <div className="flex flex-wrap gap-4">
+                {(["attachment", "emoji"] as InputBarButton[]).map((b) => {
+                  const on = w.inputBarButtons.includes(b);
+                  return (
+                    <label key={b} className="flex cursor-pointer items-center gap-2 text-sm text-text">
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={(e) =>
+                          setW((x) => {
+                            const set = new Set(x.inputBarButtons);
+                            if (e.target.checked) set.add(b);
+                            else set.delete(b);
+                            x.inputBarButtons = Array.from(set) as InputBarButton[];
+                          })
+                        }
+                        className="size-4 accent-ember"
+                      />
+                      <span className="capitalize">{b === "attachment" ? "File attachment" : "Emoji picker"}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </Field>
+
+            <div className="flex items-center gap-3 rounded-md border border-border bg-surface-2/50 p-3">
+              <div className="flex-1">
+                <div className="text-sm font-medium text-text">“Powered by BotForge” badge</div>
+                <div className="text-xs text-muted">Show a small attribution in the widget footer.</div>
+              </div>
+              <Switch checked={w.branding} onCheckedChange={(v) => setW((x) => void (x.branding = v))} />
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Embed snippet" description="Paste this before </body> on any page.">
+            <div className="relative">
+              <pre className="overflow-x-auto rounded-md border border-border bg-surface-2/60 p-3 font-mono text-xs text-muted">
+                {snippet}
+              </pre>
+              <button
+                onClick={copy}
+                className="absolute right-2 top-2 flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-xs text-muted transition-colors hover:text-text"
+              >
+                {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <p className="text-xs text-faint">
+              The snippet never changes — the widget loads every design choice above from this agent’s live
+              config, so saving here updates every embedded widget on the visitor’s next page load.
+            </p>
+          </SectionCard>
+        </div>
+
+        {/* Live preview — runs the real widget bundle in an iframe, updated via postMessage. */}
+        <div>
+          <div className="sticky top-32 rounded-lg border border-border bg-surface p-4">
+            <div className="mb-3 text-xs font-medium uppercase tracking-wide text-faint">Live preview</div>
+            <LivePreview draft={draft} />
+          </div>
         </div>
       </div>
-    </div>
 
-    {agentId && <MessagingChannels agentId={agentId} />}
+      {agentId && <MessagingChannels agentId={agentId} />}
+    </div>
+  );
+}
+
+function ColorInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <Field label={label}>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-9 w-12 cursor-pointer rounded-md border border-border bg-surface-2"
+        />
+        <Input value={value} onChange={(e) => onChange(e.target.value)} className="font-mono" />
+      </div>
+    </Field>
+  );
+}
+
+function NullableColor({
+  label,
+  value,
+  fallback,
+  onChange,
+  disabled,
+  disabledHint,
+}: {
+  label: string;
+  value: string | null;
+  fallback: string;
+  onChange: (v: string | null) => void;
+  disabled?: boolean;
+  disabledHint?: string;
+}) {
+  const active = value !== null;
+  return (
+    <Field label={label}>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          disabled={disabled || !active}
+          value={value ?? fallback}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-9 w-12 cursor-pointer rounded-md border border-border bg-surface-2 disabled:opacity-40"
+        />
+        {active ? (
+          <>
+            <Input value={value} onChange={(e) => onChange(e.target.value)} className="font-mono" disabled={disabled} />
+            <button
+              type="button"
+              onClick={() => onChange(null)}
+              title="Reset to theme default"
+              className="rounded-md border border-border px-2 py-1.5 text-xs text-muted hover:text-text"
+            >
+              Reset
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onChange(fallback)}
+            disabled={disabled}
+            className="flex-1 rounded-md border border-dashed border-border px-2 py-1.5 text-left text-xs text-faint hover:text-muted disabled:opacity-40"
+          >
+            {disabled ? disabledHint ?? "Disabled" : "Default (auto) — click to override"}
+          </button>
+        )}
+      </div>
+    </Field>
+  );
+}
+
+function LogoUpload({
+  agentId,
+  logoUrl,
+  onChange,
+}: {
+  agentId: string;
+  logoUrl: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const upload = useMutation({
+    mutationFn: (file: File) => uploadWidgetLogo(agentId, file),
+    onSuccess: (res) => {
+      setError(null);
+      // Cache-bust so the freshly-uploaded image shows immediately.
+      onChange(`${res.logo_url}?t=${Date.now()}`);
+    },
+    onError: (e) => setError((e as Error).message),
+  });
+  const src = logoUrl ? (logoUrl.startsWith("/") ? `${API_BASE}${logoUrl}` : logoUrl) : null;
+
+  return (
+    <Field label="Logo / avatar">
+      <div className="flex items-center gap-3">
+        <div className="grid size-12 place-items-center overflow-hidden rounded-full border border-border bg-surface-2">
+          {src ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={src} alt="Logo" className="size-full object-cover" />
+          ) : (
+            <MessageSquare className="size-5 text-faint" />
+          )}
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) upload.mutate(f);
+            e.target.value = "";
+          }}
+        />
+        <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={upload.isPending}>
+          {upload.isPending ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} Upload
+        </Button>
+        {logoUrl && (
+          <button type="button" onClick={() => onChange(null)} className="text-xs text-muted hover:text-error">
+            Remove
+          </button>
+        )}
+      </div>
+      <p className="mt-1 text-xs text-faint">PNG, JPG, WEBP, or GIF · up to 2 MB. Used on the launcher and as the assistant avatar.</p>
+      {error && <p className="mt-1 text-xs text-error">{error}</p>}
+    </Field>
+  );
+}
+
+function LivePreview({ draft }: { draft: AgentDraft }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [ready, setReady] = useState(false);
+  const config = useMemo(() => toPreviewConfig(draft), [draft]);
+  const src = `/widget-preview.html?api=${encodeURIComponent(API_BASE)}`;
+
+  // Wait for the widget bundle inside the iframe to announce it's ready.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type === "bf-preview-ready") setReady(true);
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  // Push the current config into the iframe whenever it changes (or once it's ready).
+  useEffect(() => {
+    if (!ready) return;
+    iframeRef.current?.contentWindow?.postMessage({ type: "bf-preview-config", config }, "*");
+  }, [ready, config]);
+
+  return (
+    <div className="relative h-[520px] overflow-hidden rounded-lg border border-border bg-surface-2/40">
+      <iframe
+        ref={iframeRef}
+        src={src}
+        title="Widget preview"
+        className="size-full"
+        // Same-origin so we can postMessage; no allow-scripts sandbox restriction needed.
+      />
+      {!ready && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center text-xs text-faint">
+          <Loader2 className="size-4 animate-spin" />
+        </div>
+      )}
     </div>
   );
 }
@@ -242,7 +556,7 @@ function MessagingChannels({ agentId }: { agentId: string }) {
                   </div>
                 ) : (
                   <Button variant="outline" size="sm" onClick={() => setConnecting(type)}>
-                    <Plus /> Connect
+                    Connect
                   </Button>
                 )}
               </div>
@@ -255,12 +569,7 @@ function MessagingChannels({ agentId }: { agentId: string }) {
           );
         })}
       </ul>
-      <ConnectDialog
-        type={connecting}
-        agentId={agentId}
-        onClose={() => setConnecting(null)}
-        onConnected={invalidate}
-      />
+      <ConnectDialog type={connecting} agentId={agentId} onClose={() => setConnecting(null)} onConnected={invalidate} />
     </SectionCard>
   );
 }
@@ -319,84 +628,5 @@ function ConnectDialog({
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function WidgetPreview({
-  name,
-  welcome,
-  prompts,
-  primaryColor,
-  launcherText,
-  branding,
-  mode,
-  position,
-}: {
-  name: string;
-  welcome: string;
-  prompts: string[];
-  primaryColor: string;
-  launcherText: string;
-  branding: boolean;
-  mode: "dark" | "light";
-  position: "bottom-right" | "bottom-left";
-}) {
-  const dark = mode !== "light";
-  const bg = dark ? "#16181D" : "#FFFFFF";
-  const bg2 = dark ? "#1E2127" : "#F4F5F7";
-  const text = dark ? "#E7E9EE" : "#14161A";
-  const border = dark ? "#2A2E37" : "#E3E6EA";
-  const alignEnd = position === "bottom-right";
-
-  return (
-    <div className="space-y-3">
-      <div
-        className="overflow-hidden rounded-xl border shadow-lg"
-        style={{ background: bg, borderColor: border, color: text }}
-      >
-        <div
-          className="flex items-center gap-2 px-3 py-2.5 text-sm font-semibold text-white"
-          style={{ background: primaryColor }}
-        >
-          <MessageSquare className="size-4" />
-          {name || "Assistant"}
-        </div>
-        <div className="space-y-2 p-3">
-          <div
-            className="max-w-[85%] rounded-lg border px-3 py-2 text-xs"
-            style={{ background: bg2, borderColor: border }}
-          >
-            {welcome || "Hi! How can I help you today?"}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {(prompts ?? []).slice(0, 3).map((p, i) => (
-              <span
-                key={i}
-                className="rounded-full border px-2 py-1 text-[11px]"
-                style={{ background: bg2, borderColor: border }}
-              >
-                {p}
-              </span>
-            ))}
-          </div>
-        </div>
-        {branding && (
-          <div
-            className="border-t px-3 py-1.5 text-center text-[10px]"
-            style={{ borderColor: border, color: dark ? "#9AA0AB" : "#5A616B" }}
-          >
-            Powered by BotForge
-          </div>
-        )}
-      </div>
-      <div className={`flex ${alignEnd ? "justify-end" : "justify-start"}`}>
-        <span
-          className="inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-white shadow-lg"
-          style={{ background: primaryColor }}
-        >
-          <MessageSquare className="size-4" /> {launcherText}
-        </span>
-      </div>
-    </div>
   );
 }

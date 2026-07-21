@@ -37,6 +37,27 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   Ollama `qwen3:14b` tool-calling turns** (30–90 s/turn), not a web-provider latency — it must not
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
+## Shipped enhancements (post-v1)
+- **Widget customization → full parity (2026-07-21).** Extended the embeddable widget from
+  accent/text/position to a complete design system, all flowing through the existing
+  live-fetched public config (`GET /v1/public/agents/{key}/config`) so the embed snippet never
+  changes. **Backend** (`modules/public/schemas.py` `WidgetTheme` + validated `WidgetConfigIn`,
+  `modules/agents/service.py`): `widget_style` (solid|transparent), 4 colors
+  (background/text/bubble/typing-area), `font_family` (5 system-safe stacks, no webfonts),
+  `floating_button_style` (6 designs) + independent `floating_button_color`, `logo_url`,
+  `input_bar_buttons` (attachment|emoji) — all nullable (unset = today's look), hex/enum
+  validated with typed errors, **merge-on-write** so a partial PATCH never nulls sibling keys.
+  **Logo upload** (`POST /v1/agents/{id}/widget/logo`) reuses the KB upload storage; rejects SVG +
+  double-checks MIME **and** extension, 2 MB cap; served public + cross-origin at
+  `GET /v1/public/agents/{key}/widget-logo`. **Widget bundle** (`packages/widget`): rewritten to
+  apply everything via CSS custom properties (no per-agent rebuild), 6 inline-SVG launcher designs,
+  `pulse-ring` keyframes gated behind `prefers-reduced-motion`, transparent frosted-glass style,
+  emoji picker, and a `data-preview-mode` that live-applies posted config. **Builder** (`channels-tab`):
+  full customization UI + a **real-widget iframe preview** driven by `postMessage` (not a CSS mock),
+  reusing the debounced autosave. 4 backend tests + 2 Playwright checks (live embed reflects a
+  saved change without re-pasting the script; builder preview applies a posted config instantly).
+  No new env var (file storage reuses `UPLOAD_DIR`). See ADR-035.
+
 ## Roadmap / deferred enhancements
 List any provider/channel/billing key that is stubbed and needs a real value. (See `ENV.md`.)
 

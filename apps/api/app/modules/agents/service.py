@@ -291,11 +291,82 @@ async def create_version(session: AsyncSession, ctx: OrgContext, agent_id: uuid.
     return _version_out(await _draft_from_latest(session, agent_id, ctx.user.id))
 
 
+# Widget logo upload. SVG is rejected outright (it can carry executable script → stored-XSS on an
+# origin that serves uploads cross-origin). Both MIME and extension are checked because MIME is
+# client-supplied and spoofable. 2 MB cap (mirrors the KB upload's size-reasoning).
+_LOGO_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
+_LOGO_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_LOGO_MAX_BYTES = 2 * 1024 * 1024
+
+
+async def save_widget_logo(
+    session: AsyncSession,
+    ctx: OrgContext,
+    agent_id: uuid.UUID,
+    *,
+    filename: str | None,
+    content_type: str | None,
+    data: bytes,
+) -> dict[str, str]:
+    """Validate + store a widget logo image; return its public URL (a relative API path)."""
+    from pathlib import Path
+
+    rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
+    agent = await _get_agent(session, ctx, agent_id)
+    if not data:
+        raise AppError("widget.empty_logo", "The uploaded image is empty.", 400)
+    if len(data) > _LOGO_MAX_BYTES:
+        raise AppError("widget.logo_too_large", "Logo must be 2 MB or smaller.", 400)
+    ext = Path(filename or "").suffix.lower()
+    ctype = (content_type or "").lower().split(";")[0].strip()
+    if ctype == "image/svg+xml" or ext == ".svg":
+        raise AppError("widget.logo_svg_rejected", "SVG images aren't allowed for security reasons.", 400)
+    if ctype not in _LOGO_TYPES or ext not in _LOGO_EXTS:
+        raise AppError("widget.logo_bad_type", "Logo must be a PNG, JPG, WEBP, or GIF image.", 400)
+
+    dest_dir = Path(settings.upload_dir) / str(ctx.org.id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for old in dest_dir.glob(f"widget-logo-{agent_id}.*"):  # drop a prior logo (possibly a different ext)
+        old.unlink(missing_ok=True)
+    dest = dest_dir / f"widget-logo-{agent_id}{_LOGO_TYPES[ctype]}"
+    dest.write_bytes(data)
+    # Relative path — the widget prepends its own API base (port/host-agnostic).
+    return {"logo_url": f"/v1/public/agents/{agent.public_key}/widget-logo"}
+
+
+def _merge_persona(existing: dict[str, Any] | None, incoming: dict[str, Any]) -> dict[str, Any]:
+    """Merge an incoming persona into the stored one. The ``widget`` sub-object is deep-merged so
+    a partial update (e.g. just a logo) never nulls out previously-set colors, and the incoming
+    widget config is validated (hex/enums) → typed error on bad values (CLAUDE.md §8)."""
+    from pydantic import ValidationError
+
+    from app.modules.public.schemas import WidgetConfigIn
+
+    base = dict(existing or {})
+    merged: dict[str, Any] = {**base}
+    for key, value in incoming.items():
+        if key == "widget" and isinstance(value, dict):
+            try:
+                WidgetConfigIn(**value)
+            except ValidationError as exc:
+                raise AppError(
+                    "widget.invalid_config",
+                    "Invalid widget configuration.",
+                    400,
+                    details=[{"field": e["loc"][-1], "error": e["msg"]} for e in exc.errors()],
+                ) from exc
+            existing_widget = base.get("widget")
+            merged["widget"] = {**(existing_widget if isinstance(existing_widget, dict) else {}), **value}
+        else:
+            merged[key] = value
+    return merged
+
+
 def _apply_version_patch(version: AgentVersion, data: schemas.UpdateVersionRequest) -> None:
     if data.system_prompt is not None:
         version.system_prompt = data.system_prompt
     if data.persona is not None:
-        version.persona = data.persona
+        version.persona = _merge_persona(version.persona, data.persona)
     if data.welcome_message is not None:
         version.welcome_message = data.welcome_message
     if data.fallback_message is not None:

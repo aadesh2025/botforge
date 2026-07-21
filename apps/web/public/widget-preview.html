@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BotForge widget preview</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Loads the real widget bundle in preview mode. The builder posts live config overrides
+         via postMessage({ type: "bf-preview-config", config }). -->
+    <script>
+      (function () {
+        var q = new URLSearchParams(location.search);
+        var s = document.createElement("script");
+        s.src = "/widget.js";
+        s.setAttribute("data-preview-mode", "true");
+        s.setAttribute("data-agent", "preview");
+        s.setAttribute("data-api", q.get("api") || location.protocol + "//" + location.hostname + ":8000");
+        document.body.appendChild(s);
+      })();
+    </script>
+  </body>
+</html>
