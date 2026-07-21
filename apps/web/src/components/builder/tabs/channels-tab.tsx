@@ -117,7 +117,8 @@ export function ChannelsTab() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+      {/* Fixed-width control rail on the left; the live preview owns the remaining width. */}
+      <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
         <div className="space-y-6">
           <SectionCard title="Web widget" description="Design an embeddable chat bubble for any website.">
             {/* Style + font */}
@@ -469,12 +470,14 @@ function LivePreview({ draft }: { draft: AgentDraft }) {
             type="button"
             title="Preview backdrop (not saved)"
             onClick={() => setBackdrop(bg)}
-            className={`size-5 rounded-full border ${backdrop === bg ? "border-ember ring-1 ring-ember" : "border-border"}`}
+            className={`size-6 rounded-full border transition-shadow ${
+              backdrop === bg ? "border-text ring-2 ring-text/40" : "border-border hover:border-border-strong"
+            }`}
             style={{ background: bg }}
           />
         ))}
       </div>
-      <div className="relative h-[520px] overflow-hidden rounded-lg border border-border bg-surface-2/40">
+      <div className="relative h-[70vh] max-h-[720px] min-h-[560px] overflow-hidden rounded-lg border border-border bg-surface-2/40">
         <iframe
           ref={iframeRef}
           src={src}

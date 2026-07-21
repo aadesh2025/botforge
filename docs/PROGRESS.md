@@ -68,6 +68,17 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   builder-only **preview backdrop** swatch (local state, applied to the preview page via
   `postMessage`, never persisted). Regression tests: a config change never changes the panel's
   open/closed state; the transparent header has no solid backdrop. Widget still one file. See ADR-035.
+- **Widget preview layout + mobile-collision bug (2026-07-21).** (1) **BUG** — on viewports
+  under 768px the floating launcher and the fullscreen panel shared the same `z-index`, so an
+  open panel painted over the launcher/close button and could swallow clicks meant for the send
+  button (a real bug for phone visitors in production, not just the builder). Fix in `widget.js`:
+  `api.open`/`close` toggle a `bf-open` host class and a `@media (max-width:767px){:host(.bf-open)
+  .bf-launcher{display:none}}` rule hides the launcher while open at phone widths, relying on the
+  panel's own header close button; ≥768px the launcher stays visible and still doubles as close.
+  (2) Live-preview layout flipped to a fixed **420px control rail + full-width preview** (was a
+  cramped 360px preview sidebar), preview grown to `70vh` (560–720px). (3) Backdrop swatches
+  enlarged + neutral (non-orange) selection ring for legibility. Playwright covers the <768/≥768
+  launcher behavior. Widget still one file; tsc/eslint/build green.
 
 ## Roadmap / deferred enhancements
 List any provider/channel/billing key that is stubbed and needs a real value. (See `ENV.md`.)
