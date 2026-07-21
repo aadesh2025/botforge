@@ -48,32 +48,47 @@ test("criterion: widget customization reflects on a live embed without re-pastin
   expect(after).not.toBe(before);
 });
 
-test("builder live preview: the real widget bundle applies posted config instantly", async ({ page }) => {
-  // The builder embeds this page in an iframe and posts config via postMessage — no save round-trip.
-  await page.goto("/widget-preview.html");
-  // Wait until the widget has mounted (so its postMessage listener is registered).
-  await expect(page.locator(".bf-launcher")).toBeVisible({ timeout: 10_000 });
-  await page.evaluate(() => {
+async function post(page: import("@playwright/test").Page, theme: Record<string, unknown>) {
+  await page.evaluate((t) => {
     window.postMessage(
-      {
-        type: "bf-preview-config",
-        config: {
-          name: "Preview Bot",
-          welcome_message: "Hi from preview",
-          suggested_prompts: [],
-          theme: { primary_color: "#22CC88", floating_button_style: "rounded-square", mode: "dark" },
-        },
-      },
+      { type: "bf-preview-config", config: { name: "Preview Bot", welcome_message: "Hi", suggested_prompts: [], theme: t } },
       "*",
     );
-  });
+  }, theme);
+}
+
+test("builder preview: config changes apply live and NEVER change the open/closed state", async ({ page }) => {
+  await page.goto("/widget-preview.html");
   const launcher = page.locator(".bf-launcher");
+  const panel = page.locator(".bf-panel");
   await expect(launcher).toBeVisible({ timeout: 10_000 });
-  // The color applies live to the launcher (proves applyTheme ran from the posted config).
-  await expect
-    .poll(async () => launcher.evaluate((el) => getComputedStyle(el).backgroundColor))
-    .toBe("rgb(34, 204, 136)");
-  // Collapse the auto-opened panel so the launcher shows its chosen design (not the close button).
-  await page.evaluate(() => (window as unknown as { BotForge?: { close: () => void } }).BotForge?.close());
-  await expect(launcher).toHaveClass(/bf-square/); // rounded-square design applied live
+
+  // Preview starts CLOSED, like a real embed (the reported bug was it force-opening).
+  await expect(panel).not.toHaveClass(/bf-show/);
+
+  // A config change (color + design) applies live but must NOT open the panel.
+  await post(page, { primary_color: "#22CC88", floating_button_style: "rounded-square", mode: "dark" });
+  await expect.poll(() => launcher.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(34, 204, 136)");
+  await expect(launcher).toHaveClass(/bf-square/); // design applied while closed
+  await expect(panel).not.toHaveClass(/bf-show/); // still closed — the bug is fixed
+
+  // Another change (simulating a keystroke on a different control) also stays closed.
+  await post(page, { primary_color: "#FF0000", floating_button_style: "circle-dots", mode: "dark" });
+  await expect(panel).not.toHaveClass(/bf-show/);
+
+  // Once the user opens it, subsequent config changes must keep it OPEN.
+  await launcher.click();
+  await expect(panel).toHaveClass(/bf-show/);
+  await post(page, { primary_color: "#0000FF", floating_button_style: "circle-chat", mode: "dark" });
+  await expect(panel).toHaveClass(/bf-show/); // stayed open
+});
+
+test("transparent style: header has no solid backdrop", async ({ page }) => {
+  await page.goto("/widget-preview.html");
+  await expect(page.locator(".bf-launcher")).toBeVisible({ timeout: 10_000 });
+  await page.locator(".bf-launcher").click(); // open so the header is rendered
+  await post(page, { primary_color: "#E8590C", widget_style: "transparent", mode: "light" });
+  const headBg = await page.locator(".bf-head").evaluate((el) => getComputedStyle(el).backgroundColor);
+  // No accent-colored bar — transparent (or fully transparent rgba), never the solid accent.
+  expect(headBg === "rgba(0, 0, 0, 0)" || headBg === "transparent").toBeTruthy();
 });

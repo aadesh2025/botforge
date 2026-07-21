@@ -45,6 +45,7 @@
     })(),
     visitor: {},
     sending: false,
+    hasConversation: false,
     ws: null,
   };
 
@@ -186,10 +187,19 @@
       "display:none;flex-direction:column;overflow:hidden}" +
       ".bf-panel.bf-show{display:flex}" +
       ":host(.bf-left) .bf-launcher,:host(.bf-left) .bf-panel{right:auto;left:20px}" +
+      // Transparent style = its own independent glass palette (not "theme + blur"): no solid
+      // header bar, white-glass bot side with fixed near-black text (guaranteed contrast, not the
+      // mode's text var), and a genuinely dark floating input pill. User bubbles keep the accent.
       ":host(.bf-transparent) .bf-panel{background:transparent;border-color:transparent;box-shadow:none}" +
       ":host(.bf-transparent) .bf-msgs{background:transparent}" +
-      ":host(.bf-transparent) .bf-foot{background:rgba(127,127,127,.14);backdrop-filter:blur(10px);border-radius:12px;margin:8px;border:1px solid var(--bf-border)}" +
-      ":host(.bf-transparent) .bf-bot .bf-bubble{backdrop-filter:blur(10px);background:rgba(127,127,127,.18)}" +
+      ":host(.bf-transparent) .bf-head{background:transparent;color:var(--bf-text-on-transparent,#171717)}" +
+      ":host(.bf-transparent) .bf-head .bf-x{color:var(--bf-text-on-transparent,#171717)}" +
+      ":host(.bf-transparent) .bf-bot .bf-bubble{background:rgba(255,255,255,.7);color:#171717;border-color:rgba(0,0,0,.06);backdrop-filter:blur(10px)}" +
+      ":host(.bf-transparent) .bf-chip{background:rgba(255,255,255,.7);color:#171717;border-color:rgba(0,0,0,.06)}" +
+      ":host(.bf-transparent) .bf-foot{background:rgba(23,23,23,.8);color:#fff;backdrop-filter:blur(10px);border-radius:14px;margin:8px;border:1px solid rgba(255,255,255,.12)}" +
+      ":host(.bf-transparent) .bf-ta{background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.16)}" +
+      ":host(.bf-transparent) .bf-iconbtn{background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.16)}" +
+      ":host(.bf-transparent) .bf-brand,:host(.bf-transparent) .bf-brand a{color:rgba(255,255,255,.7)}" +
       ".bf-head{display:flex;align-items:center;gap:10px;padding:14px 16px;background:var(--bf-accent);color:var(--bf-on-accent)}" +
       ".bf-head .bf-avatar{width:26px;height:26px;border-radius:50%;object-fit:cover}" +
       ".bf-head .bf-title{font-weight:700;font-size:15px;flex:1}" +
@@ -294,34 +304,30 @@
     els.launcher = launcher;
     launcher.addEventListener("click", api.toggle);
 
-    var buttons = theme.input_bar_buttons || ["attachment"];
-    var hasAttach = buttons.indexOf("attachment") !== -1;
-    var hasEmoji = buttons.indexOf("emoji") !== -1;
-    var logo = logoUrl(theme);
-
+    // Static structure — built once. Every config-driven detail (colors, logo, input buttons,
+    // branding, chips, welcome, launcher design) is filled in by applyConfig() below, so a
+    // config change never tears the widget down or changes whether the panel is open.
     var panel = document.createElement("div");
     panel.className = "bf-panel";
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-label", "Chat window");
     panel.innerHTML =
-      '<div class="bf-head">' +
-      (logo ? '<img class="bf-avatar" src="' + logo + '" alt="" />' : "") +
+      '<div class="bf-head"><img class="bf-avatar" alt="" style="display:none" />' +
       '<div class="bf-title"></div><button class="bf-x" aria-label="Close chat">&times;</button></div>' +
       '<div class="bf-msgs"></div>' +
       '<div class="bf-chips"></div>' +
       '<div class="bf-foot"><div class="bf-attach" style="display:none"></div>' +
       '<div class="bf-inrow">' +
-      (hasAttach ? '<button class="bf-iconbtn bf-file" aria-label="Attach file">📎</button>' : "") +
-      (hasEmoji ? '<button class="bf-iconbtn bf-emoji" aria-label="Insert emoji">🙂</button>' : "") +
+      '<button class="bf-iconbtn bf-file" aria-label="Attach file">📎</button>' +
+      '<button class="bf-iconbtn bf-emoji" aria-label="Insert emoji">🙂</button>' +
       '<textarea class="bf-ta" rows="1" placeholder="Type a message…" aria-label="Message"></textarea>' +
       '<button class="bf-send" aria-label="Send">➤</button>' +
       "</div>" +
-      (theme.branding === false
-        ? ""
-        : '<div class="bf-brand">Powered by <a href="https://botforge.dev" target="_blank" rel="noopener">BotForge</a></div>') +
-      '<input type="file" style="display:none" />';
+      '<div class="bf-brand">Powered by <a href="https://botforge.dev" target="_blank" rel="noopener">BotForge</a></div>' +
+      '<input type="file" style="display:none" /></div>';
     root.appendChild(panel);
     els.panel = panel;
+    els.avatar = panel.querySelector(".bf-avatar");
     els.title = panel.querySelector(".bf-title");
     els.msgs = panel.querySelector(".bf-msgs");
     els.chips = panel.querySelector(".bf-chips");
@@ -330,12 +336,9 @@
     els.attach = panel.querySelector(".bf-attach");
     els.fileBtn = panel.querySelector(".bf-file");
     els.emojiBtn = panel.querySelector(".bf-emoji");
+    els.brand = panel.querySelector(".bf-brand");
     els.inrow = panel.querySelector(".bf-inrow");
     els.fileInput = panel.querySelector('input[type="file"]');
-    els.title.textContent = state.config.name || "Chat";
-
-    applyTheme(theme);
-    launcherContent(theme, false);
 
     panel.querySelector(".bf-x").addEventListener("click", api.close);
     els.send.addEventListener("click", function () {
@@ -350,19 +353,47 @@
       }
     });
     els.ta.addEventListener("input", autoGrow);
-    if (els.fileBtn) {
-      els.fileBtn.addEventListener("click", function () {
-        els.fileInput.click();
-      });
-      els.fileInput.addEventListener("change", onFile);
-    }
-    if (els.emojiBtn) els.emojiBtn.addEventListener("click", toggleEmoji);
+    els.fileBtn.addEventListener("click", function () {
+      els.fileInput.click();
+    });
+    els.fileInput.addEventListener("change", onFile);
+    els.emojiBtn.addEventListener("click", toggleEmoji);
 
-    renderChips();
-    if (state.config.welcome_message) {
-      addMessage("bot", state.config.welcome_message);
-    }
+    applyConfig(state.config);
     emit("ready", { config: state.config });
+  }
+
+  // Apply a (possibly changed) config in place — no teardown, no forced open/close. Preserves
+  // whatever state.open currently is. Safe to call repeatedly (used by the builder live preview).
+  function applyConfig(config) {
+    if (!els.panel) return;
+    state.config = config || state.config;
+    var theme = state.config.theme || {};
+    applyTheme(theme);
+    els.title.textContent = state.config.name || "Chat";
+    var logo = logoUrl(theme);
+    if (logo) {
+      els.avatar.src = logo;
+      els.avatar.style.display = "";
+    } else {
+      els.avatar.removeAttribute("src");
+      els.avatar.style.display = "none";
+    }
+    var buttons = theme.input_bar_buttons || ["attachment"];
+    els.fileBtn.style.display = buttons.indexOf("attachment") !== -1 ? "" : "none";
+    els.emojiBtn.style.display = buttons.indexOf("emoji") !== -1 ? "" : "none";
+    els.brand.style.display = theme.branding === false ? "none" : "";
+    renderChips();
+    refreshWelcome(state.config.welcome_message);
+    launcherContent(theme, state.open); // keep the current open/closed state
+  }
+
+  // Manage the welcome bubble in place while no real conversation has started (design preview).
+  function refreshWelcome(text) {
+    if (!els.msgs) return;
+    if (state.hasConversation) return; // don't disturb an in-progress chat
+    els.msgs.innerHTML = "";
+    els.welcomeBubble = text ? addMessage("bot", text) : null;
   }
 
   function toggleEmoji() {
@@ -461,6 +492,7 @@
 
   async function sendMessage(text) {
     if (!text || state.sending) return;
+    state.hasConversation = true;
     if (PREVIEW) {
       // In preview mode there's no live backend turn — just echo locally so the design shows.
       addMessage("user", text);
@@ -611,36 +643,34 @@
   };
 
   // ── Preview mode: apply live config overrides posted by the builder ─────────
-  function rebuildForPreview(config) {
-    if (host && host.parentNode) host.parentNode.removeChild(host);
-    els = {};
-    state.config = config;
-    build();
-    api.open();
-  }
-
   function previewListener(ev) {
     var d = ev && ev.data;
     if (!d || d.type !== "bf-preview-config" || !d.config) return;
     var incoming = d.config;
     var base = state.config || { theme: {} };
+    // Optional builder-only backdrop for the preview *page* (never part of the widget/embed).
+    if (typeof d.previewBackdrop === "string") {
+      document.body.style.background = d.previewBackdrop;
+    }
     // Merge posted config over the base (theme is replaced wholesale from the builder's full state).
-    state.config = {
+    var merged = {
       agent_id: base.agent_id,
       name: incoming.name != null ? incoming.name : base.name,
       welcome_message: incoming.welcome_message != null ? incoming.welcome_message : base.welcome_message,
       suggested_prompts: incoming.suggested_prompts || base.suggested_prompts || [],
       theme: incoming.theme || base.theme || {},
     };
-    rebuildForPreview(state.config);
+    // Apply in place — preserves whether the panel is currently open, and never force-opens it.
+    applyConfig(merged);
   }
 
   async function init() {
     if (PREVIEW) {
       // Start from an empty/default config; the parent posts the real one immediately.
+      // Preview starts CLOSED, exactly like a real embed does for a visitor — the panel only
+      // opens when the launcher is clicked, never as a side effect of a config change.
       state.config = { agent_id: null, name: "Assistant", welcome_message: "Hi! How can I help you today?", suggested_prompts: [], theme: {} };
       build();
-      api.open();
       window.addEventListener("message", previewListener);
       try {
         parent.postMessage({ type: "bf-preview-ready" }, "*");

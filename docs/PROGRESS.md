@@ -57,6 +57,17 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   reusing the debounced autosave. 4 backend tests + 2 Playwright checks (live embed reflects a
   saved change without re-pasting the script; builder preview applies a posted config instantly).
   No new env var (file storage reuses `UPLOAD_DIR`). See ADR-035.
+- **Widget customization — parity fixes (2026-07-21).** Follow-up after a live comparison:
+  (1) **bug** — the preview widget force-opened on every control change (`rebuildForPreview` did a
+  full teardown + `api.open()` per `postMessage`). Split `build()` (once) from `applyConfig()`
+  (in-place, preserves `state.open`, never force-opens); preview now starts **closed** like a real
+  embed. (2) Transparent style uses its **own glass palette** (no solid header bar, white-glass bot
+  bubbles + fixed near-black text, dark floating input pill), not "theme + blur". (3) The launcher
+  picker previews the **real widget SVGs** (`lib/widget-icons.tsx`), not Lucide stand-ins. (4) The
+  Channels tab renders **full-width** (drops the Playground column it doesn't need). (5) A
+  builder-only **preview backdrop** swatch (local state, applied to the preview page via
+  `postMessage`, never persisted). Regression tests: a config change never changes the panel's
+  open/closed state; the transparent header has no solid backdrop. Widget still one file. See ADR-035.
 
 ## Roadmap / deferred enhancements
 List any provider/channel/billing key that is stubbed and needs a real value. (See `ENV.md`.)

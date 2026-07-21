@@ -2,21 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Check,
-  Copy,
-  Hash,
-  Loader2,
-  MessageCircle,
-  MessageSquare,
-  MoreHorizontal,
-  Phone,
-  Send,
-  Square,
-  Trash2,
-  Upload,
-} from "lucide-react";
+import { Check, Copy, Hash, Loader2, MessageSquare, Phone, Send, Trash2, Upload } from "lucide-react";
 import { Field, SectionCard } from "@/components/builder/field";
+import { WidgetChatIcon, WidgetDotsIcon, WidgetMessageIcon } from "@/lib/widget-icons";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -45,15 +33,29 @@ const FONT_OPTIONS: { value: WidgetFont; label: string }[] = [
   { value: "courier", label: "Courier New" },
 ];
 
-const LAUNCHER_OPTIONS: { value: FloatingButtonStyle | null; label: string; icon: typeof MessageSquare; square?: boolean; pill?: boolean }[] = [
-  { value: null, label: "Text (default)", icon: MessageSquare, pill: true },
-  { value: "circle-chat", label: "Chat circle", icon: MessageSquare },
-  { value: "circle-message", label: "Message", icon: MessageCircle },
-  { value: "circle-dots", label: "Dots", icon: MoreHorizontal },
-  { value: "rounded-square", label: "Square", icon: Square },
-  { value: "pill-text", label: "Pill + text", icon: MessageSquare, pill: true },
-  { value: "pulse-ring", label: "Pulse ring", icon: MessageSquare },
+type LauncherOption = {
+  value: FloatingButtonStyle | null;
+  label: string;
+  kind: "chat" | "message" | "dots";
+  shape: "circle" | "square" | "pill" | "pulse";
+};
+
+const LAUNCHER_OPTIONS: LauncherOption[] = [
+  { value: null, label: "Text (default)", kind: "chat", shape: "pill" },
+  { value: "circle-chat", label: "Chat circle", kind: "chat", shape: "circle" },
+  { value: "circle-message", label: "Message", kind: "message", shape: "circle" },
+  { value: "circle-dots", label: "Dots", kind: "dots", shape: "circle" },
+  { value: "rounded-square", label: "Square", kind: "chat", shape: "square" },
+  { value: "pill-text", label: "Pill + text", kind: "chat", shape: "pill" },
+  { value: "pulse-ring", label: "Pulse ring", kind: "chat", shape: "pulse" },
 ];
+
+/** The real widget icon for a launcher option, rendered white on the button color. */
+function LauncherIcon({ kind, cut }: { kind: LauncherOption["kind"]; cut: string }) {
+  if (kind === "message") return <WidgetMessageIcon className="size-4" cut={cut} />;
+  if (kind === "dots") return <WidgetDotsIcon className="size-4" />;
+  return <WidgetChatIcon className="size-4" />;
+}
 
 /** Map the builder draft into the snake_case config the widget bundle expects. */
 function toPreviewConfig(draft: AgentDraft) {
@@ -181,8 +183,9 @@ export function ChannelsTab() {
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
                 {LAUNCHER_OPTIONS.map((opt) => {
                   const selected = w.floatingButtonStyle === opt.value;
-                  const Icon = opt.icon;
                   const btnColor = w.floatingButtonColor ?? w.primaryColor;
+                  const shapeCls =
+                    opt.shape === "square" ? "rounded-lg" : opt.shape === "pill" ? "rounded-full px-2 gap-1" : "rounded-full";
                   return (
                     <button
                       key={String(opt.value)}
@@ -193,12 +196,15 @@ export function ChannelsTab() {
                       }`}
                     >
                       <span
-                        className={`grid size-9 place-items-center text-white ${
-                          opt.square ? "rounded-lg" : opt.pill ? "rounded-full px-2" : "rounded-full"
-                        } ${opt.value === "pulse-ring" ? "ring-2 ring-offset-1 ring-offset-transparent" : ""}`}
+                        className={`grid h-9 min-w-9 place-items-center text-white ${shapeCls} ${
+                          opt.shape === "pulse" ? "ring-2 ring-white/30 ring-offset-1 ring-offset-transparent" : ""
+                        }`}
                         style={{ background: btnColor }}
                       >
-                        <Icon className="size-4" />
+                        <span className="flex items-center gap-1">
+                          <LauncherIcon kind={opt.kind} cut={btnColor} />
+                          {opt.shape === "pill" && <span className="text-[8px] font-semibold">Chat</span>}
+                        </span>
                       </span>
                       <span className="text-[10px] leading-tight text-faint">{opt.label}</span>
                     </button>
@@ -425,9 +431,16 @@ function LogoUpload({
   );
 }
 
+// A soft lavender-blue default, purely so you can eyeball contrast while designing.
+const DEFAULT_BACKDROP = "linear-gradient(135deg, #EEF1FF, #DCE6FF)";
+const BACKDROP_SWATCHES = ["linear-gradient(135deg, #EEF1FF, #DCE6FF)", "#FFFFFF", "#0A0B0D", "#F4F5F7", "#1E2530"];
+
 function LivePreview({ draft }: { draft: AgentDraft }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
+  // Builder-only: the preview PAGE background. Never persisted, never part of the embed —
+  // a real site already has its own background, which a widget can't (and shouldn't) control.
+  const [backdrop, setBackdrop] = useState(DEFAULT_BACKDROP);
   const config = useMemo(() => toPreviewConfig(draft), [draft]);
   const src = `/widget-preview.html?api=${encodeURIComponent(API_BASE)}`;
 
@@ -440,26 +453,41 @@ function LivePreview({ draft }: { draft: AgentDraft }) {
     return () => window.removeEventListener("message", onMsg);
   }, []);
 
-  // Push the current config into the iframe whenever it changes (or once it's ready).
+  // Push the current config (+ the local-only backdrop) into the iframe whenever either changes.
   useEffect(() => {
     if (!ready) return;
-    iframeRef.current?.contentWindow?.postMessage({ type: "bf-preview-config", config }, "*");
-  }, [ready, config]);
+    iframeRef.current?.contentWindow?.postMessage({ type: "bf-preview-config", config, previewBackdrop: backdrop }, "*");
+  }, [ready, config, backdrop]);
 
   return (
-    <div className="relative h-[520px] overflow-hidden rounded-lg border border-border bg-surface-2/40">
-      <iframe
-        ref={iframeRef}
-        src={src}
-        title="Widget preview"
-        className="size-full"
-        // Same-origin so we can postMessage; no allow-scripts sandbox restriction needed.
-      />
-      {!ready && (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center text-xs text-faint">
-          <Loader2 className="size-4 animate-spin" />
-        </div>
-      )}
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5">
+        <span className="mr-1 text-[11px] text-faint">Preview page:</span>
+        {BACKDROP_SWATCHES.map((bg) => (
+          <button
+            key={bg}
+            type="button"
+            title="Preview backdrop (not saved)"
+            onClick={() => setBackdrop(bg)}
+            className={`size-5 rounded-full border ${backdrop === bg ? "border-ember ring-1 ring-ember" : "border-border"}`}
+            style={{ background: bg }}
+          />
+        ))}
+      </div>
+      <div className="relative h-[520px] overflow-hidden rounded-lg border border-border bg-surface-2/40">
+        <iframe
+          ref={iframeRef}
+          src={src}
+          title="Widget preview"
+          className="size-full"
+          // Same-origin so we can postMessage; no allow-scripts sandbox restriction needed.
+        />
+        {!ready && (
+          <div className="pointer-events-none absolute inset-0 grid place-items-center text-xs text-faint">
+            <Loader2 className="size-4 animate-spin" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

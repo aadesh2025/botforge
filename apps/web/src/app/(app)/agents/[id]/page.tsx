@@ -93,8 +93,10 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
     <div className="mx-auto max-w-[1500px]">
       <BuilderHeader />
 
-      <div className="grid gap-6 pt-6 xl:grid-cols-3">
-        <div className="min-w-0 xl:col-span-2">
+      {/* Channels has its own full-width visual preview and needs no chat-testing pane, so it
+          renders full width and drops the Playground column. Other tabs keep the 2:1 split. */}
+      <div className={`grid gap-6 pt-6 ${tab === "channels" ? "" : "xl:grid-cols-3"}`}>
+        <div className={tab === "channels" ? "min-w-0" : "min-w-0 xl:col-span-2"}>
           <Tabs value={tab} onValueChange={onTabChange}>
             <TabsList className="mb-5 rounded-lg border border-border bg-surface p-1">
               {TABS.map((t) => (
@@ -128,11 +130,13 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
           </Tabs>
         </div>
 
-        <div className="xl:col-span-1">
-          <div className="sticky top-32">
-            <Playground />
+        {tab !== "channels" && (
+          <div className="xl:col-span-1">
+            <div className="sticky top-32">
+              <Playground />
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
