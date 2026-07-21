@@ -93,7 +93,7 @@ async def seed() -> None:
                 "top_p": 1.0,
                 "max_tokens": 1024,
             },
-            rag_config={"enabled": True, "knowledge_base_ids": [], "top_k": 5, "score_threshold": 0.7, "hybrid": True},
+            rag_config={"enabled": True, "knowledge_base_ids": [], "top_k": 5, "score_threshold": 0.35, "hybrid": True},
             features={"tools_enabled": True, "memory_enabled": True, "handoff_enabled": True},
             created_by=owner.id,
         )

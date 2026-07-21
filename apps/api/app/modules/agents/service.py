@@ -40,8 +40,25 @@ DEFAULT_MODEL_CONFIG = {
     "presence_penalty": 0.0,
     "stop": [],
 }
-DEFAULT_RAG_CONFIG = {"enabled": False, "knowledge_base_ids": [], "top_k": 5, "score_threshold": 0.7, "hybrid": True}
+# score_threshold 0.35: nomic-embed-text scores genuinely-relevant chunks ~0.65-0.76 and
+# tangential ones ~0.5, so 0.35 keeps real matches while dropping noise. (0.7 was too high —
+# it filtered out relevant chunks; see the RAG diagnosis.)
+DEFAULT_RAG_CONFIG = {"enabled": False, "knowledge_base_ids": [], "top_k": 5, "score_threshold": 0.35, "hybrid": True}
 DEFAULT_FEATURES = {"tools_enabled": False, "memory_enabled": True, "handoff_enabled": False}
+
+# Seeded default so a new agent behaves like a grounded support bot out of the box: answer only
+# from the knowledge base, admit when it doesn't know instead of inventing, stay in support tone.
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a customer-support assistant. Answer the user's question using ONLY the information "
+    "in the knowledge base context provided to you in this conversation.\n\n"
+    "Rules:\n"
+    "- If the answer is not in the provided context, say you don't have that information and offer "
+    "to connect the user with a human. Do NOT guess, and do NOT use outside/general knowledge.\n"
+    "- Never invent facts, prices, features, policies, or links that aren't in the context.\n"
+    "- Be concise, accurate, friendly, and professional — like a helpful support agent.\n"
+    "- If the user asks something unrelated to the knowledge base, politely steer them back to "
+    "what you can help with."
+)
 
 
 def _public_key() -> str:
@@ -150,6 +167,7 @@ async def create_agent(session: AsyncSession, ctx: OrgContext, data: schemas.Cre
             agent_id=agent.id,
             version=1,
             is_published=False,
+            system_prompt=DEFAULT_SYSTEM_PROMPT,
             welcome_message="Hi! How can I help you today?",
             fallback_message="I'm not sure about that — want me to connect you with a teammate?",
             suggested_prompts=[],
