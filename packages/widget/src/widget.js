@@ -294,9 +294,15 @@
 
   function build() {
     var theme = state.config.theme || {};
+    // Idempotency: never leave a second widget behind. If a prior host exists (e.g. a React
+    // remount of the preview, or a double init), remove it before creating the new one.
+    var prior = document.getElementById("botforge-widget");
+    if (prior && prior.parentNode) prior.parentNode.removeChild(prior);
+
+    // Build fully DETACHED, theme it, THEN insert — so there's never an unstyled/default frame
+    // painted (the white panel + dark launcher flash) before applyTheme sets the CSS vars.
     host = document.createElement("div");
     host.id = "botforge-widget";
-    document.body.appendChild(host);
     root = host.attachShadow({ mode: "open" });
 
     var style = document.createElement("style");
@@ -364,7 +370,8 @@
     els.fileInput.addEventListener("change", onFile);
     els.emojiBtn.addEventListener("click", toggleEmoji);
 
-    applyConfig(state.config);
+    applyConfig(state.config); // themes + fills content while still detached
+    document.body.appendChild(host); // enter the DOM fully styled — no unstyled first paint
     emit("ready", { config: state.config });
   }
 

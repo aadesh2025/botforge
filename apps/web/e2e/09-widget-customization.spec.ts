@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { API, auth, createAccount, createPublishedAgent } from "./helpers";
+import { API, auth, authenticateBrowser, createAccount, createPublishedAgent } from "./helpers";
 
 // A builder edit (new launcher design + color) must reflect on an already-embedded widget on the
 // next page load — the <script> tag is never re-pasted (config is live-fetched from the API).
@@ -114,4 +114,39 @@ test("transparent style: header has no solid backdrop", async ({ page }) => {
   const headBg = await page.locator(".bf-head").evaluate((el) => getComputedStyle(el).backgroundColor);
   // No accent-colored bar — transparent (or fully transparent rgba), never the solid accent.
   expect(headBg === "rgba(0, 0, 0, 0)" || headBg === "transparent").toBeTruthy();
+});
+
+test("builder preview mounts exactly one widget host across config changes + open/close", async ({ page, context, request }) => {
+  // Regression for the reported "second widget underneath" overlap: the preview iframe must never
+  // hold more than one #botforge-widget host, no matter how many config posts or toggles happen.
+  const account = await createAccount(request, "Single Host Org");
+  const { id } = await createPublishedAgent(request, account, { name: "Single Host Bot" });
+  await authenticateBrowser(context, account);
+
+  await page.goto(`/agents/${id}?tab=channels`);
+  const frame = page.frameLocator('iframe[title="Widget preview"]');
+  await expect(frame.locator(".bf-launcher")).toBeVisible({ timeout: 20_000 });
+
+  const f = () => page.frames().find((fr) => fr.url().includes("widget-preview"))!;
+  const hostCount = () => f().evaluate(() => document.querySelectorAll("#botforge-widget").length);
+  const postCfg = (color: string) =>
+    f().evaluate((c) => {
+      window.postMessage(
+        { type: "bf-preview-config", config: { name: "X", welcome_message: "Hi", suggested_prompts: [], theme: { primary_color: c, mode: "dark" } } },
+        "*",
+      );
+    }, color);
+
+  expect(await hostCount()).toBe(1);
+  for (const c of ["#112233", "#445566", "#778899", "#AA3311"]) {
+    await postCfg(c);
+    await page.waitForTimeout(120);
+    expect(await hostCount()).toBe(1); // never a duplicate after a config change
+  }
+  // Open + close a couple of times — still exactly one host.
+  for (let i = 0; i < 2; i++) {
+    await f().evaluate(() => (window as unknown as { BotForge?: { toggle: () => void } }).BotForge?.toggle());
+    await page.waitForTimeout(120);
+    expect(await hostCount()).toBe(1);
+  }
 });
