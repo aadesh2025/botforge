@@ -18,7 +18,7 @@ export function SidebarNav({ collapsed }: { collapsed: boolean }) {
   const groups = isStaff ? [...nav, STAFF_GROUP] : nav;
 
   return (
-    <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 py-4 no-scrollbar">
+    <nav className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-3 py-4 no-scrollbar">
       {groups.map((group, gi) => (
         <div key={gi} className="flex flex-col gap-1">
           {group.heading && !collapsed && (

@@ -76,6 +76,19 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   own header close button; ≥768px the launcher stays visible and still doubles as close. Playwright
   covers both breakpoints. (The preview-layout widening from the same original change was reverted
   per request; only the bug fix was re-applied.)
+- **Widget preview single-host + sidebar flex fix (2026-07-27).** (1) A reported preview "overlap"
+  (a white panel + dark launcher behind the themed one) was diagnosed live in the real Channels tab
+  (Playwright): exactly **one** `#botforge-widget` host — not a duplicate mount. Hardened `widget.js`
+  anyway: `build()` removes any pre-existing host first (idempotency), and now builds the widget
+  **detached and themes it before inserting into the DOM**, so there's no unstyled/default first
+  paint (the white/black flash the screenshot caught). New Playwright asserts a single host across
+  repeated config posts + open/close toggles. (2) **Sidebar** (`shell/sidebar*.tsx`): the `<nav>`
+  flex child lacked `min-h-0`, and the `aside` was `lg:static` under a `min-h-screen` shell, so it
+  grew past the viewport and pushed the footer (Scale plan card + Collapse button) below the fold.
+  Fix: `min-h-0` on the scrolling `<nav>` **and** `lg:sticky lg:top-0 lg:h-screen` on the aside to
+  bound it to the viewport. Added a **header collapse toggle** beside the logo (rendered in both
+  expanded + collapsed states, same `toggleCollapsed` as the footer control). Playwright: footer
+  visible without scrolling at a short viewport; header toggle collapses/expands.
 
 ## Roadmap / deferred enhancements
 List any provider/channel/billing key that is stubbed and needs a real value. (See `ENV.md`.)
