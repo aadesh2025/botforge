@@ -212,6 +212,13 @@
       ".bf-bot .bf-bubble{background:var(--bf-bg2);color:var(--bf-text);border:1px solid var(--bf-border)}" +
       ".bf-user .bf-bubble{background:var(--bf-bubble);color:var(--bf-on-bubble)}" +
       ".bf-bubble pre{background:rgba(0,0,0,.25);padding:8px;border-radius:8px;overflow-x:auto;margin:6px 0}" +
+      ".bf-cites{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px;padding-top:7px;border-top:1px solid var(--bf-border);font-size:11px;line-height:1.4}" +
+      ".bf-cites-label{opacity:.6;text-transform:uppercase;letter-spacing:.04em;font-weight:600}" +
+      ".bf-cite{padding:2px 7px;border-radius:999px;background:var(--bf-bg);border:1px solid var(--bf-border);opacity:.85;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      "a.bf-cite{color:inherit;text-decoration:none}" +
+      "a.bf-cite:hover{opacity:1;border-color:var(--bf-accent)}" +
+      ":host(.bf-transparent) .bf-cites{border-top-color:rgba(0,0,0,.08)}" +
+      ":host(.bf-transparent) .bf-cite{background:rgba(255,255,255,.5);border-color:rgba(0,0,0,.08)}" +
       ".bf-bubble code{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}" +
       ".bf-bubble a{color:var(--bf-accent)}" +
       ".bf-typing{display:inline-flex;gap:3px}.bf-typing i{width:6px;height:6px;border-radius:50%;background:var(--bf-muted);animation:bfb 1s infinite}" +
@@ -482,6 +489,63 @@
     return bubble;
   }
 
+  // Grounded answers carry "[1]"-style markers; without a source list they read to a
+  // visitor as a glitch. Renders the sources the retrieval step actually returned.
+  function citationLabel(c, i) {
+    var meta = c.metadata || {};
+    return (
+      meta.title ||
+      meta.filename ||
+      meta.heading ||
+      c.filename ||
+      meta.source_url ||
+      c.source_url ||
+      "Source " + (i + 1)
+    );
+  }
+
+  function renderCitations(bubble, cites, answer) {
+    if (!cites || !cites.length || !answer) return;
+    // Only list sources the answer actually references. Retrieval returns candidates even
+    // when the model doesn't use them, and attributing "I don't know" to a document reads
+    // as a mistake to a visitor.
+    var used = [];
+    for (var i = 0; i < cites.length; i++) {
+      if (answer.indexOf("[" + (i + 1) + "]") !== -1) used.push({ c: cites[i], n: i + 1 });
+    }
+    if (!used.length) return;
+
+    var wrap = document.createElement("div");
+    wrap.className = "bf-cites";
+    var label = document.createElement("span");
+    label.className = "bf-cites-label";
+    label.textContent = used.length === 1 ? "Source" : "Sources";
+    wrap.appendChild(label);
+
+    for (var j = 0; j < used.length; j++) {
+      var c = used[j].c;
+      var meta = c.metadata || {};
+      var url = meta.source_url || c.source_url || "";
+      var text = used[j].n + ". " + citationLabel(c, used[j].n - 1);
+      var node;
+      if (url && /^https?:\/\//i.test(url)) {
+        node = document.createElement("a");
+        node.href = url;
+        node.target = "_blank";
+        node.rel = "noopener noreferrer";
+      } else {
+        node = document.createElement("span");
+      }
+      node.className = "bf-cite";
+      node.textContent = text; // textContent, not innerHTML — snippets are untrusted
+      var snippet = (c.content || "").trim();
+      if (snippet) node.title = snippet.slice(0, 300);
+      wrap.appendChild(node);
+    }
+    bubble.appendChild(wrap);
+    els.msgs.scrollTop = els.msgs.scrollHeight;
+  }
+
   function typingBubble() {
     var row = document.createElement("div");
     row.className = "bf-row bf-bot";
@@ -530,6 +594,7 @@
     addMessage("user", text);
     var bubble = typingBubble();
     var acc = "";
+    var cites = null;
     emit("message", { role: "user", content: text });
 
     try {
@@ -570,6 +635,10 @@
               localStorage.setItem(STORE_KEY, ev.conversation_id);
             } catch (e2) {}
             ensureSubscription(ev.conversation_id);
+          } else if (ev.type === "citations" && ev.citations) {
+            // Emitted once, before the provider stream. Held until the reply finishes so
+            // the sources render under the completed answer.
+            cites = ev.citations;
           } else if (ev.type === "token" && ev.delta) {
             acc += ev.delta;
             bubble.innerHTML = renderMarkdown(acc);
@@ -581,8 +650,9 @@
         }
       }
       if (!acc) bubble.textContent = "…";
-      emit("response", { content: acc });
-      emit("message", { role: "assistant", content: acc });
+      renderCitations(bubble, cites, acc);
+      emit("response", { content: acc, citations: cites || [] });
+      emit("message", { role: "assistant", content: acc, citations: cites || [] });
     } catch (err) {
       bubble.textContent = "⚠ " + (err && err.message ? err.message : "connection error");
     } finally {
