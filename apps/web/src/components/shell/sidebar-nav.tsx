@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { ShieldAlert } from "lucide-react";
 import { nav, type NavGroup } from "@/lib/nav";
+import { listInbox } from "@/lib/api/inbox";
 import { useSession } from "@/lib/store/session";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +17,17 @@ const STAFF_GROUP: NavGroup = {
 export function SidebarNav({ collapsed }: { collapsed: boolean }) {
   const pathname = usePathname();
   const isStaff = useSession((s) => Boolean(s.user?.is_staff));
+  const activeOrgId = useSession((s) => s.activeOrgId);
   const groups = isStaff ? [...nav, STAFF_GROUP] : nav;
+
+  // Conversations waiting on a human. Was a hardcoded "3" — it never reflected anything.
+  const { data: waiting } = useQuery({
+    queryKey: ["inbox-waiting", activeOrgId],
+    queryFn: () => listInbox("handoff"),
+    enabled: Boolean(activeOrgId),
+    refetchInterval: 30_000,
+    select: (rows) => rows.length,
+  });
 
   return (
     <nav className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-3 py-4 no-scrollbar">
@@ -52,9 +64,9 @@ export function SidebarNav({ collapsed }: { collapsed: boolean }) {
                   )}
                 />
                 {!collapsed && <span className="flex-1">{item.label}</span>}
-                {!collapsed && item.badge ? (
+                {!collapsed && item.href === "/inbox" && waiting ? (
                   <span className="rounded-full bg-ember/15 px-1.5 py-0.5 text-[11px] font-semibold text-ember-soft">
-                    {item.badge}
+                    {waiting}
                   </span>
                 ) : null}
               </Link>

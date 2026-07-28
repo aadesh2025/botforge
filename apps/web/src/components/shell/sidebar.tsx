@@ -8,6 +8,7 @@ import { OrgSwitcher } from "./org-switcher";
 import { Button } from "@/components/ui/button";
 import { useUI } from "@/lib/store/ui";
 import { cn } from "@/lib/utils";
+import { activeOrg, useSession } from "@/lib/store/session";
 
 export function Sidebar() {
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useUI();
@@ -69,19 +70,7 @@ export function Sidebar() {
 
         {/* Upgrade nudge + collapse control */}
         <div className={cn("border-t border-border p-3", collapsed && "px-2")}>
-          {!collapsed && (
-            <div className="mb-3 overflow-hidden rounded-lg border border-ember/20 bg-ember/[0.06] p-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-text">
-                <Sparkles className="size-4 text-ember-soft" /> Scale plan
-              </div>
-              <p className="mt-1 text-xs text-muted">
-                63% of monthly message credits used. Resets Aug 1.
-              </p>
-              <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-3">
-                <div className="h-full w-[63%] rounded-full bg-gradient-to-r from-ember to-ember-2" />
-              </div>
-            </div>
-          )}
+          {!collapsed && <PlanCard />}
           <Button
             variant="ghost"
             size={collapsed ? "icon" : "sm"}
@@ -95,5 +84,29 @@ export function Sidebar() {
         </div>
       </aside>
     </>
+  );
+}
+
+/** The org's real plan.
+ *
+ * This card previously hardcoded "Scale plan" and "63% of monthly message credits used",
+ * shown to every org regardless of plan — a Free-plan org saw Scale. There is no quota
+ * endpoint, so no usage figure is displayed rather than an invented one. */
+function PlanCard() {
+  const org = useSession(activeOrg);
+  if (!org) return null;
+  const plan = org.plan.charAt(0).toUpperCase() + org.plan.slice(1);
+
+  return (
+    <div className="mb-3 overflow-hidden rounded-lg border border-ember/20 bg-ember/[0.06] p-3">
+      <div className="flex items-center gap-2 text-sm font-medium text-text">
+        <Sparkles className="size-4 text-ember-soft" /> {plan} plan
+      </div>
+      <p className="mt-1 text-xs text-muted">
+        {org.plan === "free"
+          ? "Free tier — bring your own provider keys for unlimited use."
+          : `${org.name} is on the ${plan} plan.`}
+      </p>
+    </div>
   );
 }

@@ -137,8 +137,9 @@ export function UsageChart({ data }: { data: UsagePoint[] }) {
           />
           <circle cx={activePoint.x} cy={activePoint.y} r={4.5} fill="#FF6A3D" stroke="#0A0B0D" strokeWidth={2} />
 
-          {/* x labels: first, mid, last */}
-          {[0, Math.floor(data.length / 2), data.length - 1].map((i) => (
+          {/* x labels: first, mid, last — de-duplicated, since a short series collapses
+              them onto the same index (1 point => [0,0,0], which also duplicated React keys) */}
+          {[...new Set([0, Math.floor(data.length / 2), data.length - 1])].map((i) => (
             <text
               key={i}
               x={points[i].x}

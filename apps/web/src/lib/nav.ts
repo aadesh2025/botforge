@@ -14,7 +14,6 @@ export type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
-  badge?: number;
 };
 
 export type NavGroup = {
@@ -38,7 +37,7 @@ export const nav: NavGroup[] = [
     heading: "Operate",
     items: [
       { label: "Conversations", href: "/conversations", icon: MessagesSquare },
-      { label: "Inbox", href: "/inbox", icon: Inbox, badge: 3 },
+      { label: "Inbox", href: "/inbox", icon: Inbox },
       { label: "Analytics", href: "/analytics", icon: BarChart3 },
     ],
   },
