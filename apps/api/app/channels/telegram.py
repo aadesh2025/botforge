@@ -5,10 +5,30 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.channels.base import BaseChannel, InboundMessage, register
+from app.channels.base import BaseChannel, ContactProfile, InboundMessage, register
 from app.core.logging import get_logger
 
 log = get_logger("channels.telegram")
+
+
+def _profile(msg: dict[str, Any]) -> ContactProfile:
+    """Telegram puts the sender's identity straight in the update — no lookup needed."""
+    user = msg.get("from") or {}
+    chat = msg.get("chat") or {}
+    src = user if user else chat
+    name = " ".join(str(p) for p in (src.get("first_name"), src.get("last_name")) if p).strip()
+    if not name:
+        # Group chats have a title; a user with no first name still has a @handle.
+        name = str(src.get("title") or src.get("username") or "")
+    extra: dict[str, Any] = {}
+    if src.get("username"):
+        extra["username"] = str(src["username"])
+    if src.get("language_code"):
+        extra["locale"] = str(src["language_code"])
+    # avatar_url stays null on purpose: Telegram serves profile photos from
+    # api.telegram.org/file/bot<TOKEN>/… — persisting that URL would put the bot token
+    # in the contacts table and hand it to every operator who can open the inbox.
+    return ContactProfile(display_name=name or None, extra=extra)
 
 
 class TelegramChannel(BaseChannel):
@@ -31,7 +51,9 @@ class TelegramChannel(BaseChannel):
         chat_id = (msg.get("chat") or {}).get("id")
         if text is None or chat_id is None:
             return None
-        return InboundMessage(external_user_id=str(chat_id), text=str(text), raw=payload)
+        return InboundMessage(
+            external_user_id=str(chat_id), text=str(text), raw=payload, profile=_profile(msg)
+        )
 
     async def send(self, channel: Any, to: str, text: str) -> None:
         token = self.secret(channel, "bot_token")

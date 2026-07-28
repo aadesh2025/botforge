@@ -3,6 +3,7 @@
 
 from app.models.agents import Agent, AgentVersion, ProviderCredential
 from app.models.channels import Channel
+from app.models.contacts import Contact
 from app.models.conversations import Conversation, Message
 from app.models.identity import (
     EmailVerificationToken,
@@ -36,6 +37,7 @@ __all__ = [
     "AuditLog",
     "Channel",
     "Chunk",
+    "Contact",
     "Conversation",
     "Document",
     "EmailVerificationToken",

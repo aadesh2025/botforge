@@ -54,6 +54,27 @@ See §3.
 - `POST` webhook: verify `X-Hub-Signature-256`, parse message → chat → reply via Graph API
   `messages` endpoint. Handle 24-hour window / templates note in docs.
 
+### Facebook Messenger + Instagram DMs (Meta Messenger Platform)
+Meta unified these two behind one Send API, so BotForge implements them once
+(`channels/meta_messaging.py`) with a thin subclass each. They share the WhatsApp app
+secret and its `X-Hub-Signature-256` check (`channels/meta_signature.py`).
+
+- Config: `page_access_token`, `verify_token`, `app_secret`, plus `page_id` (Messenger) or
+  `ig_user_id` (Instagram).
+- `GET` webhook: the same `hub.challenge` handshake as WhatsApp.
+- `POST` webhook: verify the signature, then parse `entry[].messaging[]`. A delivery is only
+  accepted if its `object` matches the adapter's surface (`page` vs `instagram`), so one Meta
+  app feeding several channels never cross-attributes a conversation. Read receipts, delivery
+  confirmations, and `is_echo` (our own outbound) are ignored.
+- Outbound: `POST /v19.0/me/messages` with the page token as a Bearer header.
+- Identity: `fetch_profile` resolves a name + photo via the Graph API — `first_name`,
+  `last_name`, `profile_pic` for Messenger; `name`, `username`, `profile_pic` for Instagram
+  (needs `instagram_manage_messages`). Called only while the contact is still missing a name
+  or avatar, so an active thread costs one lookup, not one per message.
+- **Not included:** public post-comment moderation (the "Facebook comments" / "Instagram
+  comments" surfaces). Different webhook fields, permissions, and reply semantics — see
+  ADR-037.
+
 ### Slack
 - Config: bot token, signing secret. Verify Slack signature. Handle `event_callback`
   (app_mention / message.im) → chat → `chat.postMessage`. Support Slack markdown.
@@ -67,7 +88,17 @@ See §3.
 
 ### Channel abstraction
 Implement a `Channel` interface: `verify(request)`, `parse_inbound(request) -> InboundMsg`,
-`send(conversation, text, attachments)`. Register per type. Keeps `chat.service` channel-agnostic.
+`send(conversation, text, attachments)`, and an optional
+`fetch_profile(channel, external_id) -> ContactProfile | None`. Register per type. Keeps
+`chat.service` channel-agnostic.
+
+### Contact identity
+Every inbound path — channels *and* the widget — resolves the sender to a `contacts` row keyed
+`(organization_id, channel, external_id)` before the turn runs, and points the conversation at
+it. Names and avatars refresh when a platform sends something fresher; a blank value never
+overwrites a known one. That's what lets the unified inbox show a person instead of a PSID.
+Identity is per-channel by design: the same human on Instagram and WhatsApp arrives with two
+unrelated ids and no reliable way to link them.
 
 ## 3. Embeddable web widget (`packages/widget`)
 

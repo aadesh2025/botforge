@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 from collections.abc import Mapping
 from typing import Any
 
-from app.channels.base import BaseChannel, InboundMessage, register
+from app.channels.base import BaseChannel, ContactProfile, InboundMessage, register
+from app.channels.meta_signature import verify_challenge, verify_signature
 from app.core.logging import get_logger
 
 log = get_logger("channels.whatsapp")
@@ -20,20 +19,11 @@ class WhatsAppChannel(BaseChannel):
     async def verify(
         self, channel: Any, headers: Mapping[str, str], body: bytes, query: Mapping[str, str]
     ) -> bool:
-        secret = self.secret(channel, "app_secret")
-        if not secret:
-            return True
-        provided = headers.get("x-hub-signature-256", "")
-        expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, provided)
+        return verify_signature(self.secret(channel, "app_secret"), headers, body)
 
     def verify_challenge(self, channel: Any, query: Mapping[str, str]) -> str | None:
         """Meta's GET webhook verification handshake → return hub.challenge on success."""
-        if query.get("hub.mode") == "subscribe" and query.get("hub.verify_token") == channel.config.get(
-            "verify_token"
-        ):
-            return query.get("hub.challenge")
-        return None
+        return verify_challenge(channel, query)
 
     def parse_inbound(self, channel: Any, payload: dict[str, Any]) -> InboundMessage | None:
         try:
@@ -43,7 +33,26 @@ class WhatsAppChannel(BaseChannel):
             text = msg["text"]["body"]
         except (KeyError, IndexError, TypeError):
             return None
-        return InboundMessage(external_user_id=str(sender), text=str(text), raw=payload)
+        return InboundMessage(
+            external_user_id=str(sender),
+            text=str(text),
+            raw=payload,
+            profile=self._profile(value, str(sender)),
+        )
+
+    @staticmethod
+    def _profile(value: dict[str, Any], sender: str) -> ContactProfile:
+        """WhatsApp ships the contact's profile name with the message.
+
+        There is no photo endpoint on the Cloud API, so ``avatar_url`` stays null — a
+        platform limitation, not a gap to fill in later.
+        """
+        name: str | None = None
+        for contact in value.get("contacts") or []:
+            if isinstance(contact, dict) and (contact.get("profile") or {}).get("name"):
+                name = str(contact["profile"]["name"])
+                break
+        return ContactProfile(display_name=name, extra={"phone": sender})
 
     async def send(self, channel: Any, to: str, text: str) -> None:
         token = self.secret(channel, "access_token")

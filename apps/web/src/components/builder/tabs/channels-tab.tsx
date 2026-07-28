@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, Hash, Loader2, MessageSquare, Phone, Send, Trash2, Upload } from "lucide-react";
+import { Check, Copy, Hash, Loader2, MessageSquare, Send, Trash2, Upload } from "lucide-react";
 import { Field, SectionCard } from "@/components/builder/field";
+import { CHANNEL_META } from "@/lib/channel-meta";
 import { WidgetChatIcon, WidgetDotsIcon, WidgetMessageIcon } from "@/lib/widget-icons";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -504,7 +505,7 @@ const CHANNEL_SPECS: Record<
   },
   whatsapp: {
     label: "WhatsApp (Meta)",
-    icon: Phone,
+    icon: CHANNEL_META.whatsapp.Icon,
     fields: [
       { key: "phone_number_id", label: "Phone number ID" },
       { key: "access_token", label: "Access token", secret: true },
@@ -512,6 +513,28 @@ const CHANNEL_SPECS: Record<
       { key: "app_secret", label: "App secret", secret: true },
     ],
     hint: "Set the webhook URL below in Meta → WhatsApp → Configuration, using your verify token.",
+  },
+  facebook: {
+    label: "Facebook Messenger",
+    icon: CHANNEL_META.facebook.Icon,
+    fields: [
+      { key: "page_id", label: "Page ID" },
+      { key: "page_access_token", label: "Page access token", secret: true },
+      { key: "verify_token", label: "Verify token (you choose)" },
+      { key: "app_secret", label: "App secret (same Meta app as WhatsApp)", secret: true },
+    ],
+    hint: "In Meta → Messenger → Webhooks, set the callback URL below and subscribe to the `messages` field.",
+  },
+  instagram: {
+    label: "Instagram",
+    icon: CHANNEL_META.instagram.Icon,
+    fields: [
+      { key: "ig_user_id", label: "Instagram account ID" },
+      { key: "page_access_token", label: "Instagram-scoped page access token", secret: true },
+      { key: "verify_token", label: "Verify token (you choose)" },
+      { key: "app_secret", label: "App secret (same Meta app as WhatsApp)", secret: true },
+    ],
+    hint: "Needs the instagram_manage_messages permission. Subscribe to `messages` for the Instagram object using the callback URL below.",
   },
   slack: {
     label: "Slack",

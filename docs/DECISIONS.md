@@ -36,6 +36,56 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-038: Contact identity as its own table, scoped per channel
+- **Date:** 2026-07-28
+- **Status:** accepted
+- **Context:** the inbox could only show a raw `channel_user_id` — a PSID or phone number —
+  because a conversation carried no notion of *who* it was with. Building a unified
+  multi-channel inbox on that is impossible: an operator can't triage "17841400000000042".
+- **Decision:** a `contacts` table keyed uniquely on `(organization_id, channel, external_id)`,
+  with `conversations.contact_id` pointing at it (nullable — older threads predate it). One
+  upsert helper (`app/contacts/service.py`) serves every inbound path, including the widget.
+  Refresh semantics are `COALESCE(new, old)` per field plus a JSONB merge on `extra`, so
+  fresher platform data wins but a payload that omits a name never erases one we already had.
+  Adapters supply identity two ways: inline on `InboundMessage.profile` when the payload
+  carries it (Telegram, WhatsApp), or via an optional `fetch_profile` hook when the platform
+  needs a separate call (Meta's Graph API) — invoked only while the contact is still missing a
+  name or avatar, so a long thread costs one lookup rather than one per message.
+- **Alternatives:** denormalizing `display_name`/`avatar_url` onto `conversations` (loses the
+  identity across threads, re-fetches per conversation); a cross-channel "person" entity that
+  merges identities (no reliable join key across platforms — deferred, and this table is the
+  right thing to build it on later).
+- **Consequences:** the inbox renders a person; contacts are per-channel, so the same human on
+  two platforms is two rows. That's honest about what the platforms actually tell us.
+
+### ADR-037: Public post-comment moderation deliberately out of scope
+- **Date:** 2026-07-28
+- **Status:** accepted
+- **Context:** the reference inbox shows "Facebook comments" and "Instagram comments" tabs
+  alongside the DM tabs, which makes them look like a small extension of the DM adapters.
+- **Decision:** ship Messenger + Instagram **DMs** only. Comments are a materially different
+  product: different webhook subscription fields (`feed`/`comments`, not `messages`), different
+  permissions (`pages_manage_engagement`, `instagram_manage_comments`), and different reply
+  semantics — a public thread hanging off a post, not a private back-and-forth with an agent.
+  They don't fit `Conversation`/`Message` without distorting both.
+- **Consequences:** no comment tabs today. When there's a concrete need, comments get their own
+  small model (`Comment`/`CommentThread`) rather than being forced through the DM path.
+
+### ADR-036: Never persist Telegram profile-photo URLs
+- **Date:** 2026-07-28
+- **Status:** accepted
+- **Context:** Telegram can return a sender's avatar via `getUserProfilePhotos` + `getFile`, but
+  the resulting file URL is `api.telegram.org/file/bot<BOT_TOKEN>/<path>` — the bot token is
+  *in the URL*.
+- **Decision:** Telegram contacts get a name (which the update carries inline) and no avatar.
+  Storing that URL would put the bot token in the `contacts` table and serve it to every
+  operator who can open the inbox — including the `operator` role, which deliberately cannot
+  read channel config. That's privilege escalation to full control of the bot.
+- **Alternatives:** an authenticated avatar-proxy endpoint that keeps the token server-side.
+  Viable, but it's real surface area for one cosmetic field; revisit if avatars matter enough.
+- **Consequences:** Telegram rows show the person-glyph fallback. WhatsApp is avatar-less too,
+  but for a plainer reason: the Cloud API has no photo endpoint at all.
+
 ### ADR-035: Widget customization parity — config-driven, CSS-vars, merge-on-write
 - **Date:** 2026-07-21
 - **Status:** accepted

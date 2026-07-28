@@ -12,12 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.channels import schemas
 from app.channels.base import BaseChannel, InboundMessage, get_channel
 from app.chat.inbound import InboundTurn
+from app.contacts import resolve_contact
 from app.core import rbac
 from app.core.config import settings
 from app.core.crypto import encrypt
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.models import Agent, AgentVersion, Channel, Conversation
+from app.models import Agent, AgentVersion, Channel, Contact, Conversation
 from app.modules.orgs.deps import OrgContext
 
 log = get_logger("channels.service")
@@ -25,6 +26,8 @@ log = get_logger("channels.service")
 _WEBHOOK_PATH = {
     "telegram": "webhook",
     "whatsapp": "webhook",
+    "instagram": "webhook",
+    "facebook": "webhook",
     "slack": "events",
     "discord": "interactions",
 }
@@ -180,7 +183,9 @@ async def _live_version(session: AsyncSession, agent: Agent) -> AgentVersion | N
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def _get_or_create_conversation(session: AsyncSession, channel: Channel, external_user_id: str) -> Conversation:
+async def _get_or_create_conversation(
+    session: AsyncSession, channel: Channel, external_user_id: str, contact: Contact | None
+) -> Conversation:
     stmt = (
         select(Conversation)
         .where(
@@ -195,12 +200,16 @@ async def _get_or_create_conversation(session: AsyncSession, channel: Channel, e
     )
     conv = (await session.execute(stmt)).scalar_one_or_none()
     if conv is not None:
+        # Backfill: threads that started before this channel had contact resolution.
+        if contact is not None and conv.contact_id is None:
+            conv.contact_id = contact.id
         return conv
     conv = Conversation(
         organization_id=channel.organization_id,
         agent_id=channel.agent_id,
         channel=channel.type,
         channel_user_id=external_user_id,
+        contact_id=contact.id if contact else None,
         status="active",
     )
     session.add(conv)
@@ -224,7 +233,8 @@ async def process_inbound(
     version = await _live_version(session, agent)
     if version is None:
         return msg, None
-    conv = await _get_or_create_conversation(session, channel, msg.external_user_id)
+    contact = await resolve_contact(session, channel, adapter, msg.external_user_id, msg.profile)
+    conv = await _get_or_create_conversation(session, channel, msg.external_user_id, contact)
     turn = InboundTurn(session, agent, version, conv, msg.text)
     await turn.run()
     reply = None if turn.handed_off else ((turn.result.content or "").strip() or None)

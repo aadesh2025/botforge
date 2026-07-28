@@ -20,7 +20,8 @@ class Channel(Base, UUIDPrimaryKey, TimestampMixin):
         ForeignKey("organizations.id", ondelete="CASCADE"), index=True
     )
     agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
-    type: Mapped[str] = mapped_column(String(16), nullable=False)  # widget|telegram|whatsapp|slack|discord|api
+    # widget|telegram|whatsapp|instagram|facebook|slack|discord|api
+    type: Mapped[str] = mapped_column(String(16), nullable=False)
     name: Mapped[str | None] = mapped_column(String(255))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)

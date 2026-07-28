@@ -17,6 +17,12 @@ export interface ApiHandoff {
   resolved_at: string | null;
 }
 
+export interface ApiContact {
+  id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
 export interface ApiInboxItem {
   id: string;
   agent_id: string;
@@ -28,14 +34,18 @@ export interface ApiInboxItem {
   last_message_at: string | null;
   created_at: string;
   handoff: ApiHandoff | null;
+  contact: ApiContact | null;
 }
 
 export interface ApiInboxDetail extends ApiInboxItem {
   messages: ApiMessage[];
 }
 
-export function listInbox(status?: string) {
-  const q = status ? `?status=${status}` : "";
+export function listInbox(status?: string, channel?: string) {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (channel) params.set("channel", channel);
+  const q = params.size ? `?${params}` : "";
   return api<ApiInboxItem[]>(`/v1/inbox/conversations${q}`, { orgScoped: true });
 }
 

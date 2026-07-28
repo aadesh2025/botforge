@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels import schemas, service
 from app.channels.base import get_channel
-from app.channels.whatsapp import WhatsAppChannel
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.ratelimit import rate_limit
@@ -131,19 +130,27 @@ async def telegram_webhook(
     return {"ok": True}
 
 
-@router.get("/whatsapp/{channel_id}/webhook", dependencies=[_webhook_rl])
-async def whatsapp_verify(
-    channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
+async def _meta_challenge(
+    session: AsyncSession, channel_type: str, channel_id: uuid.UUID, request: Request
 ) -> PlainTextResponse:
-    channel = await service.get_channel_by_id(session, channel_id, "whatsapp")
+    """Meta's GET subscription handshake — identical for WhatsApp, Messenger, Instagram."""
+    channel = await service.get_channel_by_id(session, channel_id, channel_type)
     if channel is None:
         raise AppError("channels.not_found", "Channel not found.", 404)
-    adapter = get_channel("whatsapp")
-    assert isinstance(adapter, WhatsAppChannel)
+    adapter = get_channel(channel_type)
+    if adapter is None or not hasattr(adapter, "verify_challenge"):
+        raise AppError("channels.unknown_type", "Unknown channel type.", 400)
     challenge = adapter.verify_challenge(channel, dict(request.query_params))
     if challenge is None:
         raise AppError("channels.verify_failed", "Verification token mismatch.", 403)
     return PlainTextResponse(challenge)
+
+
+@router.get("/whatsapp/{channel_id}/webhook", dependencies=[_webhook_rl])
+async def whatsapp_verify(
+    channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
+) -> PlainTextResponse:
+    return await _meta_challenge(session, "whatsapp", channel_id, request)
 
 
 @router.post("/whatsapp/{channel_id}/webhook", dependencies=[_webhook_rl])
@@ -151,6 +158,39 @@ async def whatsapp_webhook(
     channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
 ) -> dict[str, bool]:
     channel, adapter, _h, _b, payload = await _load_verified(session, "whatsapp", channel_id, request)
+    await _run_and_send(session, channel, adapter, payload)
+    return {"ok": True}
+
+
+# Messenger + Instagram DMs: same Meta app, same envelope, different `object` type.
+@router.get("/facebook/{channel_id}/webhook", dependencies=[_webhook_rl])
+async def facebook_verify(
+    channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
+) -> PlainTextResponse:
+    return await _meta_challenge(session, "facebook", channel_id, request)
+
+
+@router.post("/facebook/{channel_id}/webhook", dependencies=[_webhook_rl])
+async def facebook_webhook(
+    channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
+) -> dict[str, bool]:
+    channel, adapter, _h, _b, payload = await _load_verified(session, "facebook", channel_id, request)
+    await _run_and_send(session, channel, adapter, payload)
+    return {"ok": True}
+
+
+@router.get("/instagram/{channel_id}/webhook", dependencies=[_webhook_rl])
+async def instagram_verify(
+    channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
+) -> PlainTextResponse:
+    return await _meta_challenge(session, "instagram", channel_id, request)
+
+
+@router.post("/instagram/{channel_id}/webhook", dependencies=[_webhook_rl])
+async def instagram_webhook(
+    channel_id: uuid.UUID, request: Request, session: AsyncSession = Depends(get_session)
+) -> dict[str, bool]:
+    channel, adapter, _h, _b, payload = await _load_verified(session, "instagram", channel_id, request)
     await _run_and_send(session, channel, adapter, payload)
     return {"ok": True}
 

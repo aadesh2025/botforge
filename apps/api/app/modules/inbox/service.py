@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import func, select
@@ -13,7 +14,7 @@ from app.channels import get_channel
 from app.core import rbac
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.models import Channel, Conversation, Handoff, Message
+from app.models import Channel, Contact, Conversation, Handoff, Message
 from app.modules.conversations.schemas import MessageOut
 from app.modules.conversations.service import _message_out
 from app.modules.inbox import schemas
@@ -23,7 +24,7 @@ from app.webhooks.dispatch import emit_event
 
 log = get_logger("inbox")
 
-_CHANNEL_TYPES = ("telegram", "whatsapp", "slack", "discord")
+_CHANNEL_TYPES = ("telegram", "whatsapp", "instagram", "facebook", "slack", "discord")
 
 
 def _now() -> dt.datetime:
@@ -68,7 +69,30 @@ async def _message_count(session: AsyncSession, conversation_id: uuid.UUID) -> i
     return int((await session.execute(stmt)).scalar_one())
 
 
-async def _item_out(session: AsyncSession, conv: Conversation) -> schemas.InboxItemOut:
+def _contact_out(contact: Contact | None) -> schemas.ContactOut | None:
+    if contact is None:
+        return None
+    return schemas.ContactOut(
+        id=contact.id, display_name=contact.display_name, avatar_url=contact.avatar_url
+    )
+
+
+async def _contacts_by_id(
+    session: AsyncSession, convs: Sequence[Conversation]
+) -> dict[uuid.UUID, Contact]:
+    """One query for the whole page's contacts, rather than one per row."""
+    ids = {c.contact_id for c in convs if c.contact_id is not None}
+    if not ids:
+        return {}
+    stmt = select(Contact).where(Contact.id.in_(ids))
+    return {c.id: c for c in (await session.execute(stmt)).scalars().all()}
+
+
+async def _item_out(
+    session: AsyncSession, conv: Conversation, contact: Contact | None = None
+) -> schemas.InboxItemOut:
+    if contact is None and conv.contact_id is not None:
+        contact = await session.get(Contact, conv.contact_id)
     return schemas.InboxItemOut(
         id=conv.id,
         agent_id=conv.agent_id,
@@ -80,12 +104,16 @@ async def _item_out(session: AsyncSession, conv: Conversation) -> schemas.InboxI
         last_message_at=conv.last_message_at,
         created_at=conv.created_at,
         handoff=_handoff_out(await _latest_handoff(session, conv.id)),
+        contact=_contact_out(contact),
     )
 
 
 # ── Queue + detail ───────────────────────────────────────────────────────────────
 async def list_conversations(
-    session: AsyncSession, ctx: OrgContext, status_filter: str | None
+    session: AsyncSession,
+    ctx: OrgContext,
+    status_filter: str | None,
+    channel_filter: str | None = None,
 ) -> list[schemas.InboxItemOut]:
     rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
     # Conversations that have at least one handoff record form the inbox queue.
@@ -97,8 +125,13 @@ async def list_conversations(
     )
     if status_filter:
         stmt = stmt.where(Conversation.status == status_filter)
+    if channel_filter:
+        # Server-side so the channel tabs page independently instead of slicing one
+        # client-held list.
+        stmt = stmt.where(Conversation.channel == channel_filter)
     convs = (await session.execute(stmt)).scalars().all()
-    return [await _item_out(session, c) for c in convs]
+    contacts = await _contacts_by_id(session, convs)
+    return [await _item_out(session, c, contacts.get(c.contact_id) if c.contact_id else None) for c in convs]
 
 
 async def get_detail(session: AsyncSession, ctx: OrgContext, cid: uuid.UUID) -> schemas.InboxDetail:

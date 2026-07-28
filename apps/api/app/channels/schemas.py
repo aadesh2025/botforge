@@ -8,12 +8,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-CHANNEL_TYPES = ("telegram", "whatsapp", "slack", "discord")
+CHANNEL_TYPES = ("telegram", "whatsapp", "instagram", "facebook", "slack", "discord")
 
 
 class CreateChannelRequest(BaseModel):
     agent_id: uuid.UUID
-    type: str = Field(pattern="^(telegram|whatsapp|slack|discord)$")
+    type: str = Field(pattern=f"^({'|'.join(CHANNEL_TYPES)})$")
     name: str | None = Field(default=None, max_length=255)
     config: dict[str, Any] = Field(default_factory=dict)
 

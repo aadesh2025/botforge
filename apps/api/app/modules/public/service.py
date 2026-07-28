@@ -13,7 +13,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.channels.base import ContactProfile
 from app.chat.inbound import InboundTurn
+from app.contacts import upsert_contact
 from app.core.errors import AppError
 from app.llm.types import StreamEvent
 from app.models import Agent, AgentVersion, Conversation
@@ -89,6 +91,18 @@ async def get_config(session: AsyncSession, public_key: str) -> schemas.PublicCo
     )
 
 
+def _visitor_profile(visitor: schemas.Visitor | None) -> ContactProfile:
+    """Whatever the embedding site chose to tell us about the visitor."""
+    if visitor is None:
+        return ContactProfile()
+    extra: dict[str, Any] = {}
+    if visitor.email:
+        extra["email"] = visitor.email
+    if visitor.metadata:
+        extra.update(visitor.metadata)
+    return ContactProfile(display_name=visitor.name or None, extra=extra)
+
+
 async def _get_or_create_conversation(
     session: AsyncSession, agent: Agent, data: schemas.PublicChatRequest, visitor_id: str
 ) -> Conversation:
@@ -105,11 +119,21 @@ async def _get_or_create_conversation(
     meta: dict[str, Any] = {}
     if data.visitor is not None:
         meta["visitor"] = data.visitor.model_dump(exclude_none=True)
+    # The widget is a channel like any other in the inbox, so its visitors get contact
+    # rows too — an anonymous one still anchors the thread to a stable identity.
+    contact = await upsert_contact(
+        session,
+        organization_id=agent.organization_id,
+        channel="widget",
+        external_id=visitor_id,
+        profile=_visitor_profile(data.visitor),
+    )
     conv = Conversation(
         organization_id=agent.organization_id,
         agent_id=agent.id,
         channel="widget",
         channel_user_id=visitor_id,
+        contact_id=contact.id,
         status="active",
         meta=meta,
     )

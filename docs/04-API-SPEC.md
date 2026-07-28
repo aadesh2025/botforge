@@ -87,11 +87,16 @@ from it. Error model per `02 §8`.
 - Inbound webhooks (public, signature-verified):
   `POST /channels/telegram/{channelId}/webhook`,
   `POST /channels/whatsapp/{channelId}/webhook` (+ `GET` for Meta verify challenge),
+  `POST /channels/facebook/{channelId}/webhook` (+ `GET` verify challenge),
+  `POST /channels/instagram/{channelId}/webhook` (+ `GET` verify challenge),
   `POST /channels/slack/{channelId}/events`,
   `POST /channels/discord/{channelId}/interactions`.
 
 ## Inbox / handoff  `/v1/inbox`
-- `GET /conversations?status=` (active/handoff/closed), `GET /conversations/{cid}`.
+- `GET /conversations?status=&channel=` (status: active/handoff/closed; channel: widget/
+  telegram/whatsapp/instagram/facebook/slack/discord), `GET /conversations/{cid}`.
+- Both carry a nested `contact: {id, display_name, avatar_url} | null` — the resolved identity
+  behind `channel_user_id`. Null only for conversations that predate contact resolution.
 - `POST /conversations/{cid}/takeover`, `POST /conversations/{cid}/handback`,
   `POST /conversations/{cid}/messages` (operator reply),
   `POST /conversations/{cid}/assign` `{userId}`, `POST /conversations/{cid}/close`,

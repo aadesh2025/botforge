@@ -38,6 +38,29 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Unified multi-channel inbox — contacts, Instagram + Messenger, channel tabs (2026-07-28).**
+  The inbox could previously only show a raw `channel_user_id`; it now shows a person, per
+  channel. **Contacts** (`models/contacts.py`, migration `0006_contacts`): a `contacts` table
+  unique on `(organization_id, channel, external_id)` + `conversations.contact_id`, with one
+  upsert helper (`app/contacts/service.py`) used by every inbound path including the widget's
+  `Visitor`. Names/avatars refresh with `COALESCE(new, old)` + a JSONB merge, so a payload that
+  omits a name never erases one we had. Adapters supply identity inline
+  (`InboundMessage.profile` — Telegram, WhatsApp) or through a new optional
+  `BaseChannel.fetch_profile` hook, called only while the contact still lacks a name or avatar.
+  **Instagram + Facebook Messenger** (`channels/instagram.py`, `facebook.py` over a shared
+  `meta_messaging.py`): Meta unified the Send API, so one implementation covers both; the
+  `X-Hub-Signature-256` check and `hub.challenge` handshake were factored out of `whatsapp.py`
+  into `meta_signature.py` so all three Meta surfaces share one verification path. Deliveries
+  are matched on the webhook `object` (`page` vs `instagram`), and echoes/read receipts are
+  ignored. Profiles come from the Graph API. **Inbox API:** nested `contact` on
+  `InboxItemOut`/`InboxDetail` (batched, no N+1) and a `?channel=` filter so tabs page
+  server-side. **Inbox UI:** a channel tab bar — Web Chat always (the widget needs no
+  connecting), every other tab only once that channel has an enabled row in the org, plus a
+  "New" badge for the first week — and contact avatars with a platform badge in both the list
+  row and the thread header. 9 backend tests, 12 web unit tests, 1 Playwright flow. New human
+  secrets documented: `META_PAGE_ACCESS_TOKEN`, `INSTAGRAM_PAGE_ACCESS_TOKEN` (+ ids and a
+  shared `META_VERIFY_TOKEN`); unset → warn and skip sending, inbound still works. Public
+  **post-comment moderation is deliberately not included** (ADR-037). See ADR-036/037/038.
 - **Widget customization → full parity (2026-07-21).** Extended the embeddable widget from
   accent/text/position to a complete design system, all flowing through the existing
   live-fetched public config (`GET /v1/public/agents/{key}/config`) so the embed snippet never

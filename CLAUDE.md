@@ -144,3 +144,65 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 10. `docs/09-DEPLOYMENT.md`
 11. `docs/10-TESTING.md`
 12. `docs/08-PHASES.md` ← then execute this, task by task, no stopping.
+
+---
+
+## 11. Session log (append-only; newest first)
+
+> Contract above is stable. This section is a running note of what shipped per session so a
+> fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
+> `docs/DECISIONS.md`; keep entries here to a few lines.
+
+### 2026-07-28 — Unified multi-channel inbox (contacts, IG/Messenger, channel tabs)
+- **Contacts** (`models/contacts.py`, migration `0006_contacts`, `app/contacts/service.py`): new
+  `contacts` table unique on `(org, channel, external_id)` + `conversations.contact_id`. One upsert
+  helper for every inbound path (channels **and** the widget's `Visitor`); `COALESCE(new, old)` +
+  JSONB merge so a nameless payload never erases a known name. New `BaseChannel.fetch_profile` hook,
+  called only while a contact still lacks a name/avatar.
+- **Instagram + Facebook Messenger**: `channels/instagram.py` + `facebook.py` over a shared
+  `meta_messaging.py`; Meta's signature/challenge logic factored out of `whatsapp.py` into
+  `meta_signature.py` (all three Meta surfaces now share one verification path). Deliveries matched
+  on webhook `object`; echoes/read receipts ignored. **Comment moderation deliberately excluded** — ADR-037.
+- **Inbox**: nested `contact` on list/detail (batched), `?channel=` filter, and a channel tab bar
+  (Web Chat always; others only once an enabled `Channel` row exists) with contact avatars +
+  platform badges. ADR-036 (no Telegram avatar — its photo URLs embed the bot token), ADR-038.
+
+### 2026-07-27 — Widget preview single-host + app sidebar
+- **Widget preview overlap** (`packages/widget/src/widget.js`): live Playwright diagnosis in the
+  real Channels tab confirmed a **single** `#botforge-widget` host (not a duplicate mount). The
+  white/black "overlap" was an unstyled first-paint frame. Fixed `build()`: remove any pre-existing
+  host (idempotency) + build **detached** and theme via `applyConfig()` *before* `appendChild` — no
+  unstyled frame. Playwright asserts one host across config posts + open/close.
+- **App sidebar** (`apps/web/src/components/shell/sidebar*.tsx`): footer (Scale plan + Collapse) was
+  pushed below the fold — the `<nav>` lacked `min-h-0` and the `aside` was `lg:static` under a
+  `min-h-screen` shell (unbounded). Fixed with `min-h-0` on the nav + `lg:sticky lg:top-0 lg:h-screen`
+  on the aside; added a **header collapse toggle** next to the logo (both states) sharing
+  `toggleCollapsed`. Commits `73a949c`, `f1db62e`.
+
+### 2026-07-21 — Widget customization parity + fixes
+- Full widget customization (styles/colors/fonts/logo/launcher designs/live preview) — ADR-035.
+- Fixes: preview no longer force-opens on config change (`build`/`applyConfig` split); transparent
+  glass palette; real launcher SVGs in the picker; mobile launcher-vs-panel collision hidden
+  `<768px` via a `bf-open` host class. RAG fix: support-bot default prompt + `score_threshold` 0.7→0.35.
+
+### 2026-07-19/20 — Phases 19–20 complete; repo published
+- Phase 19 (E2E for PRD criteria 1–7, Next 14→16 upgrade, docs, a11y) + Phase 20 (prod compose +
+  Caddy TLS, Redis pub/sub hub, webhook retry sweep, httpOnly refresh via BFF, /metrics + Sentry +
+  backups, K8s manifests, release CI/CD). Phase 18 (billing) deferred by design. Tagged
+  `phase-19-complete`, `phase-20-complete`. Pushed to `github.com/aadesh2025/botforge` (private).
+
+## 12. Dev-stack reality (Windows, this machine)
+
+Each new session usually starts with Docker Desktop + services **stopped** — bring them up first:
+1. **Docker Desktop** must be running, then `cd infra && docker compose up -d postgres redis` (wait healthy).
+2. **API** (from `apps/api`): `./.venv/Scripts/python.exe -m uvicorn app.main:app --port 8000`
+   (+ a Celery worker `--pool=solo` for ingestion). For keyless E2E, add `LLM_FORCE_FAKE=true` and
+   run on port **8010** (see below).
+3. **Web** (from `apps/web`): `npm run dev -- -p 3001`. Open **http://localhost:3001**.
+
+**Port gotchas:** canonical is web **3000** / API **8000**, but on this machine **3000 is taken by
+an unrelated app**, so BotForge web runs on **3001**. The keyless-E2E API runs on **8010**
+(`LLM_FORCE_FAKE=true`, `AUTH_RATE_LIMIT` lifted) so it doesn't clash with a real :8000 API.
+**n8n** is expected at **5678** (`N8N_BASE_URL`) — note the running `:5678` belongs to the separate
+AUROZEN AI compose, not BotForge's own `n8n` service. Always run API/web commands from `apps/api` /
+`apps/web` (not the repo root) to avoid `ModuleNotFoundError: app` / npm ENOENT.

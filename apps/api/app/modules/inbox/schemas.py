@@ -23,6 +23,14 @@ class HandoffOut(BaseModel):
     resolved_at: dt.datetime | None
 
 
+class ContactOut(BaseModel):
+    """The human on the other end — what the inbox needs to render a recognizable row."""
+
+    id: uuid.UUID
+    display_name: str | None
+    avatar_url: str | None
+
+
 class InboxItemOut(BaseModel):
     id: uuid.UUID
     agent_id: uuid.UUID
@@ -34,6 +42,9 @@ class InboxItemOut(BaseModel):
     last_message_at: dt.datetime | None
     created_at: dt.datetime
     handoff: HandoffOut | None
+    # Null for conversations that predate contact resolution — the UI falls back to the
+    # channel user id.
+    contact: ContactOut | None = None
 
 
 class InboxDetail(InboxItemOut):

@@ -2,7 +2,7 @@
 
 import { api } from "./client";
 
-export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord";
+export type ChannelType = "telegram" | "whatsapp" | "instagram" | "facebook" | "slack" | "discord";
 
 export interface ApiChannel {
   id: string;

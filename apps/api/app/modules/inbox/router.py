@@ -24,10 +24,11 @@ router = APIRouter(prefix="/v1/inbox", tags=["inbox"])
 @router.get("/conversations", response_model=list[schemas.InboxItemOut])
 async def list_conversations(
     status: str | None = Query(default=None),
+    channel: str | None = Query(default=None, description="Filter to one channel, e.g. `instagram`."),
     session: AsyncSession = Depends(get_session),
     ctx: OrgContext = Depends(current_org),
 ) -> list[schemas.InboxItemOut]:
-    return await service.list_conversations(session, ctx, status)
+    return await service.list_conversations(session, ctx, status, channel)
 
 
 @router.get("/conversations/{cid}", response_model=schemas.InboxDetail)

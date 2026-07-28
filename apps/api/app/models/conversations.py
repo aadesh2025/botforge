@@ -23,6 +23,9 @@ class Conversation(Base, UUIDPrimaryKey, TimestampMixin):
     agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
     channel: Mapped[str] = mapped_column(String(16), nullable=False)  # web|widget|api|telegram|...
     channel_user_id: Mapped[str | None] = mapped_column(String(255))
+    # Who this thread is with. Nullable: conversations predate contacts, and an inbound
+    # can arrive before we've resolved a profile for it.
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
     external_id: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))

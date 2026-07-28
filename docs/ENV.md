@@ -29,10 +29,31 @@ and keep building (`CLAUDE.md §7`).
 needs-human (create OAuth apps). Unset → hide/deny those login buttons.
 
 ## Channels
-`TELEGRAM_BOT_TOKEN`; WhatsApp `META_APP_SECRET`, `WHATSAPP_PHONE_ID`, `WHATSAPP_TOKEN`,
-`WHATSAPP_VERIFY_TOKEN`; Slack `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`; Discord
+`TELEGRAM_BOT_TOKEN`; Slack `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`; Discord
 `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`. All needs-human; unset → channel disabled with a
 clear message.
+
+### Meta surfaces (WhatsApp, Messenger, Instagram)
+All three ride one Meta app, so they share `META_APP_SECRET` — the key behind the
+`X-Hub-Signature-256` check every inbound delivery must pass.
+
+| Var | Surface | Needs human |
+|---|---|---|
+| `META_APP_SECRET` | all three — webhook signature verification | yes |
+| `META_VERIFY_TOKEN` | all three — echoed back during Meta's `hub.challenge` handshake | no (you choose it) |
+| `WHATSAPP_PHONE_ID`, `WHATSAPP_TOKEN`, `WHATSAPP_VERIFY_TOKEN` | WhatsApp Cloud API | yes |
+| `META_PAGE_ID`, `META_PAGE_ACCESS_TOKEN` | Facebook Messenger DMs + profile lookups | yes |
+| `INSTAGRAM_USER_ID`, `INSTAGRAM_PAGE_ACCESS_TOKEN` | Instagram DMs; needs `instagram_manage_messages` | yes |
+
+These are reference values for the human — each channel's real credentials are entered per
+agent in **Builder → Channels** and stored encrypted in `channels.config`. Unset → the
+adapter logs a loud warning and skips sending/profile lookups, but still accepts and
+persists inbound messages (CLAUDE.md §7).
+
+Profile/avatar support differs by platform, and that's the platform's doing, not a gap:
+Messenger and Instagram return a name *and* photo via the Graph API; WhatsApp Cloud API
+sends a profile name but has no photo endpoint; Telegram carries the name in the update but
+serves photos from token-bearing URLs we deliberately never persist (see ADR-036).
 
 ## n8n
 | Var | Purpose | Needs human |

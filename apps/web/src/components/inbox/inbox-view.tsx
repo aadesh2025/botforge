@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Check, Headphones, Loader2, Send, User, UserCog } from "lucide-react";
+import { Bot, Check, Headphones, Loader2, Send, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,6 +15,9 @@ import {
   replyInbox,
   takeover,
 } from "@/lib/api/inbox";
+import { listChannels } from "@/lib/api/channels";
+import { CHANNEL_META, channelMeta, isNewChannel, visibleChannelTabs } from "@/lib/channel-meta";
+import { ContactAvatar, contactLabel } from "@/components/inbox/contact-avatar";
 import { useSession } from "@/lib/store/session";
 
 const STATUS_FILTERS = [
@@ -34,11 +37,20 @@ export function InboxView({ initialId }: { initialId?: string }) {
   const qc = useQueryClient();
   const activeOrgId = useSession((s) => s.activeOrgId);
   const [filter, setFilter] = useState("");
+  const [channel, setChannel] = useState(""); // "" = every channel
   const [activeCid, setActiveCid] = useState<string | null>(initialId ?? null);
 
+  // Which channels this org has actually connected — decides which tabs exist at all.
+  const { data: channels } = useQuery({
+    queryKey: ["channels", activeOrgId],
+    queryFn: () => listChannels(),
+    enabled: Boolean(activeOrgId),
+  });
+  const tabs = visibleChannelTabs(channels);
+
   const { data: items, isLoading } = useQuery({
-    queryKey: ["inbox", activeOrgId, filter],
-    queryFn: () => listInbox(filter || undefined),
+    queryKey: ["inbox", activeOrgId, filter, channel],
+    queryFn: () => listInbox(filter || undefined, channel || undefined),
     enabled: Boolean(activeOrgId),
   });
 
@@ -54,64 +66,136 @@ export function InboxView({ initialId }: { initialId?: string }) {
     return () => ws.close();
   }, [activeOrgId, qc]);
 
+  const pickChannel = (next: string) => {
+    setChannel(next);
+    setActiveCid(null); // the open thread may not belong to the channel we just switched to
+  };
+
   return (
-    <div className="grid h-[calc(100vh-220px)] grid-cols-[340px_1fr] overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="flex flex-col border-r border-border">
-        <div className="flex gap-1 border-b border-border p-2">
-          {STATUS_FILTERS.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                filter === f.key ? "bg-ember/15 text-ember-soft" : "text-muted hover:bg-surface-2"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex-1 overflow-y-auto scroll-thin">
-          {isLoading && <Skeleton className="m-3 h-16" />}
-          {!isLoading && (items ?? []).length === 0 && (
-            <p className="p-6 text-center text-sm text-muted">Nothing in the inbox yet.</p>
-          )}
-          {(items ?? []).map((it) => (
-            <button
-              key={it.id}
-              onClick={() => setActiveCid(it.id)}
-              className={`flex w-full flex-col gap-1 border-b border-border p-3 text-left transition-colors hover:bg-surface-2/50 ${
-                activeCid === it.id ? "bg-surface-2/60" : ""
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium text-text">{it.title || "Conversation"}</span>
-                <Badge variant={statusVariant[it.status] ?? "default"} className="ml-auto shrink-0">
-                  {it.status}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-faint">
-                <span className="capitalize">{it.channel}</span>
-                <span>·</span>
-                <span>{it.message_count} msgs</span>
-                {it.handoff && it.handoff.status !== "resolved" && (
-                  <Badge variant="ember" className="ml-auto">
-                    {it.handoff.assigned_to ? "assigned" : "needs agent"}
-                  </Badge>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
+    <div className="flex h-[calc(100vh-220px)] flex-col overflow-hidden rounded-lg border border-border bg-surface">
+      {/* Channel tabs — only for surfaces this org has actually connected. */}
+      <div
+        role="tablist"
+        aria-label="Channels"
+        className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 scroll-thin"
+      >
+        <ChannelTab label="All messages" active={channel === ""} onClick={() => pickChannel("")} />
+        {tabs.map((type) => {
+          const meta = CHANNEL_META[type];
+          return (
+            <ChannelTab
+              key={type}
+              label={meta.label}
+              icon={<meta.Icon className="size-3.5" aria-hidden />}
+              badge={isNewChannel(channels, type) ? "New" : undefined}
+              active={channel === type}
+              onClick={() => pickChannel(type)}
+            />
+          );
+        })}
       </div>
 
-      {activeCid ? (
-        <Thread cid={activeCid} onChanged={() => qc.invalidateQueries({ queryKey: ["inbox", activeOrgId] })} />
-      ) : (
-        <div className="flex items-center justify-center text-sm text-muted">
-          Select a conversation to view it.
+      <div className="grid min-h-0 flex-1 grid-cols-[340px_1fr] overflow-hidden">
+        <div className="flex min-h-0 flex-col border-r border-border">
+          <div className="flex gap-1 border-b border-border p-2">
+            {STATUS_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                  filter === f.key ? "bg-ember/15 text-ember-soft" : "text-muted hover:bg-surface-2"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 overflow-y-auto scroll-thin">
+            {isLoading && <Skeleton className="m-3 h-16" />}
+            {!isLoading && (items ?? []).length === 0 && (
+              <p className="p-6 text-center text-sm text-muted">Nothing in the inbox yet.</p>
+            )}
+            {(items ?? []).map((it) => (
+              <button
+                key={it.id}
+                onClick={() => setActiveCid(it.id)}
+                className={`flex w-full items-start gap-3 border-b border-border p-3 text-left transition-colors hover:bg-surface-2/50 ${
+                  activeCid === it.id ? "bg-surface-2/60" : ""
+                }`}
+              >
+                <ContactAvatar
+                  channel={it.channel}
+                  name={contactLabel(it.contact, it.channel_user_id)}
+                  avatarUrl={it.contact?.avatar_url}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-text">
+                      {contactLabel(it.contact, it.channel_user_id)}
+                    </span>
+                    <Badge variant={statusVariant[it.status] ?? "default"} className="ml-auto shrink-0">
+                      {it.status}
+                    </Badge>
+                  </div>
+                  <div className="truncate text-xs text-muted">{it.title || "Conversation"}</div>
+                  <div className="flex items-center gap-2 text-xs text-faint">
+                    <span>{it.message_count} msgs</span>
+                    {it.handoff && it.handoff.status !== "resolved" && (
+                      <Badge variant="ember" className="ml-auto">
+                        {it.handoff.assigned_to ? "assigned" : "needs agent"}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
-      )}
+
+        {activeCid ? (
+          <Thread cid={activeCid} onChanged={() => qc.invalidateQueries({ queryKey: ["inbox", activeOrgId] })} />
+        ) : (
+          <div className="flex items-center justify-center text-sm text-muted">
+            Select a conversation to view it.
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+function ChannelTab({
+  label,
+  icon,
+  badge,
+  active,
+  onClick,
+}: {
+  label: string;
+  icon?: React.ReactNode;
+  badge?: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
+        active
+          ? "border-ember text-ember-soft"
+          : "border-transparent text-muted hover:border-border-strong hover:text-text"
+      }`}
+    >
+      {icon}
+      {label}
+      {badge && (
+        <Badge variant="ember" className="ml-0.5">
+          {badge}
+        </Badge>
+      )}
+    </button>
   );
 }
 
@@ -151,12 +235,18 @@ function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center gap-2 border-b border-border p-3">
-        <UserCog className="size-4 text-ember-soft" />
+      <div className="flex items-center gap-3 border-b border-border p-3">
+        <ContactAvatar
+          channel={detail?.channel ?? "widget"}
+          name={detail ? contactLabel(detail.contact, detail.channel_user_id) : null}
+          avatarUrl={detail?.contact?.avatar_url}
+        />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-text">{detail?.title || "Conversation"}</div>
-          <div className="text-xs capitalize text-faint">
-            {detail?.channel} · {detail?.status}
+          <div className="truncate text-sm font-medium text-text">
+            {detail ? contactLabel(detail.contact, detail.channel_user_id) : "Conversation"}
+          </div>
+          <div className="truncate text-xs text-faint">
+            {detail ? `${channelMeta(detail.channel).label} · ${detail.status}` : ""}
             {handoff?.reason ? ` · reason: ${handoff.reason}` : ""}
           </div>
         </div>
