@@ -6,15 +6,17 @@ import { PageHeader } from "@/components/dashboard/page-header";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { UsageChart } from "@/components/dashboard/usage-chart";
 import { BarList } from "@/components/analytics/bar-list";
+import { ChannelBreakdown } from "@/components/analytics/channel-breakdown";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { channelMeta } from "@/lib/channel-meta";
 import { getLatency, getOverview, getTopQuestions, getUnanswered, getUsage } from "@/lib/api/analytics";
 import { API_BASE } from "@/lib/api/config";
 import { getAccessToken, getActiveOrgId } from "@/lib/api/tokens";
 import { useSession } from "@/lib/store/session";
 import { compact, usd } from "@/lib/utils";
 
-async function downloadCsv(type: "usage" | "conversations") {
+async function downloadCsv(type: "usage" | "conversations" | "channels") {
   const token = getAccessToken();
   const org = getActiveOrgId();
   const res = await fetch(`${API_BASE}/v1/analytics/export?type=${type}`, {
@@ -33,7 +35,11 @@ export default function AnalyticsPage() {
   const activeOrgId = useSession((s) => s.activeOrgId);
   const enabled = Boolean(activeOrgId);
 
-  const { data: overview } = useQuery({ queryKey: ["an-overview", activeOrgId], queryFn: () => getOverview(), enabled });
+  const { data: overview, isLoading: overviewLoading } = useQuery({
+    queryKey: ["an-overview", activeOrgId],
+    queryFn: () => getOverview(),
+    enabled,
+  });
   const { data: latency } = useQuery({ queryKey: ["an-latency", activeOrgId], queryFn: () => getLatency(), enabled });
   const { data: usageDay } = useQuery({
     queryKey: ["an-usage-day", activeOrgId],
@@ -43,6 +49,11 @@ export default function AnalyticsPage() {
   const { data: usageProvider } = useQuery({
     queryKey: ["an-usage-provider", activeOrgId],
     queryFn: () => getUsage({ group_by: "provider" }),
+    enabled,
+  });
+  const { data: usageChannel } = useQuery({
+    queryKey: ["an-usage-channel", activeOrgId],
+    queryFn: () => getUsage({ group_by: "channel" }),
     enabled,
   });
   const { data: top } = useQuery({ queryKey: ["an-top", activeOrgId], queryFn: () => getTopQuestions(), enabled });
@@ -60,6 +71,9 @@ export default function AnalyticsPage() {
       <PageHeader title="Analytics" description="How your agents are performing across channels.">
         <Button variant="outline" size="default" onClick={() => downloadCsv("usage")}>
           <Download /> Export usage
+        </Button>
+        <Button variant="outline" size="default" onClick={() => downloadCsv("channels")}>
+          <Download /> Export channels
         </Button>
         <Button variant="outline" size="default" onClick={() => downloadCsv("conversations")}>
           <Download /> Export conversations
@@ -96,6 +110,44 @@ export default function AnalyticsPage() {
       </div>
 
       <UsageChart data={series} />
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <section
+          aria-labelledby="an-by-channel"
+          className="overflow-hidden rounded-lg border border-border bg-surface"
+        >
+          <div className="border-b border-border p-5">
+            <h3 id="an-by-channel" className="font-display text-base font-semibold text-text">
+              By channel
+            </h3>
+            <p className="text-sm text-muted">
+              Every connected channel, including ones still waiting on their first message.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <ChannelBreakdown buckets={overview?.by_channel} isLoading={overviewLoading} />
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-border bg-surface">
+          <div className="border-b border-border p-5">
+            <h3 className="font-display text-base font-semibold text-text">Tokens by channel</h3>
+          </div>
+          <div className="p-5">
+            {(usageChannel ?? []).length === 0 ? (
+              <p className="text-sm text-muted">No usage yet.</p>
+            ) : (
+              <BarList
+                items={(usageChannel ?? []).map((b) => ({
+                  label: channelMeta(b.key).label,
+                  value: b.tokens_prompt + b.tokens_completion,
+                }))}
+                format={(n) => compact(n)}
+              />
+            )}
+          </div>
+        </section>
+      </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section className="rounded-lg border border-border bg-surface">

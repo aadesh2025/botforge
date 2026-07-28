@@ -38,6 +38,25 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Per-channel analytics — Dashboard + Analytics breakdown (2026-07-28).** With up to 7 channel
+  types per agent, analytics had no channel dimension at all: `usage()` grouped only by
+  day/provider/model and `overview()` returned one flat aggregate. **Backend**
+  (`modules/analytics/`): new `ChannelBucket` + `Overview.by_channel`, `group_by=channel` on
+  `usage()`, a `channels` CSV export kind, and a `channel=` filter param on every analytics
+  endpoint. The channel set is the **union of channels with traffic and channels that are
+  connected** — a plain `GROUP BY channel` would drop a live-but-silent channel, which is
+  exactly the case that matters when WhatsApp/Instagram go live days before the first real
+  message. `widget` is always included (every agent has the embeddable chat inherently, so it
+  has no `channels` row to enable — the same rule the inbox tab bar follows); disabled channels
+  are excluded. Rates guard the zero-conversation case. **Frontend:** one `ChannelBreakdown`
+  component shared by the Dashboard and the Analytics page (icon + label from the existing
+  `channel-meta` map, conversations with a proportional bar, resolution rate, cost), a "Tokens by
+  channel" bar list, and an "Export channels" CSV control. A connected-but-empty channel renders
+  as a flagged zero row with an em dash for its rate — `0%` resolution reads as failure rather
+  than silence. `dashboard`/`api`/`web` got real labels (they're genuine conversation channels
+  but never inbox tabs) instead of falling back to "Other". 5 backend tests, 9 web unit tests,
+  1 Playwright flow covering one populated + one connected-but-empty channel across the
+  Dashboard, the Analytics page, and the CSV. No migration — grouping by an existing column.
 - **Unified multi-channel inbox — contacts, Instagram + Messenger, channel tabs (2026-07-28).**
   The inbox could previously only show a raw `channel_user_id`; it now shows a person, per
   channel. **Contacts** (`models/contacts.py`, migration `0006_contacts`): a `contacts` table
@@ -125,6 +144,19 @@ List any provider/channel/billing key that is stubbed and needs a real value. (S
   record via the signed callback, but a late result is not re-injected into the same generation
   turn. Options: a "pending → notify" follow-up message on the conversation, or a short bounded
   wait on the callback before the turn ends. Deferred; the callback + record resolution work.
+- **Dashboard `AgentsPanel` / `ConversationsPanel` still render mock data.** `dashboard/page.tsx`
+  passes `agents` and `recentConversations` from `@/lib/mock/data` into those two panels, so a
+  fresh org sees invented agents ("Support Concierge", 1.3K chats) and invented conversations
+  next to its own real stat cards, usage chart, and channel breakdown — which *are* wired to the
+  live API. Noticed while adding the per-channel breakdown (2026-07-28) and deliberately left
+  alone rather than silently widening that change. Fix: swap in `listAgents()` and the real
+  conversations/inbox list the way `DashboardStats` already does.
+- **Analytics page has no date-range or per-agent filter UI.** Every query on
+  `analytics/page.tsx` calls the API with zero params, so the page always shows the backend's
+  default last-30-days across all agents — even though `overview`/`usage`/`latency`/`export` all
+  accept `agent_id`, `from`, `to`, and now `channel`. The controls were never built. Adding an
+  agent picker + range picker would light up filtering across every view at once, including the
+  new channel breakdown.
 - ✅ ~~**httpOnly cookie migration for web auth tokens (ADR-019).**~~ **Refresh token DONE (Phase
   20)** — moved to an httpOnly/Secure/SameSite cookie set by a Next BFF (`/api/auth/*`). The
   **access token remains JS-readable by architectural necessity** (cross-origin Bearer + SSE + the

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CircleDollarSign, MessagesSquare, ShieldCheck, Zap } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { UsageChart } from "@/components/dashboard/usage-chart";
+import { ChannelBreakdown } from "@/components/analytics/channel-breakdown";
 import { getOverview, getUsage } from "@/lib/api/analytics";
 import { useSession } from "@/lib/store/session";
 import { compact, usd } from "@/lib/utils";
@@ -12,7 +13,7 @@ export function DashboardStats() {
   const activeOrgId = useSession((s) => s.activeOrgId);
   const enabled = Boolean(activeOrgId);
 
-  const { data: overview } = useQuery({
+  const { data: overview, isLoading: overviewLoading } = useQuery({
     queryKey: ["dash-overview", activeOrgId],
     queryFn: () => getOverview(),
     enabled,
@@ -50,7 +51,25 @@ export function DashboardStats() {
           invertDelta
         />
       </div>
-      <UsageChart data={series} />
+      {/* Side by side only when there's genuinely room; below xl the table would be
+          squeezed to the point of clipping, so it stacks full width instead. */}
+      <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1fr_420px]">
+        <UsageChart data={series} />
+        <section
+          aria-labelledby="dash-by-channel"
+          className="overflow-hidden rounded-lg border border-border bg-surface"
+        >
+          <div className="border-b border-border p-5">
+            <h3 id="dash-by-channel" className="font-display text-base font-semibold text-text">
+              By channel
+            </h3>
+            <p className="text-sm text-muted">Where your conversations came from.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <ChannelBreakdown buckets={overview?.by_channel} isLoading={overviewLoading} />
+          </div>
+        </section>
+      </div>
     </>
   );
 }

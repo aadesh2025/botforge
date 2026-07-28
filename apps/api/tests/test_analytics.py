@@ -138,6 +138,123 @@ async def test_rollup_matches_live_totals(client: AsyncClient, db_session: Async
     assert crossed is False  # no token_limit set
 
 
+# ── Per-channel breakdown ───────────────────────────────────────────────────────────
+async def _connect_channel(client: AsyncClient, headers: dict[str, str], aid: str, ctype: str) -> str:
+    """Connect + enable a channel. Config is irrelevant here — these tests never deliver
+    through it, they only care that an *enabled* channel exists to report on."""
+    ch = await client.post(
+        "/v1/channels", json={"agent_id": aid, "type": ctype, "config": {}}, headers=headers
+    )
+    assert ch.status_code == 201, ch.text
+    cid = ch.json()["id"]
+    await client.post(f"/v1/channels/{cid}/enable", headers=headers)
+    return cid
+
+
+async def test_overview_by_channel_includes_connected_but_empty(client: AsyncClient) -> None:
+    """The case this breakdown exists for: WhatsApp gets connected with real credentials
+    days before anyone messages it. It must read as a zero row, not disappear."""
+    headers, _ = await _headers(client, "ch-empty@example.com")
+    aid = await _fake_agent(client, headers)
+    await _connect_channel(client, headers, aid, "whatsapp")
+
+    # Traffic on one channel only (dashboard chat → the `web` conversation channel).
+    await client.post(f"/v1/agents/{aid}/chat", json={"message": "hi", "stream": False}, headers=headers)
+
+    ov = (await client.get("/v1/analytics/overview", headers=headers)).json()
+    by_channel = {b["channel"]: b for b in ov["by_channel"]}
+
+    # Connected-but-silent → a real zero row, with no divide-by-zero on the rates.
+    assert "whatsapp" in by_channel, "an enabled channel must appear even with no traffic"
+    empty = by_channel["whatsapp"]
+    assert empty["conversations"] == 0
+    assert empty["messages"] == 0
+    assert empty["cost_micros"] == 0
+    assert empty["handoff_rate"] == 0.0
+    assert empty["resolution_rate"] == 0.0
+
+    # The widget is inherent to every agent, so it's always reportable too.
+    assert "widget" in by_channel
+
+    # And the channel that actually has traffic carries the real numbers.
+    populated = next(b for b in ov["by_channel"] if b["conversations"] > 0)
+    assert populated["messages"] == 2  # 1 user + 1 assistant
+    assert populated["tokens_prompt"] == 10
+    assert populated["resolution_rate"] == 1.0
+
+    # Per-channel conversations reconcile with the flat total.
+    assert sum(b["conversations"] for b in ov["by_channel"]) == ov["conversations"]
+
+
+async def test_by_channel_omits_disabled_channels(client: AsyncClient) -> None:
+    """A channel that was connected and then switched off isn't somewhere traffic can
+    arrive, so it shouldn't sit in the breakdown implying it's live."""
+    headers, _ = await _headers(client, "ch-disabled@example.com")
+    aid = await _fake_agent(client, headers)
+    cid = await _connect_channel(client, headers, aid, "telegram")
+    await client.post(f"/v1/channels/{cid}/disable", headers=headers)
+
+    ov = (await client.get("/v1/analytics/overview", headers=headers)).json()
+    assert "telegram" not in {b["channel"] for b in ov["by_channel"]}
+
+
+async def test_usage_group_by_channel(client: AsyncClient) -> None:
+    headers, _ = await _headers(client, "ch-usage@example.com")
+    aid = await _fake_agent(client, headers)
+    await _connect_channel(client, headers, aid, "instagram")
+    await client.post(f"/v1/agents/{aid}/chat", json={"message": "hi", "stream": False}, headers=headers)
+
+    buckets = (await client.get("/v1/analytics/usage?group_by=channel", headers=headers)).json()
+    by_key = {b["key"]: b for b in buckets}
+
+    populated = next(b for b in buckets if b["requests"] > 0)
+    assert populated["tokens_prompt"] == 10
+
+    # Zero-filled the same way the overview breakdown is.
+    assert by_key["instagram"]["requests"] == 0
+    assert by_key["instagram"]["tokens_prompt"] == 0
+    assert by_key["instagram"]["cost_micros"] == 0
+
+
+async def test_channel_filter_narrows_results(client: AsyncClient) -> None:
+    headers, _ = await _headers(client, "ch-filter@example.com")
+    aid = await _fake_agent(client, headers)
+    await _connect_channel(client, headers, aid, "instagram")
+    await client.post(f"/v1/agents/{aid}/chat", json={"message": "hi", "stream": False}, headers=headers)
+
+    # An enabled channel with no traffic: real response, all zeros, no error.
+    scoped = (await client.get("/v1/analytics/overview?channel=instagram", headers=headers)).json()
+    assert scoped["conversations"] == 0
+    assert scoped["messages"] == 0
+    assert [b["channel"] for b in scoped["by_channel"]] == ["instagram"]
+
+    # An unknown channel is an empty result, not a 422 — `channel` is free text because
+    # conversations still carry legacy values (`web`, `api`).
+    unknown = await client.get("/v1/analytics/overview?channel=nope", headers=headers)
+    assert unknown.status_code == 200
+    assert unknown.json()["conversations"] == 0
+    assert unknown.json()["by_channel"] == []
+
+
+async def test_csv_channel_export(client: AsyncClient) -> None:
+    headers, _ = await _headers(client, "ch-csv@example.com")
+    aid = await _fake_agent(client, headers)
+    await _connect_channel(client, headers, aid, "facebook")
+    await client.post(f"/v1/agents/{aid}/chat", json={"message": "x", "stream": False}, headers=headers)
+
+    csv = await client.get("/v1/analytics/export?type=channels", headers=headers)
+    assert csv.status_code == 200
+    assert "text/csv" in csv.headers["content-type"]
+    lines = csv.text.splitlines()
+    assert lines[0] == (
+        "channel,conversations,messages,tokens_prompt,tokens_completion,cost_micros,"
+        "handoff_rate,resolution_rate"
+    )
+    # The connected-but-empty channel is exported as a zero row, not dropped.
+    fb = next(line for line in lines[1:] if line.startswith("facebook,"))
+    assert fb == "facebook,0,0,0,0,0,0.0,0.0"
+
+
 async def test_overview_counts_dashboard_conversations_as_users(client: AsyncClient) -> None:
     """`users` counted distinct channel_user_id, which only channel/widget conversations
     carry — so an org whose traffic is all dashboard reported 0 users next to N

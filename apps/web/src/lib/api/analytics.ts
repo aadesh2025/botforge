@@ -2,6 +2,17 @@
 
 import { api } from "./client";
 
+export interface ChannelBucket {
+  channel: string;
+  conversations: number;
+  messages: number;
+  tokens_prompt: number;
+  tokens_completion: number;
+  cost_micros: number;
+  handoff_rate: number;
+  resolution_rate: number;
+}
+
 export interface Overview {
   conversations: number;
   messages: number;
@@ -11,6 +22,8 @@ export interface Overview {
   cost_micros: number;
   handoff_rate: number;
   resolution_rate: number;
+  /** One bucket per channel, including connected ones with no traffic yet. */
+  by_channel: ChannelBucket[];
 }
 
 export interface UsageBucket {
@@ -38,6 +51,8 @@ export interface AnalyticsParams {
   from?: string;
   to?: string;
   group_by?: string;
+  /** Narrow every metric to one channel, e.g. `instagram`. */
+  channel?: string;
 }
 
 function qs(params: AnalyticsParams): string {
@@ -49,7 +64,7 @@ export function getOverview(p: AnalyticsParams = {}) {
   return api<Overview>(`/v1/analytics/overview${qs(p)}`, { orgScoped: true });
 }
 
-export function getUsage(p: AnalyticsParams & { group_by?: "day" | "provider" | "model" } = {}) {
+export function getUsage(p: AnalyticsParams & { group_by?: "day" | "provider" | "model" | "channel" } = {}) {
   return api<UsageBucket[]>(`/v1/analytics/usage${qs(p)}`, { orgScoped: true });
 }
 

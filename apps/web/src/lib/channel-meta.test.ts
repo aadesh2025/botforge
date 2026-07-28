@@ -53,8 +53,15 @@ describe("channelMeta", () => {
     expect(CHANNEL_META.widget.label).toBe("Web Chat");
   });
 
-  it("falls back for legacy channel values rather than rendering undefined", () => {
-    expect(channelMeta("api").label).toBe("Other");
-    expect(channelMeta("api").Icon).toBeTruthy();
+  it("labels reporting-only channels that never get a tab", () => {
+    // Real conversation.channel values that aren't connectable surfaces.
+    expect(channelMeta("dashboard").label).toBe("Dashboard");
+    expect(channelMeta("api").label).toBe("API");
+    expect(visibleChannelTabs([{ type: "dashboard", enabled: true }])).toEqual(["widget"]);
+  });
+
+  it("falls back for a channel value it has never seen, rather than rendering undefined", () => {
+    expect(channelMeta("carrier-pigeon").label).toBe("Other");
+    expect(channelMeta("carrier-pigeon").Icon).toBeTruthy();
   });
 });

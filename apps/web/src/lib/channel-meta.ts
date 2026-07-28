@@ -6,7 +6,7 @@
  * two logos.
  */
 
-import { Camera, Globe, Hash, MessageCircle, MessageSquare, Phone, Send } from "lucide-react";
+import { Camera, Code2, Globe, Hash, LayoutDashboard, MessageCircle, MessageSquare, Phone, Send } from "lucide-react";
 import type { ChannelType } from "./api/channels";
 
 /** Channels a conversation can arrive on — the connectable ones plus the built-in widget. */
@@ -38,11 +38,23 @@ export const INBOX_CHANNEL_ORDER: InboxChannel[] = [
   "discord",
 ];
 
+/** Channel values a conversation can carry that are never inbox *tabs*.
+ *
+ * `dashboard` is the in-app playground, `api`/`web` are legacy values from before the
+ * channel registry. They show up in analytics (they're real traffic) but there's nothing
+ * to connect, so they get no tab.
+ */
+const REPORTING_ONLY: Record<string, ChannelMeta> = {
+  dashboard: { label: "Dashboard", Icon: LayoutDashboard },
+  api: { label: "API", Icon: Code2 },
+  web: { label: "Web", Icon: Globe },
+};
+
 const FALLBACK: ChannelMeta = { label: "Other", Icon: MessageSquare };
 
-/** Meta for any channel string, including legacy values like `web` or `api`. */
+/** Meta for any channel string, including reporting-only values like `dashboard`. */
 export function channelMeta(type: string): ChannelMeta {
-  return CHANNEL_META[type as InboxChannel] ?? FALLBACK;
+  return CHANNEL_META[type as InboxChannel] ?? REPORTING_ONLY[type] ?? FALLBACK;
 }
 
 /** A channel counts as connected once a row exists for it *and* it's switched on. */

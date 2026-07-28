@@ -103,9 +103,18 @@ from it. Error model per `02 §8`.
   `POST /conversations/{cid}/notes`, `POST /conversations/{cid}/tags`.
 
 ## Analytics  `/v1/analytics`
-- `GET /overview?agent_id=&from=&to=` → conversations, messages, users, resolution/handoff rate.
-- `GET /usage?agent_id=&from=&to=&group_by=day|provider|model` → tokens + cost.
-- `GET /latency`, `GET /top-questions`, `GET /unanswered`.
+- `GET /overview?agent_id=&from=&to=&channel=` → conversations, messages, users,
+  resolution/handoff rate, plus `by_channel[]` — one bucket per channel with its own
+  conversations/messages/tokens/cost/rates.
+- `GET /usage?agent_id=&from=&to=&channel=&group_by=day|provider|model|channel` → tokens + cost.
+- `GET /latency`, `GET /top-questions`, `GET /unanswered` — all take `channel=` too.
+- `GET /export?type=usage|conversations|channels` → CSV.
+- **Channel coverage:** `by_channel` and `group_by=channel` include every channel the org
+  has an *enabled* `Channel` row for (plus `widget`, which every agent has inherently),
+  even with zero conversations — a freshly-connected channel is a reportable zero, not a
+  missing row. Rates are `0.0` on zero conversations (no divide-by-zero). `channel=` is
+  free text, not an enum: `conversations.channel` also holds `dashboard`/`api`/`web`, and
+  an unknown value returns an empty result rather than a 422.
 - `GET /export?type=usage|conversations&from=&to=` → CSV.
 
 ## API keys  `/v1/apikeys`

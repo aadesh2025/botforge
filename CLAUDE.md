@@ -153,6 +153,19 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-07-28 — Per-channel analytics (Dashboard + Analytics breakdown)
+- **Backend** (`modules/analytics/`): `Overview.by_channel` (new `ChannelBucket`), `group_by=channel`
+  on `usage()`, a `channels` CSV export kind, and a `channel=` filter on every endpoint. Channel set
+  = channels **with traffic ∪ channels connected & enabled** (+ always `widget`) — a plain
+  `GROUP BY channel` drops a live-but-silent channel, the exact case that matters when Meta channels
+  go live before any real message. Rates guard zero conversations.
+- **Frontend**: one `ChannelBreakdown` component shared by Dashboard + Analytics; zero-traffic rows
+  render flagged with an em dash (not `0%`). `dashboard`/`api`/`web` got real labels in
+  `channel-meta.ts` as reporting-only channels (never inbox tabs).
+- **Flagged, not fixed** (see `docs/PROGRESS.md` roadmap): the dashboard's `AgentsPanel` /
+  `ConversationsPanel` still render `@/lib/mock/data`; the Analytics page has no date/agent filter UI
+  despite the API supporting the params.
+
 ### 2026-07-28 — Unified multi-channel inbox (contacts, IG/Messenger, channel tabs)
 - **Contacts** (`models/contacts.py`, migration `0006_contacts`, `app/contacts/service.py`): new
   `contacts` table unique on `(org, channel, external_id)` + `conversations.contact_id`. One upsert
