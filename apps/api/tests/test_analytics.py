@@ -136,3 +136,21 @@ async def test_rollup_matches_live_totals(client: AsyncClient, db_session: Async
     tokens_used, crossed = await refresh_quota(db_session, uuid.UUID(org_id))
     assert tokens_used >= 20
     assert crossed is False  # no token_limit set
+
+
+async def test_overview_counts_dashboard_conversations_as_users(client: AsyncClient) -> None:
+    """`users` counted distinct channel_user_id, which only channel/widget conversations
+    carry — so an org whose traffic is all dashboard reported 0 users next to N
+    conversations. An untracked conversation is one person."""
+    headers, _ = await _headers(client, "users-metric@example.com")
+    aid = await _fake_agent(client, headers)
+
+    for text in ("first question", "second question"):
+        r = await client.post(
+            f"/v1/agents/{aid}/chat", json={"message": text, "stream": False}, headers=headers
+        )
+        assert r.status_code == 200, r.text
+
+    ov = (await client.get("/v1/analytics/overview", headers=headers)).json()
+    assert ov["conversations"] == 2
+    assert ov["users"] == ov["conversations"]

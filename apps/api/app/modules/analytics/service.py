@@ -6,7 +6,7 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import Date, cast, distinct, func, select
+from sqlalchemy import Date, String, cast, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import Select
 
@@ -65,12 +65,22 @@ async def overview(
     conversations = int(
         (await session.execute(select(func.count()).select_from(Conversation).where(*conv_conds))).scalar_one()
     )
+    # Distinct end users. Only channel/widget conversations carry a `channel_user_id`;
+    # dashboard and API conversations have none, and counting only the former reported
+    # "0 users" next to N conversations for an org whose traffic is all dashboard. An
+    # untracked conversation is one person, so it falls back to the conversation id.
     users = int(
         (
             await session.execute(
-                select(func.count(distinct(Conversation.channel_user_id))).where(
-                    *conv_conds, Conversation.channel_user_id.is_not(None)
-                )
+                select(
+                    func.count(
+                        distinct(
+                            func.coalesce(
+                                Conversation.channel_user_id, cast(Conversation.id, String)
+                            )
+                        )
+                    )
+                ).where(*conv_conds)
             )
         ).scalar_one()
     )

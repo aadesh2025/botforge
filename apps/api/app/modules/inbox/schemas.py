@@ -6,7 +6,7 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.modules.conversations.schemas import MessageOut
 
@@ -41,7 +41,11 @@ class InboxDetail(InboxItemOut):
 
 
 class ReplyRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=8000)
+    # The chat APIs take `message`, so integrators reasonably send that here too. Accept
+    # both rather than 422 on a field name that differs only by history.
+    model_config = ConfigDict(populate_by_name=True)
+
+    text: str = Field(min_length=1, max_length=8000, validation_alias=AliasChoices("text", "message"))
 
 
 class AssignRequest(BaseModel):

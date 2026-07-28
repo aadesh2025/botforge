@@ -60,7 +60,7 @@ from it. Error model per `02 §8`.
 
 ## Chat  `/v1/agents/{id}/chat`  (dashboard + API)
 - `POST /agents/{id}/chat` `{conversation_id?, message, stream?}` →
-  SSE stream of `{type: token|tool_call|tool_result|citation|done, ...}` or JSON if not streamed.
+  SSE stream of `{type: conversation|citations|token|tool_call|tool_result|message|error|done, ...}` or JSON if not streamed.
 - WebSocket `WS /v1/agents/{id}/chat/ws` — bidirectional streaming.
 - Conversations: `GET /v1/conversations?agent_id=`, `GET /v1/conversations/{cid}`,
   `GET /v1/conversations/{cid}/messages`, `PATCH /v1/conversations/{cid}` (title/status),
@@ -127,7 +127,8 @@ Each event: `{ "type": "...", ... }`
 - `token` `{delta}` — a text chunk.
 - `tool_call` `{tool, input, run_id}` — model requested a tool.
 - `tool_result` `{run_id, output, status}`.
-- `citation` `{document_id, chunk_id, snippet, score}`.
+- `citations` `{citations: [{document_id, chunk_id, knowledge_base_id, ordinal, content, score,
+  metadata}]}` — emitted once, before the model's first token (not one event per source).
 - `message` `{message_id}` — assistant message persisted.
 - `error` `{code, message}`.
 - `done` `{usage: {tokens_prompt, tokens_completion, cost_micros}, provider, model}`.

@@ -93,7 +93,7 @@ last_message_at, created_at, updated_at`
 ### messages
 `id, conversation_id→conversations, organization_id, role (user|assistant|system|tool),
 content (text), tool_calls (jsonb), tool_call_id, citations (jsonb[]: {document_id,
-chunk_id, score, snippet}), provider, model, tokens_prompt (int), tokens_completion (int),
+chunk_id, knowledge_base_id, ordinal, score, content, metadata}), provider, model, tokens_prompt (int), tokens_completion (int),
 cost_micros (int), latency_ms (int), error (text), created_at`
 
 ## Tools & automations

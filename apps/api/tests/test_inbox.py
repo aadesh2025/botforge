@@ -171,3 +171,27 @@ async def test_hub_publishes_to_subscribers() -> None:
     event = await q.get()
     assert event["type"] == "handoff.requested"
     hub.unsubscribe(inbox_topic(org), q)
+
+
+async def test_operator_reply_accepts_message_or_text(client: AsyncClient) -> None:
+    """The chat APIs take `message`; the inbox historically took only `text`, so an
+    integrator reusing the obvious field name got a 422."""
+    headers = await _headers(client, "ops3@example.com")
+    _aid, key = await _handoff_agent(client, headers)
+    cid = (await _public_chat(client, key, "talk to a human"))["conversation_id"]
+    await client.post(f"/v1/inbox/conversations/{cid}/takeover", headers=headers)
+
+    via_message = await client.post(
+        f"/v1/inbox/conversations/{cid}/messages", json={"message": "sent as message"}, headers=headers
+    )
+    assert via_message.status_code == 200, via_message.text
+    assert via_message.json()["content"] == "sent as message"
+
+    via_text = await client.post(
+        f"/v1/inbox/conversations/{cid}/messages", json={"text": "sent as text"}, headers=headers
+    )
+    assert via_text.status_code == 200
+    assert via_text.json()["content"] == "sent as text"
+
+    empty = await client.post(f"/v1/inbox/conversations/{cid}/messages", json={}, headers=headers)
+    assert empty.status_code == 422

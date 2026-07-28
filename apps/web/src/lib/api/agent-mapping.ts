@@ -45,7 +45,7 @@ export function versionToDraft(agent: ApiAgent, v: ApiVersion): AgentDraft {
     knowledge: {
       attachedKbIds: (rag.knowledge_base_ids as string[]) ?? [],
       topK: num(rag.top_k, 5),
-      scoreThreshold: num(rag.score_threshold, 0.7),
+      scoreThreshold: num(rag.score_threshold, 0.35),
       hybrid: (rag.hybrid as boolean) ?? true,
     },
     features: {
