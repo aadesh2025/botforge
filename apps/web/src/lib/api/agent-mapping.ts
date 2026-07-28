@@ -35,6 +35,11 @@ export function versionToDraft(agent: ApiAgent, v: ApiVersion): AgentDraft {
       maxTokens: num(mc.max_tokens, 1024),
       frequencyPenalty: num(mc.frequency_penalty, 0),
       presencePenalty: num(mc.presence_penalty, 0),
+      fallbacks: Array.isArray(mc.fallbacks)
+        ? (mc.fallbacks as Record<string, unknown>[])
+            .filter((f) => f && typeof f.provider === "string")
+            .map((f) => ({ provider: f.provider as Provider, model: String(f.model ?? "") }))
+        : [],
       credential: "org-default",
     },
     knowledge: {
@@ -110,6 +115,7 @@ export function draftToPatch(draft: AgentDraft): Record<string, unknown> {
       max_tokens: m.maxTokens,
       frequency_penalty: m.frequencyPenalty,
       presence_penalty: m.presencePenalty,
+      fallbacks: m.fallbacks.map((f) => ({ provider: f.provider, model: f.model })),
     },
     rag_config: {
       enabled: f.rag,

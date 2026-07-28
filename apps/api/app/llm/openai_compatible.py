@@ -97,7 +97,11 @@ class OpenAICompatibleProvider:
         if resp.status_code < 400:
             return
         retryable = resp.status_code == 429 or resp.status_code >= 500
-        raise ProviderError(f"provider returned {resp.status_code}: {resp.text[:200]}", retryable=retryable)
+        raise ProviderError(
+            f"provider returned {resp.status_code}: {resp.text[:200]}",
+            retryable=retryable,
+            status=resp.status_code,
+        )
 
     async def chat(self, req: ChatRequest) -> ChatResponse:
         async with self._client() as client:
@@ -146,7 +150,9 @@ class OpenAICompatibleProvider:
                         body = (await resp.aread()).decode(errors="replace")[:200]
                         retryable = resp.status_code == 429 or resp.status_code >= 500
                         raise ProviderError(
-                            f"provider returned {resp.status_code}: {body}", retryable=retryable
+                            f"provider returned {resp.status_code}: {body}",
+                            retryable=retryable,
+                            status=resp.status_code,
                         )
                     async for line in resp.aiter_lines():
                         if not line.startswith("data:"):
@@ -166,6 +172,7 @@ class OpenAICompatibleProvider:
                             raise ProviderError(
                                 f"provider stream error: {err.get('message', payload[:200])}",
                                 retryable=retryable,
+                                status=code if isinstance(code, int) else None,
                             )
                         if chunk.get("usage"):
                             usage = Usage(

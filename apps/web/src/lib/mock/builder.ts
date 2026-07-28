@@ -10,9 +10,17 @@ export interface PersonaConfig {
   blockedTopics: string[];
 }
 
+/** One link in the agent's provider fallback chain (NFR-4). */
+export interface FallbackEntry {
+  provider: Provider;
+  model: string;
+}
+
 export interface ModelConfig {
   provider: Provider;
   model: string;
+  /** Tried in order when the primary provider fails before producing any output. */
+  fallbacks: FallbackEntry[];
   temperature: number;
   topP: number;
   maxTokens: number;
@@ -169,6 +177,7 @@ export function makeDraft(id: string): AgentDraft {
     model: {
       provider: "groq",
       model: "llama-3.3-70b-versatile",
+      fallbacks: [],
       temperature: 0.4,
       topP: 1,
       maxTokens: 1024,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -12,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.crypto import decrypt
 from app.core.errors import AppError
+from app.core.logging import get_logger
 from app.llm.anthropic import AnthropicProvider
 from app.llm.base import ChatProvider, EmbeddingProvider, ProviderError
 from app.llm.embeddings import OllamaEmbeddingProvider
 from app.llm.fake import FakeChatProvider, FakeEmbeddingProvider
+from app.llm.fallback import build_fallback_chain
 from app.llm.gemini import GeminiProvider
 from app.llm.openai_compatible import (
     CustomProvider,
@@ -26,6 +29,11 @@ from app.llm.openai_compatible import (
 )
 from app.llm.types import ChatRequest, ChatResponse
 from app.models import ProviderCredential
+
+log = get_logger("llm.registry")
+
+# (session, org_id, provider_name, *, agent_id) -> ChatProvider
+ProviderResolver = Callable[..., Awaitable["ChatProvider"]]
 
 # provider -> catalog metadata. `requires_key`: needs an API key to work at all.
 PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
@@ -188,3 +196,41 @@ async def run_with_fallback(providers: list[ChatProvider], req: ChatRequest) -> 
         except ProviderError as exc:
             last_error = exc
     raise AppError("llm.provider_unavailable", f"All providers failed: {last_error}", 502)
+
+
+async def get_chat_provider_chain(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    model_config: dict[str, Any],
+    *,
+    agent_id: uuid.UUID | None = None,
+    resolve: ProviderResolver | None = None,
+) -> ChatProvider:
+    """Resolve an agent's provider plus its configured fallback chain (NFR-4).
+
+    `model_config.fallbacks` is a list of `{"provider": ..., "model": ...}`. A fallback whose
+    credentials are missing is skipped rather than failing the turn — an unusable link should
+    not take down a working primary.
+
+    `resolve` lets a caller supply its own provider lookup; callers pass their module-level
+    `get_chat_provider` so a test that stubs that name keeps controlling what gets built.
+    """
+    lookup = resolve or get_chat_provider
+    primary_name = str(model_config.get("provider") or "fake")
+    primary = await lookup(session, org_id, primary_name, agent_id=agent_id)
+
+    chain: list[tuple[ChatProvider, str | None]] = []
+    for entry in model_config.get("fallbacks") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("provider") or "").strip()
+        if not name or name == primary_name:
+            continue
+        try:
+            provider = await lookup(session, org_id, name, agent_id=agent_id)
+        except AppError as exc:
+            log.warning("llm_fallback_unavailable", provider=name, error=str(exc))
+            continue
+        chain.append((provider, str(entry.get("model") or "") or None))
+
+    return build_fallback_chain(primary, str(model_config.get("model") or "") or None, chain)

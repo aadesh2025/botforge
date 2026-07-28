@@ -117,6 +117,11 @@ async def run_turn(
             continue
         break
 
+    # Re-read after streaming: a fallback chain only knows which link served once it has run,
+    # and usage/cost must be attributed to the provider that actually answered.
+    result.provider = provider.name
+    result.model = getattr(provider, "active_model", None) or req.model
+
     yield StreamEvent(
         type="done",
         usage=Usage(prompt_tokens=result.prompt_tokens, completion_tokens=result.completion_tokens),

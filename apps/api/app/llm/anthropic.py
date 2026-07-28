@@ -88,7 +88,11 @@ class AnthropicProvider:
                 raise ProviderError(f"network error: {exc}") from exc
             if resp.status_code >= 400:
                 retryable = resp.status_code == 429 or resp.status_code >= 500
-                raise ProviderError(f"anthropic {resp.status_code}: {resp.text[:200]}", retryable=retryable)
+                raise ProviderError(
+                    f"anthropic {resp.status_code}: {resp.text[:200]}",
+                    retryable=retryable,
+                    status=resp.status_code,
+                )
             data = resp.json()
 
         text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")

@@ -75,7 +75,11 @@ class GeminiProvider:
                 raise ProviderError(f"network error: {exc}") from exc
             if resp.status_code >= 400:
                 retryable = resp.status_code == 429 or resp.status_code >= 500
-                raise ProviderError(f"gemini {resp.status_code}: {resp.text[:200]}", retryable=retryable)
+                raise ProviderError(
+                    f"gemini {resp.status_code}: {resp.text[:200]}",
+                    retryable=retryable,
+                    status=resp.status_code,
+                )
             data = resp.json()
 
         candidate = (data.get("candidates") or [{}])[0]

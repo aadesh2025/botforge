@@ -238,3 +238,125 @@ async def test_fallback_serves_from_second_provider() -> None:
 async def test_fallback_all_fail_raises() -> None:
     with pytest.raises(AppError):
         await run_with_fallback([FailingProvider(), FailingProvider()], _req("hi"))
+
+
+# ── Streaming fallback chain (NFR-4) ──────────────────────────────────────────
+class _StreamProvider:
+    """Minimal ChatProvider: streams `tokens`, or raises before/after emitting."""
+
+    def __init__(self, name: str, tokens: list[str] | None = None, fail: Exception | None = None,
+                 fail_after: int = 0) -> None:
+        self.name = name
+        self._tokens = tokens or []
+        self._fail = fail
+        self._fail_after = fail_after
+        self.calls = 0
+
+    def supports_tools(self) -> bool:
+        return True
+
+    async def list_models(self):  # pragma: no cover - unused in these tests
+        return []
+
+    async def chat(self, req: ChatRequest):
+        self.calls += 1
+        if self._fail:
+            raise self._fail
+        from app.llm.types import ChatResponse
+
+        return ChatResponse(content="".join(self._tokens), model=req.model, provider=self.name)
+
+    async def stream(self, req: ChatRequest):
+        self.calls += 1
+        from app.llm.types import StreamEvent
+
+        for i, tok in enumerate(self._tokens):
+            if self._fail and i == self._fail_after:
+                raise self._fail
+            yield StreamEvent(type="token", delta=tok)
+        if self._fail and self._fail_after >= len(self._tokens):
+            raise self._fail
+        yield StreamEvent(type="done", usage=Usage(prompt_tokens=1, completion_tokens=1))
+
+
+async def test_fallback_switches_when_primary_fails_before_output() -> None:
+    from app.llm.base import ProviderError
+    from app.llm.fallback import FallbackChatProvider
+
+    primary = _StreamProvider(
+        "groq", ["never"], fail=ProviderError("503", retryable=True, status=503), fail_after=0
+    )
+    backup = _StreamProvider("gemini", ["Hel", "lo"])
+    chain = FallbackChatProvider([(primary, "m1"), (backup, "m2")])
+
+    events = [e async for e in chain.stream(_req("hi"))]
+    assert "".join(e.delta or "" for e in events if e.type == "token") == "Hello"
+    assert backup.calls == 1
+    # Usage must be attributed to the provider that actually answered.
+    assert chain.name == "gemini"
+    assert chain.active_model == "m2"
+
+
+async def test_fallback_does_not_switch_after_output_started() -> None:
+    """Restarting mid-reply would duplicate or contradict text the user already saw."""
+    from app.llm.base import ProviderError
+    from app.llm.fallback import FallbackChatProvider
+
+    primary = _StreamProvider(
+        "groq", ["par", "tial"], fail=ProviderError("boom", retryable=True, status=503), fail_after=1
+    )
+    backup = _StreamProvider("gemini", ["full"])
+    chain = FallbackChatProvider([(primary, None), (backup, None)])
+
+    with pytest.raises(ProviderError):
+        [e async for e in chain.stream(_req("hi"))]
+    assert backup.calls == 0
+
+
+async def test_fallback_skipped_for_request_level_errors() -> None:
+    """A 400 is a malformed request — it fails identically everywhere, so don't burn the chain."""
+    from app.llm.base import ProviderError
+    from app.llm.fallback import FallbackChatProvider
+
+    primary = _StreamProvider(
+        "groq", ["x"], fail=ProviderError("bad request", retryable=False, status=400), fail_after=0
+    )
+    backup = _StreamProvider("gemini", ["ok"])
+    chain = FallbackChatProvider([(primary, None), (backup, None)])
+
+    with pytest.raises(ProviderError):
+        [e async for e in chain.stream(_req("hi"))]
+    assert backup.calls == 0
+
+
+async def test_fallback_switches_on_auth_failure() -> None:
+    """A 401 is not retryable on the same provider but is exactly when the backup should run."""
+    from app.llm.base import ProviderError
+    from app.llm.fallback import FallbackChatProvider
+
+    primary = _StreamProvider(
+        "openai", ["x"], fail=ProviderError("401 bad key", retryable=False, status=401), fail_after=0
+    )
+    backup = _StreamProvider("groq", ["hi"])
+    chain = FallbackChatProvider([(primary, None), (backup, None)])
+
+    events = [e async for e in chain.stream(_req("hi"))]
+    assert "".join(e.delta or "" for e in events if e.type == "token") == "hi"
+    assert chain.name == "groq"
+
+
+async def test_fallback_reports_tool_support_conservatively() -> None:
+    from app.llm.fallback import FallbackChatProvider, build_fallback_chain
+
+    class _NoTools(_StreamProvider):
+        def supports_tools(self) -> bool:
+            return False
+
+    both = FallbackChatProvider([(_StreamProvider("a"), None), (_StreamProvider("b"), None)])
+    assert both.supports_tools() is True
+    mixed = FallbackChatProvider([(_StreamProvider("a"), None), (_NoTools("b"), None)])
+    assert mixed.supports_tools() is False
+
+    # No fallbacks configured → the primary is returned untouched (no wrapper overhead).
+    primary = _StreamProvider("solo")
+    assert build_fallback_chain(primary, "m", []) is primary

@@ -20,7 +20,7 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.llm.base import ChatProvider
 from app.llm.fake import FakeChatProvider, RefusalProvider
-from app.llm.registry import get_chat_provider
+from app.llm.registry import get_chat_provider, get_chat_provider_chain
 from app.llm.types import ChatRequest, StreamEvent
 from app.llm.types import Message as LLMMessage
 from app.models import Agent, AgentVersion, Conversation, Message
@@ -125,8 +125,19 @@ def _build_chat_request(version: AgentVersion, messages: list[LLMMessage], strea
     )
 
 
-async def _resolve_provider(session: AsyncSession, org_id: uuid.UUID, agent: Agent, provider: str) -> ChatProvider:
+async def _resolve_provider(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    agent: Agent,
+    provider: str,
+    model_config: dict[str, Any] | None = None,
+) -> ChatProvider:
+    """The agent's provider, wrapped in its configured fallback chain when it has one."""
     try:
+        if model_config:
+            return await get_chat_provider_chain(
+                session, org_id, model_config, agent_id=agent.id, resolve=get_chat_provider
+            )
         return await get_chat_provider(session, org_id, provider, agent_id=agent.id)
     except AppError:
         log.warning("chat_stub_provider", provider=provider, agent_id=str(agent.id))
@@ -221,7 +232,9 @@ async def _prepare_turn(
         window_messages=settings.memory_window_messages,
     )
     provider_name = (version.model_config_json or {}).get("provider", "fake")
-    provider = await _resolve_provider(session, ctx.org.id, agent, provider_name)
+    provider = await _resolve_provider(
+        session, ctx.org.id, agent, provider_name, version.model_config_json or {}
+    )
     req = _build_chat_request(version, messages, stream=stream)
 
     # Blocked-topics guardrail: refuse pre-LLM when the message touches a blocked topic.

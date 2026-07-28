@@ -1,7 +1,8 @@
 "use client";
 
-import { BookOpen, Wrench, Brain, UserRound } from "lucide-react";
+import { BookOpen, Wrench, Brain, Plus, UserRound, X } from "lucide-react";
 import { Field, SectionCard, SliderField } from "@/components/builder/field";
+import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,10 @@ export function ModelTab() {
   const update = useBuilder((s) => s.update);
   if (!draft) return null;
   const m = draft.model;
+  // First provider not already used as the primary or an existing fallback.
+  const nextFallback = (Object.keys(providerCatalog) as Provider[]).find(
+    (k) => k !== m.provider && !m.fallbacks.some((f) => f.provider === k),
+  );
   const provider = providerCatalog[m.provider];
 
   return (
@@ -70,8 +75,90 @@ export function ModelTab() {
           <Badge variant={provider.free ? "success" : "warn"}>
             {provider.free ? "Free tier" : "Paid provider"}
           </Badge>
-          <Badge variant="default">Fallback: OpenRouter → Gemini</Badge>
+          {m.fallbacks.length > 0 ? (
+            <Badge variant="default">
+              Fallback: {m.fallbacks.map((f) => providerCatalog[f.provider].label).join(" → ")}
+            </Badge>
+          ) : null}
         </div>
+
+        <Field
+          label="Fallback providers"
+          description="Tried in order if the primary fails before it starts replying. Not used once a reply has begun."
+        >
+          <div className="space-y-2">
+            {m.fallbacks.map((f, i) => (
+              <div key={`${f.provider}-${i}`} className="flex items-center gap-2">
+                <Select
+                  value={f.provider}
+                  onValueChange={(v) =>
+                    update((d) => {
+                      d.model.fallbacks[i].provider = v as Provider;
+                      d.model.fallbacks[i].model = providerCatalog[v as Provider].models[0];
+                    })
+                  }
+                >
+                  <SelectTrigger className="w-[190px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(providerCatalog) as Provider[])
+                      .filter((k) => k !== m.provider)
+                      .map((key) => (
+                        <SelectItem key={key} value={key}>
+                          {providerCatalog[key].label}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={f.model}
+                  onValueChange={(v) => update((d) => void (d.model.fallbacks[i].model = v))}
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providerCatalog[f.provider].models.map((model) => (
+                      <SelectItem key={model} value={model}>
+                        {model}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`Remove ${providerCatalog[f.provider].label} fallback`}
+                  onClick={() => update((d) => void d.model.fallbacks.splice(i, 1))}
+                >
+                  <X className="size-4" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={nextFallback === undefined}
+              onClick={() =>
+                update((d) => {
+                  if (nextFallback === undefined) return;
+                  d.model.fallbacks.push({
+                    provider: nextFallback,
+                    model: providerCatalog[nextFallback].models[0],
+                  });
+                })
+              }
+            >
+              <Plus className="size-4" /> Add fallback
+            </Button>
+            {m.fallbacks.length === 0 ? (
+              <p className="text-xs text-faint">
+                No fallback configured — if {provider.label} fails, the turn returns an error.
+              </p>
+            ) : null}
+          </div>
+        </Field>
         <Field label="Credentials" description="Use the org key, or bring your own for this agent.">
           <Select value={m.credential} onValueChange={(v) => update((d) => void (d.model.credential = v))}>
             <SelectTrigger>

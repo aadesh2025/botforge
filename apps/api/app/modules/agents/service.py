@@ -20,7 +20,7 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.llm.base import ChatProvider
 from app.llm.fake import FakeChatProvider
-from app.llm.registry import get_chat_provider
+from app.llm.registry import get_chat_provider, get_chat_provider_chain
 from app.llm.types import ChatRequest, Message
 from app.models import Agent, AgentVersion
 from app.modules.agents import schemas
@@ -460,9 +460,17 @@ def _build_request(
 
 
 async def _resolve_playground_provider(
-    session: AsyncSession, ctx: OrgContext, agent: Agent, provider: str
+    session: AsyncSession,
+    ctx: OrgContext,
+    agent: Agent,
+    provider: str,
+    model_config: dict[str, Any] | None = None,
 ) -> ChatProvider:
     try:
+        if model_config:
+            return await get_chat_provider_chain(
+                session, ctx.org.id, model_config, agent_id=agent.id, resolve=get_chat_provider
+            )
         return await get_chat_provider(session, ctx.org.id, provider, agent_id=agent.id)
     except AppError:
         # No key configured → stub with the fake provider so the build isn't blocked (CLAUDE §7).
@@ -486,7 +494,9 @@ async def playground_stream(
     agent = await _get_agent(session, ctx, agent_id)
     version = await _latest_version(session, agent.id)
     provider_name = (version.model_config_json or {}).get("provider", "fake")
-    provider = await _resolve_playground_provider(session, ctx, agent, provider_name)
+    provider = await _resolve_playground_provider(
+        session, ctx, agent, provider_name, version.model_config_json or {}
+    )
     context_block, citations = await _retrieve_context(session, ctx, version, data.message)
     req = _build_request(version, data, stream=True, context_block=context_block)
     specs, executor = await _playground_tooling(session, ctx, agent, version, provider)
@@ -507,7 +517,9 @@ async def playground_once(
     agent = await _get_agent(session, ctx, agent_id)
     version = await _latest_version(session, agent.id)
     provider_name = (version.model_config_json or {}).get("provider", "fake")
-    provider = await _resolve_playground_provider(session, ctx, agent, provider_name)
+    provider = await _resolve_playground_provider(
+        session, ctx, agent, provider_name, version.model_config_json or {}
+    )
     context_block, citations = await _retrieve_context(session, ctx, version, data.message)
     req = _build_request(version, data, stream=False, context_block=context_block)
     specs, executor = await _playground_tooling(session, ctx, agent, version, provider)
