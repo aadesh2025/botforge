@@ -198,3 +198,43 @@ async def test_n8n_callback_resolves_pending_run(client: AsyncClient, monkeypatc
     resolved = next(r for r in runs.json() if r["id"] == run_id)
     assert resolved["status"] == "success"
     assert resolved["output"]["done"] is True
+
+
+# ── Argument/schema tolerance (blank-reply fix) ───────────────────────────────
+def test_relax_n8n_schema_drops_type_on_args() -> None:
+    """A legacy `args: {"type": "object"}` made providers reject a tool call whose args
+    came back as a string, which surfaced to the end user as an empty reply."""
+    legacy = {
+        "type": "object",
+        "properties": {"args": {"type": "object", "description": "arguments passed to the workflow"}},
+    }
+    relaxed = n8n_tool.relax_n8n_schema(legacy)
+    assert "type" not in relaxed["properties"]["args"]
+    assert relaxed["properties"]["args"]["description"]
+    assert relaxed["type"] == "object"
+    # A freshly generated schema is already tolerant.
+    assert "type" not in n8n_tool.n8n_args_schema()["properties"]["args"]
+
+
+def test_relax_n8n_schema_passes_through_custom_schemas() -> None:
+    custom = {"type": "object", "properties": {"ticket_id": {"type": "string"}}}
+    assert n8n_tool.relax_n8n_schema(custom) == custom
+    assert n8n_tool.relax_n8n_schema(None) == n8n_tool.n8n_args_schema()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ({"args": {"customer": "Acme"}}, {"customer": "Acme"}),      # documented wrapper
+        ({"args": '{"customer": "Acme"}'}, {"customer": "Acme"}),    # JSON-in-a-string
+        ({"args": "just text"}, {"input": "just text"}),             # bare string
+        ({"customer": "Acme"}, {"customer": "Acme"}),                # already flat
+        ({"args": None}, {"input": None}),
+        ("not a dict", {"input": "not a dict"}),
+    ],
+)
+def test_normalize_n8n_args(raw: object, expected: dict[str, object]) -> None:
+    """Every shape a model produces must reach the workflow identically — and must match
+    what the tool `/test` endpoint sends (previously the wrapper double-nested as
+    {"args": {"args": ...}})."""
+    assert n8n_tool.normalize_n8n_args(raw) == expected

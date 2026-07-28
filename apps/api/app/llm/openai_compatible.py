@@ -155,6 +155,18 @@ class OpenAICompatibleProvider:
                         if payload == "[DONE]":
                             break
                         chunk = json.loads(payload)
+                        # Providers may report a failure *inside* a 200 stream (Groq does this
+                        # for tool_use_failed, mid-stream rate limits, content filtering). The
+                        # frame carries no `choices`, so without this it would be skipped and
+                        # the turn would end as a silent empty reply.
+                        if isinstance(chunk.get("error"), dict):
+                            err = chunk["error"]
+                            code = err.get("status_code") or err.get("code")
+                            retryable = code in (429, 500, 502, 503, 504)
+                            raise ProviderError(
+                                f"provider stream error: {err.get('message', payload[:200])}",
+                                retryable=retryable,
+                            )
                         if chunk.get("usage"):
                             usage = Usage(
                                 prompt_tokens=chunk["usage"].get("prompt_tokens", 0),

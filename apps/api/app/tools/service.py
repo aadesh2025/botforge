@@ -20,7 +20,7 @@ from app.tools import schemas
 from app.tools.base import ToolContext, ToolResult
 from app.tools.builtins import BUILTINS
 from app.tools.http_tool import execute_http_tool
-from app.tools.n8n_tool import execute_n8n_tool
+from app.tools.n8n_tool import execute_n8n_tool, n8n_args_schema, relax_n8n_schema
 
 log = get_logger("tools")
 
@@ -131,7 +131,15 @@ async def resolve_agent_tools(
     )
     tools = list((await session.execute(stmt)).scalars().all())
     specs = [
-        ToolSpec(name=t.name, description=t.description or "", parameters=t.input_schema or {})
+        ToolSpec(
+            name=t.name,
+            description=t.description or "",
+            # n8n schemas are repaired on read so tools bound before the fix stop
+            # breaking turns without needing a data migration.
+            parameters=(
+                relax_n8n_schema(t.input_schema) if t.type == "n8n" else (t.input_schema or {})
+            ),
+        )
         for t in tools
     ]
     return specs, {t.name: t for t in tools}
@@ -322,10 +330,7 @@ async def bind_n8n_workflow(
     if not webhook_url:
         raise AppError("tools.n8n_no_webhook", "Could not resolve a webhook URL for this workflow.", 400)
 
-    input_schema = data.input_schema or {
-        "type": "object",
-        "properties": {"args": {"type": "object", "description": "arguments passed to the workflow"}},
-    }
+    input_schema = data.input_schema or n8n_args_schema()
     tool = Tool(
         organization_id=ctx.org.id,
         agent_id=data.agent_id,

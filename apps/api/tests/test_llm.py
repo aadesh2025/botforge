@@ -111,6 +111,43 @@ async def test_openai_compatible_stream() -> None:
     assert events[-1].usage is not None and events[-1].usage.prompt_tokens == 3
 
 
+async def test_stream_error_frame_raises_instead_of_empty_reply() -> None:
+    """A provider can report failure *inside* a 200 stream (Groq does this for
+    tool_use_failed). That frame carries no `choices`, so it must not be skipped —
+    skipping it ended the turn as a silent empty reply with no error."""
+    from app.llm.base import ProviderError
+
+    sse = (
+        "event: error\n"
+        'data: {"error":{"message":"tool call validation failed: parameters for tool echo_tool '
+        'did not match schema","type":"invalid_request_error","code":"tool_use_failed",'
+        '"status_code":400}}\n\n'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=sse)
+
+    provider = GroqProvider("k", transport=_mock(handler))
+    with pytest.raises(ProviderError) as exc:
+        [e async for e in provider.stream(_req("hi"))]
+    assert "tool call validation failed" in str(exc.value)
+    assert exc.value.retryable is False
+
+
+async def test_stream_error_frame_marks_rate_limit_retryable() -> None:
+    from app.llm.base import ProviderError
+
+    sse = 'data: {"error":{"message":"rate limited","status_code":429}}\n\n'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=sse)
+
+    provider = GroqProvider("k", transport=_mock(handler))
+    with pytest.raises(ProviderError) as exc:
+        [e async for e in provider.stream(_req("hi"))]
+    assert exc.value.retryable is True
+
+
 async def test_openai_compatible_5xx_raises_provider_error() -> None:
     from app.llm.base import ProviderError
 
