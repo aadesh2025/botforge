@@ -17,3 +17,11 @@ apps/api/var/
 
 # Stray root lockfile from an accidental npm install at repo root (real one is apps/web)
 /package-lock.json
+
+# Celery beat scheduler state (shelve db — recreated on start; suffix varies by platform)
+celerybeat-schedule*
+celerybeat.pid
+
+# Playwright run output
+test-results/
+playwright-report/
