@@ -81,11 +81,19 @@ Advisory (non-blocking) `pip-audit` + `npm audit` run in CI. Results as of 2026-
 - ⚠️ **Python — `ecdsa 0.19.2` (PYSEC-2026-1325, no fix available)**: transitive via `python-jose`.
   **Not exploitable in our config** — we sign JWTs with HS256 (symmetric) and perform no ECDSA
   operations. Follow-up: migrate JWT handling to `PyJWT`/`authlib` to drop `python-jose`/`ecdsa`.
-- ✅ **Web — RESOLVED (Phase 19).** The 5 Next.js-14 advisories (4 high + 1 moderate: Image-Opt DoS,
-  WS-upgrade SSRF, RSC cache poisoning, i18n middleware bypass, postcss stringify XSS) were cleared by
-  the **Next.js 14 → 16 + React 19 + ESLint 9** upgrade, plus pinning `postcss ^8.5.10` (direct dep +
-  override) to replace the vulnerable copy bundled under `next`. **`npm audit` now reports 0
-  vulnerabilities.**
+- ✅ **Web — Next.js 14 advisories RESOLVED (Phase 19).** The 5 Next.js-14 advisories (4 high + 1
+  moderate: Image-Opt DoS, WS-upgrade SSRF, RSC cache poisoning, i18n middleware bypass, postcss
+  stringify XSS) were cleared by the **Next.js 14 → 16 + React 19 + ESLint 9** upgrade, plus pinning
+  `postcss ^8.5.10` (direct dep + override) to replace the vulnerable copy bundled under `next`.
+- ✅ **Web production deps — 0 vulnerabilities** (`npm audit --omit=dev`). Next 16 ships
+  `sharp 0.34.x`, which carries inherited libvips CVEs (GHSA-f88m-g3jw-g9cj: CVE-2026-33327/33328/
+  35590/35591, vulnerable `<0.35.0`). npm's suggested remedy is a **downgrade to Next 14**, which
+  would undo the Phase 19 upgrade and reintroduce 5 advisories — so instead an `overrides.sharp:
+  ^0.35.0` pins the patched version (resolves to 0.35.3). Verified: `next build` passes.
+- ⚠️ **Web dev toolchain — 9 high, all in the ESLint chain** (`@eslint/config-array`, `eslintrc`,
+  `eslint-plugin-*`, via `brace-expansion` / `minimatch`). **Dev-only — never shipped to users or
+  into a production image.** Fixing them requires a breaking ESLint downgrade/upgrade; tracked, not
+  blocking. Re-check with `npm audit --omit=dev` for what actually ships.
 
 ## 9. Known gaps / follow-ups (tracked in PROGRESS roadmap)
 - ~~httpOnly cookie migration for web auth tokens (§1).~~ **Refresh token DONE (Phase 20);** access
