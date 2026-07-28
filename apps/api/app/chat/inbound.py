@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat import guardrails
-from app.chat.assembly import build_messages
+from app.chat.assembly import build_messages, compose_system_prompt
 from app.chat.handoff import trigger_handoff, wants_handoff
 from app.chat.runtime import TurnResult, run_turn
 from app.core.config import settings
@@ -100,7 +100,7 @@ class InboundTurn:
 
         context_block, citations = await retrieve_for_version(session, org_id, self.version, self.message)
         messages = build_messages(
-            system_prompt=self.version.system_prompt,
+            system_prompt=compose_system_prompt(self.version.system_prompt, self.version.persona),
             context_block=context_block,
             memory_summary=conv.memory_summary,
             history=history,

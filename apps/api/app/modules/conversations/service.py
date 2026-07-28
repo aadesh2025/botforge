@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat import guardrails, memory
-from app.chat.assembly import build_messages
+from app.chat.assembly import build_messages, compose_system_prompt
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
 from app.core.config import settings
@@ -213,7 +213,7 @@ async def _prepare_turn(
 
     context_block, citations = await retrieve_for_version(session, ctx.org.id, version, data.message)
     messages = build_messages(
-        system_prompt=version.system_prompt,
+        system_prompt=compose_system_prompt(version.system_prompt, version.persona),
         context_block=context_block,
         memory_summary=conv.memory_summary,
         history=history,

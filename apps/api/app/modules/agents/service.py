@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.assembly import compose_system_prompt
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
 from app.core.config import settings
@@ -437,8 +438,9 @@ def _build_request(
 ) -> ChatRequest:
     mc = version.model_config_json or {}
     messages: list[Message] = []
-    if version.system_prompt:
-        messages.append(Message(role="system", content=version.system_prompt))
+    system_prompt = compose_system_prompt(version.system_prompt, version.persona)
+    if system_prompt:
+        messages.append(Message(role="system", content=system_prompt))
     if context_block:
         messages.append(Message(role="system", content=context_block))
     for turn in data.history or []:
