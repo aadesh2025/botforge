@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, Cloud, Loader2, Rocket } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, Cloud, Loader2, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useBuilder } from "@/lib/store/builder";
@@ -11,8 +11,18 @@ import { agentStatusMeta } from "@/lib/display";
 import { relativeTime } from "@/lib/utils";
 
 export function BuilderHeader() {
-  const { draft, agentId, versionNumber, published, dirty, saving, lastSavedAt, branchedToDraft, setPublished } =
-    useBuilder();
+  const {
+    draft,
+    agentId,
+    versionNumber,
+    published,
+    dirty,
+    saving,
+    lastSavedAt,
+    branchedToDraft,
+    saveError,
+    setPublished,
+  } = useBuilder();
   const [publishing, setPublishing] = useState(false);
   if (!draft) return null;
   const status = agentStatusMeta[draft.status];
@@ -58,7 +68,7 @@ export function BuilderHeader() {
               Editing new draft v{branchedToDraft}
             </Badge>
           )}
-          <SaveIndicator dirty={dirty} saving={saving} lastSavedAt={lastSavedAt} />
+          <SaveIndicator dirty={dirty} saving={saving} lastSavedAt={lastSavedAt} saveError={saveError} />
           {published && !dirty ? (
             <Badge variant="success">
               <Check className="size-3" /> Published
@@ -78,15 +88,26 @@ function SaveIndicator({
   dirty,
   saving,
   lastSavedAt,
+  saveError,
 }: {
   dirty: boolean;
   saving: boolean;
   lastSavedAt: number | null;
+  saveError: string | null;
 }) {
   if (saving) {
     return (
       <span className="flex items-center gap-1.5 text-xs text-muted">
         <Loader2 className="size-3.5 animate-spin text-ember-soft" /> Saving…
+      </span>
+    );
+  }
+  // Checked before `dirty`: a failed save leaves the draft dirty, and "couldn't save" is
+  // the more useful of the two states.
+  if (saveError) {
+    return (
+      <span className="flex items-center gap-1.5 text-xs text-error" title={saveError} role="status">
+        <AlertTriangle className="size-3.5" /> Couldn&apos;t save
       </span>
     );
   }

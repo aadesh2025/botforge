@@ -15,16 +15,29 @@ import { VersionsTab } from "@/components/builder/tabs/versions-tab";
 import { SettingsTab } from "@/components/builder/tabs/settings-tab";
 import { useBuilder } from "@/lib/store/builder";
 import { getAgent, listVersions, patchVersion } from "@/lib/api/agents";
+import { ApiError } from "@/lib/api/client";
 import { draftToPatch, versionToDraft } from "@/lib/api/agent-mapping";
 import { useSession } from "@/lib/store/session";
 
 const TABS = ["persona", "model", "knowledge", "tools", "channels", "versions", "settings"] as const;
 type Tab = (typeof TABS)[number];
 
+/** Validation failures name the offending field — surface it, since that's what to fix. */
+function describeSaveError(e: unknown): string {
+  if (e instanceof ApiError) {
+    const detail = Array.isArray(e.details)
+      ? (e.details as { field?: string; error?: string }[]).find((d) => d?.field || d?.error)
+      : undefined;
+    return detail?.field ? `${e.message} (${detail.field}: ${detail.error ?? "invalid"})` : e.message;
+  }
+  return e instanceof Error ? e.message : "Couldn't save your changes.";
+}
+
 export default function AgentBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const activeOrgId = useSession((s) => s.activeOrgId);
-  const { draft, agentId, versionNumber, init, dirty, beginSave, markSaved, retarget } = useBuilder();
+  const { draft, agentId, versionNumber, init, dirty, beginSave, markSaved, markSaveFailed, retarget } =
+    useBuilder();
   const [tab, setTab] = useState<Tab>("persona");
   const loadedFor = useRef<string | null>(null);
 
@@ -64,12 +77,15 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
         // Branch-on-edit: if the backend forked a new draft off a published version, the
         // returned version number is higher — re-point the builder at that new draft.
         if (saved.version !== versionNumber) retarget(saved.version);
-      } finally {
         markSaved();
+      } catch (e) {
+        // Never report a rejected PATCH as saved — the edit is still only in the browser.
+        // The draft stays dirty so the indicator says so and the next edit retries.
+        markSaveFailed(describeSaveError(e));
       }
     }, 800);
     return () => clearTimeout(timer);
-  }, [dirty, draft, agentId, versionNumber, beginSave, markSaved, retarget]);
+  }, [dirty, draft, agentId, versionNumber, beginSave, markSaved, markSaveFailed, retarget]);
 
   const onTabChange = (v: string) => {
     setTab(v as Tab);

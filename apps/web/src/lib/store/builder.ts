@@ -11,6 +11,8 @@ interface BuilderState {
   lastSavedAt: number | null;
   /** Set when a save forked a new draft off a published version (branch-on-edit). */
   branchedToDraft: number | null;
+  /** Message from the last failed autosave; null while saves are succeeding. */
+  saveError: string | null;
   init: (draft: AgentDraft, agentId: string, versionNumber: number, published: boolean) => void;
   /** Mutate the draft with a producer; marks the draft dirty. */
   update: (fn: (d: AgentDraft) => void) => void;
@@ -19,6 +21,8 @@ interface BuilderState {
   retarget: (versionNumber: number) => void;
   beginSave: () => void;
   markSaved: () => void;
+  /** Record a failed autosave. Leaves the draft dirty so the edit is not reported as saved. */
+  markSaveFailed: (message: string) => void;
 }
 
 export const useBuilder = create<BuilderState>((set, get) => ({
@@ -30,6 +34,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   saving: false,
   lastSavedAt: null,
   branchedToDraft: null,
+  saveError: null,
   init: (draft, agentId, versionNumber, published) =>
     set({
       draft,
@@ -40,6 +45,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       saving: false,
       lastSavedAt: Date.now(),
       branchedToDraft: null,
+      saveError: null,
     }),
   update: (fn) => {
     const current = get().draft;
@@ -52,5 +58,8 @@ export const useBuilder = create<BuilderState>((set, get) => ({
   retarget: (versionNumber) =>
     set({ versionNumber, published: false, branchedToDraft: versionNumber }),
   beginSave: () => set({ saving: true }),
-  markSaved: () => set({ saving: false, dirty: false, lastSavedAt: Date.now() }),
+  markSaved: () => set({ saving: false, dirty: false, lastSavedAt: Date.now(), saveError: null }),
+  // `dirty` deliberately stays true: the edit is still unsaved, so the indicator must not
+  // claim success and the next edit re-triggers the save.
+  markSaveFailed: (message) => set({ saving: false, saveError: message }),
 }));
