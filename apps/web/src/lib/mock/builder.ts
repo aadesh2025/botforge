@@ -26,7 +26,8 @@ export interface ModelConfig {
   maxTokens: number;
   frequencyPenalty: number;
   presencePenalty: number;
-  credential: string;
+  /** Generation halts if the model emits any of these. */
+  stop: string[];
 }
 
 export interface KnowledgeConfig {
@@ -107,12 +108,6 @@ export const toneOptions = [
   "Technical",
 ];
 
-export const credentialOptions = [
-  { value: "org-default", label: "Organization default key" },
-  { value: "byo", label: "Bring your own key" },
-  { value: "custom-url", label: "Custom base URL + key" },
-];
-
 export interface KnowledgeBaseRef {
   id: string;
   name: string;
@@ -183,7 +178,7 @@ export function makeDraft(id: string): AgentDraft {
       maxTokens: 1024,
       frequencyPenalty: 0,
       presencePenalty: 0,
-      credential: "org-default",
+      stop: [],
     },
     knowledge: { attachedKbIds: ["kb_1", "kb_3"], topK: 5, scoreThreshold: 0.72, hybrid: true },
     features: { rag: true, tools: true, memory: true, handoff: true },

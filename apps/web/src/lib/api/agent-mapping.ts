@@ -40,7 +40,7 @@ export function versionToDraft(agent: ApiAgent, v: ApiVersion): AgentDraft {
             .filter((f) => f && typeof f.provider === "string")
             .map((f) => ({ provider: f.provider as Provider, model: String(f.model ?? "") }))
         : [],
-      credential: "org-default",
+      stop: Array.isArray(mc.stop) ? (mc.stop as unknown[]).map(String) : [],
     },
     knowledge: {
       attachedKbIds: (rag.knowledge_base_ids as string[]) ?? [],
@@ -115,6 +115,7 @@ export function draftToPatch(draft: AgentDraft): Record<string, unknown> {
       max_tokens: m.maxTokens,
       frequency_penalty: m.frequencyPenalty,
       presence_penalty: m.presencePenalty,
+      stop: m.stop,
       fallbacks: m.fallbacks.map((f) => ({ provider: f.provider, model: f.model })),
     },
     rag_config: {

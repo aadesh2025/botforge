@@ -1,7 +1,10 @@
 "use client";
 
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import { BookOpen, Wrench, Brain, Plus, UserRound, X } from "lucide-react";
 import { Field, SectionCard, SliderField } from "@/components/builder/field";
+import { ChipInput } from "@/components/builder/chip-input";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -14,7 +17,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useBuilder } from "@/lib/store/builder";
-import { credentialOptions, providerCatalog } from "@/lib/mock/builder";
+import { useSession } from "@/lib/store/session";
+import { listCredentials } from "@/lib/api/credentials";
+import { providerCatalog } from "@/lib/mock/builder";
 import type { Provider } from "@/lib/mock/types";
 import type { FeatureToggles } from "@/lib/mock/builder";
 
@@ -159,19 +164,8 @@ export function ModelTab() {
             ) : null}
           </div>
         </Field>
-        <Field label="Credentials" description="Use the org key, or bring your own for this agent.">
-          <Select value={m.credential} onValueChange={(v) => update((d) => void (d.model.credential = v))}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {credentialOptions.map((c) => (
-                <SelectItem key={c.value} value={c.value}>
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <Field label="Credentials" description="Which key this agent will use for the selected provider.">
+          <CredentialStatus provider={m.provider} />
         </Field>
       </SectionCard>
 
@@ -204,6 +198,15 @@ export function ModelTab() {
               onValueChange={([v]) => update((d) => void (d.model.maxTokens = v))}
             />
           </SliderField>
+          <SliderField label="Presence penalty" value={m.presencePenalty} display={m.presencePenalty.toFixed(1)}>
+            <Slider
+              value={[m.presencePenalty]}
+              min={-2}
+              max={2}
+              step={0.1}
+              onValueChange={([v]) => update((d) => void (d.model.presencePenalty = v))}
+            />
+          </SliderField>
           <SliderField label="Frequency penalty" value={m.frequencyPenalty} display={m.frequencyPenalty.toFixed(1)}>
             <Slider
               value={[m.frequencyPenalty]}
@@ -214,6 +217,16 @@ export function ModelTab() {
             />
           </SliderField>
         </div>
+        <Field
+          label="Stop sequences"
+          description="Generation halts as soon as the model emits one of these. Case-sensitive."
+        >
+          <ChipInput
+            values={m.stop}
+            onChange={(next) => update((d) => void (d.model.stop = next))}
+            placeholder="Add a stop sequence…"
+          />
+        </Field>
       </SectionCard>
 
       <SectionCard title="Capabilities" description="Toggle what this agent is allowed to do.">
@@ -273,6 +286,51 @@ function FeatureRow({
         checked={draft.features[k]}
         onCheckedChange={(v) => update((d) => void (d.features[k] = v))}
       />
+    </div>
+  );
+}
+
+/** Shows which key this agent will actually use, from the real credentials API.
+ *
+ * The backend resolves keys agent-scoped → org default → platform env key, so the old
+ * "Organization default key / Bring your own / Custom base URL" select was doubly wrong: it
+ * was never persisted, and the choice isn't the agent's to make. */
+function CredentialStatus({ provider }: { provider: Provider }) {
+  const activeOrgId = useSession((s) => s.activeOrgId);
+  const { data, isLoading } = useQuery({
+    queryKey: ["credentials", activeOrgId],
+    queryFn: listCredentials,
+    enabled: Boolean(activeOrgId),
+  });
+
+  if (isLoading) {
+    return <p className="text-sm text-muted">Checking credentials…</p>;
+  }
+
+  const forProvider = (data ?? []).filter((c) => c.provider === provider);
+  const chosen = forProvider.find((c) => c.is_default) ?? forProvider[0];
+  const label = providerCatalog[provider].label;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      {chosen ? (
+        <>
+          <Badge variant="success">Key configured</Badge>
+          <span className="text-muted">
+            {chosen.label || `${label} key`} · <span className="font-mono text-xs">{chosen.masked_key}</span>
+          </span>
+        </>
+      ) : (
+        <>
+          <Badge variant="warn">No stored key</Badge>
+          <span className="text-muted">
+            Falls back to the platform environment key for {label}, if one is set.
+          </span>
+        </>
+      )}
+      <Link href="/settings/credentials" className="text-xs text-ember-soft underline underline-offset-2">
+        Manage
+      </Link>
     </div>
   );
 }
