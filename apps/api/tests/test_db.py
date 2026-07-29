@@ -18,7 +18,7 @@ EXPECTED_TABLES = {
     "email_verification_tokens", "organizations", "memberships", "invitations",
     "agents", "agent_versions", "provider_credentials",
     "knowledge_bases", "documents", "chunks",
-    "contacts", "conversations", "messages",
+    "canned_responses", "contacts", "conversations", "messages",
     "tools", "tool_runs", "channels", "handoffs",
     "api_keys", "webhook_endpoints", "webhook_deliveries",
     "audit_logs", "usage_records", "quotas", "subscriptions",

@@ -38,6 +38,18 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Canned responses (2026-07-29).** Org-scoped reply snippets (`canned_responses`, migration
+  `0008`, unique per `(org, shortcut)` — shortcuts are typed rather than picked, so a duplicate
+  would make the picker ambiguous). CRUD module at `/v1/canned-responses`; reading needs only
+  `READ` (every operator needs them to reply), writing needs `INBOX_HANDLE`. Settings page for
+  create/edit/delete. In the inbox composer, typing `/` opens a filtered picker — the trigger
+  only fires at the start or after whitespace, so `example.com/refunds` and `24/07` don't
+  misfire it — with arrow-key/Enter/Tab selection, and insertion replaces the trigger text
+  rather than appending. 8 backend tests, 9 web unit tests, 2 Playwright checks.
+  **Also fixes a pre-existing 500**: any endpoint whose Pydantic `field_validator` raised
+  `ValueError` returned `internal_error` instead of a 422, because Pydantic puts the raised
+  exception in the error's `ctx` and the handler json-encoded the raw list. Widget-config
+  writes were affected long before this feature existed.
 - **WhatsApp 24-hour customer-service window (2026-07-29).** A silent-failure bug, not a
   missing feature: `send()` fired free-form text with no awareness of Meta's window, so a
   reply sent more than 24h after the customer's last message was rejected (error `131047`)

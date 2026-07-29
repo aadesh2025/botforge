@@ -32,6 +32,27 @@ class AppError(Exception):
         super().__init__(message)
 
 
+def _safe_validation_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
+    """JSON-safe view of Pydantic's error list.
+
+    A custom `field_validator` that raises `ValueError` gets that exception object put in
+    the error's `ctx`, which json.dumps can't encode — so serializing the raw list turned
+    every custom-validation failure into a 500 instead of the 422 it is. The human-readable
+    reason already lives in `msg`; `ctx` values are stringified rather than dropped.
+    """
+    out: list[dict[str, Any]] = []
+    for err in exc.errors():
+        safe = {k: v for k, v in err.items() if k != "ctx"}
+        ctx = err.get("ctx")
+        if isinstance(ctx, dict):
+            safe["ctx"] = {k: str(v) for k, v in ctx.items()}
+        # `input` is whatever the client sent; it can be any shape.
+        if "input" in safe and not isinstance(safe["input"], str | int | float | bool | type(None)):
+            safe["input"] = str(safe["input"])
+        out.append(safe)
+    return out
+
+
 def _payload(code: str, message: str, details: Any = None) -> dict[str, Any]:
     body: dict[str, Any] = {"code": code, "message": message}
     if details is not None:
@@ -51,7 +72,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def _validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content=_payload("validation_error", "Request validation failed", exc.errors()),
+            content=_payload("validation_error", "Request validation failed", _safe_validation_errors(exc)),
         )
 
     @app.exception_handler(StarletteHTTPException)

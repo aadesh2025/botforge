@@ -1,10 +1,24 @@
 "use client";
 
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { replyInbox, sendTemplate, type ApiSendWindow } from "@/lib/api/inbox";
+import { listCannedResponses } from "@/lib/api/canned-responses";
+import { useSession } from "@/lib/store/session";
+
+/** The `/shortcut` being typed at the caret, or null when the trigger isn't active. */
+export function activeShortcutQuery(text: string): string | null {
+  // Only at the very start, or after whitespace — so a URL like "a/b" doesn't trigger it.
+  const match = /(?:^|\s)\/([a-z0-9_-]*)$/i.exec(text);
+  return match ? match[1] : null;
+}
+
+/** Replace the trailing `/query` with the chosen response. */
+export function applyShortcut(text: string, content: string): string {
+  return text.replace(/(^|\s)\/[a-z0-9_-]*$/i, (_m, lead: string) => `${lead}${content}`);
+}
 
 function closesAtLabel(iso: string | null): string {
   if (!iso) return "";
@@ -28,8 +42,28 @@ export function ReplyBox({
   sendWindow: ApiSendWindow | null;
   onSent: () => void;
 }) {
+  const activeOrgId = useSession((s) => s.activeOrgId);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [highlight, setHighlight] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const query = activeShortcutQuery(text);
+
+  // Canned responses are a short per-org list, so fetch once and filter in the browser
+  // rather than round-tripping on every keystroke.
+  const { data: canned } = useQuery({
+    queryKey: ["canned-responses", activeOrgId],
+    queryFn: () => listCannedResponses(),
+    enabled: Boolean(activeOrgId),
+  });
+  const matches =
+    query === null
+      ? []
+      : (canned ?? []).filter((c) => c.shortcut.startsWith(query.toLowerCase())).slice(0, 6);
+  // Clamped at render: the list narrows as you type, and a stale index would highlight
+  // nothing (or pick the wrong row on Enter).
+  const selected = matches.length ? Math.min(highlight, matches.length - 1) : 0;
 
   const doReply = useMutation({
     mutationFn: (t: string) => replyInbox(cid, t),
@@ -42,6 +76,29 @@ export function ReplyBox({
     onError: (e) => setError((e as Error).message),
   });
 
+  const insert = (content: string) => {
+    setText((t) => applyShortcut(t, content));
+    inputRef.current?.focus();
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (matches.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlight((h) => (h + 1) % matches.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlight((h) => (h - 1 + matches.length) % matches.length);
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      // Enter picks the suggestion rather than sending a half-typed "/ref".
+      e.preventDefault();
+      insert(matches[selected].content);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setText((t) => `${t} `); // break the trigger without losing what was typed
+    }
+  };
+
   const windowClosed = Boolean(sendWindow && !sendWindow.open);
   if (windowClosed) {
     return <TemplateComposer cid={cid} templates={sendWindow!.templates} closesAt={sendWindow!.closes_at} onSent={onSent} />;
@@ -53,14 +110,54 @@ export function ReplyBox({
         e.preventDefault();
         if (text.trim()) doReply.mutate(text.trim());
       }}
-      className="border-t border-border p-3"
+      className="relative border-t border-border p-3"
     >
+      {matches.length > 0 && (
+        <ul
+          id="canned-response-list"
+          role="listbox"
+          aria-label="Canned responses"
+          className="absolute bottom-full left-3 right-3 z-10 mb-1 max-h-60 overflow-y-auto rounded-md border border-border bg-surface shadow-lg scroll-thin"
+        >
+          {matches.map((c, i) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={i === selected}
+                onMouseEnter={() => setHighlight(i)}
+                // mousedown, not click: the input blurs first otherwise and the list unmounts.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  insert(c.content);
+                }}
+                className={`flex w-full items-start gap-2 border-b border-border px-3 py-2 text-left last:border-0 ${
+                  i === selected ? "bg-surface-2" : ""
+                }`}
+              >
+                <code className="shrink-0 font-mono text-xs text-ember-soft">/{c.shortcut}</code>
+                <span className="min-w-0 flex-1 truncate text-xs text-muted">{c.content}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <div className="flex items-center gap-2">
         <input
+          ref={inputRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Reply as an operator…"
+          onChange={(e) => {
+            setText(e.target.value);
+            setHighlight(0); // the suggestion list changes with every keystroke
+          }}
+          onKeyDown={onKeyDown}
+          placeholder="Reply as an operator…  (/ for saved replies)"
           aria-label="Reply as an operator"
+          role="combobox"
+          aria-expanded={matches.length > 0}
+          aria-controls="canned-response-list"
+          autoComplete="off"
           className="h-10 flex-1 rounded-md border border-border bg-surface-2 px-3 text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
         />
         <Button type="submit" variant="primary" disabled={!text.trim() || doReply.isPending} aria-label="Send reply">

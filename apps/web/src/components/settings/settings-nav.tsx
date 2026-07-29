@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, KeyRound, PlugZap, ScrollText, UserCircle, Webhook } from "lucide-react";
+import { Building2, KeyRound, MessageSquareQuote, PlugZap, ScrollText, UserCircle, Webhook, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   { label: "Organization", href: "/settings/org", icon: Building2 },
+  { label: "Canned responses", href: "/settings/canned-responses", icon: MessageSquareQuote },
+  { label: "Macros", href: "/settings/macros", icon: Zap },
   { label: "Provider keys", href: "/settings/credentials", icon: PlugZap },
   { label: "API keys", href: "/settings/api-keys", icon: KeyRound },
   { label: "Webhooks", href: "/settings/webhooks", icon: Webhook },
