@@ -6,7 +6,18 @@
  * two logos.
  */
 
-import { Camera, Code2, Globe, Hash, LayoutDashboard, MessageCircle, MessageSquare, Phone, Send } from "lucide-react";
+import {
+  Camera,
+  Code2,
+  Globe,
+  Hash,
+  LayoutDashboard,
+  MessageCircle,
+  MessageSquare,
+  Phone,
+  Send,
+  UserPlus,
+} from "lucide-react";
 import type { ChannelType } from "./api/channels";
 
 /** Channels a conversation can arrive on — the connectable ones plus the built-in widget. */
@@ -41,13 +52,15 @@ export const INBOX_CHANNEL_ORDER: InboxChannel[] = [
 /** Channel values a conversation can carry that are never inbox *tabs*.
  *
  * `dashboard` is the in-app playground, `api`/`web` are legacy values from before the
- * channel registry. They show up in analytics (they're real traffic) but there's nothing
- * to connect, so they get no tab.
+ * channel registry, and `manual` is a contact an operator typed into the CRM. None of them
+ * can receive a message, so none of them gets a tab — `manual` especially, since it has no
+ * webhook and no conversations at all.
  */
 const REPORTING_ONLY: Record<string, ChannelMeta> = {
   dashboard: { label: "Dashboard", Icon: LayoutDashboard },
   api: { label: "API", Icon: Code2 },
   web: { label: "Web", Icon: Globe },
+  manual: { label: "Added manually", Icon: UserPlus },
 };
 
 const FALLBACK: ChannelMeta = { label: "Other", Icon: MessageSquare };

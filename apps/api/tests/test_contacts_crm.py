@@ -173,3 +173,60 @@ async def test_tenant_isolation(client: AsyncClient) -> None:
     cross = await client.patch(f"/v1/contacts/{cid}", json={"lead_stage": "lost"}, headers=b)
     assert cross.status_code == 404
     assert (await client.get(f"/v1/contacts/{uuid.uuid4()}", headers=a)).status_code == 404
+
+
+# ── Manual creation (the one operator-driven path into this table) ──────────────────
+async def test_create_contact_by_hand(client: AsyncClient) -> None:
+    headers = await _headers(client, "crm-manual@example.com")
+
+    created = await client.post(
+        "/v1/contacts",
+        json={
+            "display_name": "Walk-in Customer",
+            "email": "walkin@example.com",
+            "phone": "+91 98765 43210",
+            "lead_stage": "contacted",
+            "order_status": "Quote sent",
+        },
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["display_name"] == "Walk-in Customer"
+    assert body["channel"] == "manual"
+    # A synthetic id keeps (org, channel, external_id) uniqueness meaningful.
+    assert body["external_id"].startswith("manual-")
+    assert body["extra"]["email"] == "walkin@example.com"
+    assert body["lead_stage"] == "contacted"
+    assert body["conversation_count"] == 0
+
+    listed = await client.get("/v1/contacts", headers=headers)
+    assert [c["id"] for c in listed.json()["items"]] == [body["id"]]
+
+
+async def test_two_manual_contacts_do_not_collide(client: AsyncClient) -> None:
+    """Same name, no platform id — the generated external_id has to keep them distinct."""
+    headers = await _headers(client, "crm-manual2@example.com")
+    for _ in range(2):
+        r = await client.post("/v1/contacts", json={"display_name": "Same Name"}, headers=headers)
+        assert r.status_code == 201, r.text
+    assert (await client.get("/v1/contacts", headers=headers)).json()["total"] == 2
+
+
+async def test_manual_contact_rejects_an_unknown_lead_stage(client: AsyncClient) -> None:
+    headers = await _headers(client, "crm-manual3@example.com")
+    r = await client.post(
+        "/v1/contacts", json={"display_name": "X", "lead_stage": "Wishlist"}, headers=headers
+    )
+    assert r.status_code == 422
+
+
+async def test_manual_contacts_are_filterable_like_any_other(client: AsyncClient) -> None:
+    headers = await _headers(client, "crm-manual4@example.com")
+    await client.post(
+        "/v1/contacts", json={"display_name": "Manual Lead", "lead_stage": "qualified"}, headers=headers
+    )
+    by_channel = await client.get("/v1/contacts", params={"channel": "manual"}, headers=headers)
+    assert [c["display_name"] for c in by_channel.json()["items"]] == ["Manual Lead"]
+    by_stage = await client.get("/v1/contacts", params={"lead_stage": "qualified"}, headers=headers)
+    assert len(by_stage.json()["items"]) == 1

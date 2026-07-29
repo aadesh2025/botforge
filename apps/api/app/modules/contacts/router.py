@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
@@ -35,6 +35,16 @@ async def list_contacts(
         limit=limit,
         offset=offset,
     )
+
+
+@router.post("", response_model=schemas.ContactDetail, status_code=status.HTTP_201_CREATED)
+async def create_contact(
+    data: schemas.CreateContactRequest,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.ContactDetail:
+    """Add a contact by hand (channel `manual`); everything else arrives via a message."""
+    return await service.create_contact(session, ctx, data)
 
 
 @router.get("/{contact_id}", response_model=schemas.ContactDetail)

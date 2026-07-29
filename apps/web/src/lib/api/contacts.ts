@@ -68,6 +68,17 @@ export function listContacts(filters: ContactFilters = {}) {
   return api<ContactListResult>(`/v1/contacts${qs}`, { orgScoped: true });
 }
 
+/** Add a contact by hand. Everything else in this table arrives via a message. */
+export function createContact(body: {
+  display_name: string;
+  email?: string | null;
+  phone?: string | null;
+  lead_stage?: string | null;
+  order_status?: string | null;
+}) {
+  return api<ApiContactDetail>("/v1/contacts", { method: "POST", orgScoped: true, body });
+}
+
 export function getContact(id: string) {
   return api<ApiContactDetail>(`/v1/contacts/${id}`, { orgScoped: true });
 }

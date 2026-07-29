@@ -58,6 +58,31 @@ class ContactDetail(ContactOut):
     conversations: list[ContactConversationOut]
 
 
+class CreateContactRequest(BaseModel):
+    """Operator-created contact.
+
+    Every other `Contact` row is upserted by an inbound channel message, so it arrives with
+    a real platform id. A manually-added one has none — it gets `channel="manual"` and a
+    synthetic `external_id`, which keeps the `(org, channel, external_id)` uniqueness
+    constraint meaningful instead of special-casing it.
+    """
+
+    display_name: str = Field(min_length=1, max_length=255)
+    email: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=64)
+    lead_stage: str | None = Field(default=None, max_length=32)
+    order_status: str | None = Field(default=None, max_length=64)
+
+    @field_validator("lead_stage")
+    @classmethod
+    def _stage(cls, v: str | None) -> str | None:
+        if v in (None, ""):
+            return None
+        if v not in LEAD_STAGES:
+            raise ValueError(f"must be one of {', '.join(LEAD_STAGES)}")
+        return v
+
+
 class UpdateContactRequest(BaseModel):
     lead_stage: str | None = Field(default=None, max_length=32)
     order_status: str | None = Field(default=None, max_length=64)

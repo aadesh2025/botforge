@@ -38,6 +38,15 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Contacts → CRM, plus manual contact creation (2026-07-29).** Nav item and page title
+  renamed to "CRM"; the `/contacts` route is unchanged, so the Inbox's contact link still
+  resolves. New `POST /v1/contacts` adds the first **operator-initiated** creation path —
+  every other row in this table is upserted by an inbound message. A manual contact has no
+  platform account behind it, so it gets `channel="manual"` and a generated `external_id`,
+  keeping the `(org, channel, external_id)` uniqueness constraint meaningful rather than
+  special-casing it. `manual` joins `dashboard`/`api`/`web` in `channel-meta.ts`'s
+  `REPORTING_ONLY` map, so it can never become an Inbox tab — it has no webhook and no
+  conversations at all. 4 backend tests.
 - **URL ingest extracts the article, not the page chrome (2026-07-29).** `strip_html()`
   removed `<script>`/`<style>` then regex-stripped every remaining tag with no notion of
   document structure, so nav menus, headers, footers and cookie banners landed in the same

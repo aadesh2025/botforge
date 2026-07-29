@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ContactAvatar } from "@/components/inbox/contact-avatar";
 import { ContactDetailPanel } from "@/components/contacts/contact-detail-panel";
+import { NewContactDialog } from "@/components/contacts/new-contact-dialog";
 import { channelMeta } from "@/lib/channel-meta";
 import { listContacts, LEAD_STAGES } from "@/lib/api/contacts";
 import { useSession } from "@/lib/store/session";
@@ -30,6 +31,7 @@ export function ContactsView({ initialId }: { initialId?: string }) {
   const [stage, setStage] = useState("");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<string | null>(initialId ?? null);
+  const [adding, setAdding] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["contacts", activeOrgId, q, stage, page],
@@ -49,7 +51,14 @@ export function ContactsView({ initialId }: { initialId?: string }) {
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-6">
-      <PageHeader title="Contacts" description="Everyone who has talked to your agents, across every channel." />
+      <PageHeader
+        title="CRM"
+        description="Everyone who has talked to your agents, across every channel."
+      >
+        <Button variant="primary" size="default" onClick={() => setAdding(true)}>
+          <Plus className="size-4" /> New contact
+        </Button>
+      </PageHeader>
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[240px] flex-1">
@@ -173,6 +182,9 @@ export function ContactsView({ initialId }: { initialId?: string }) {
 
         {selected && <ContactDetailPanel contactId={selected} onClose={() => setSelected(null)} />}
       </div>
+
+      {/* Opens the new contact straight away — you almost always want to fill in more. */}
+      <NewContactDialog open={adding} onOpenChange={setAdding} onCreated={setSelected} />
     </div>
   );
 }

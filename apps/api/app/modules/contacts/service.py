@@ -160,6 +160,36 @@ async def get_contact(session: AsyncSession, ctx: OrgContext, contact_id: uuid.U
     )
 
 
+async def create_contact(
+    session: AsyncSession, ctx: OrgContext, data: schemas.CreateContactRequest
+) -> schemas.ContactDetail:
+    """Add a contact by hand — the first operator-initiated creation path.
+
+    Everything else in this table is upserted from an inbound message, so it carries a real
+    platform id. A manual one has none, hence `channel="manual"` and a generated
+    `external_id`: the uniqueness constraint stays meaningful rather than being special-cased.
+    """
+    rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
+    extra: dict[str, str] = {}
+    if data.email:
+        extra["email"] = data.email.strip()
+    if data.phone:
+        extra["phone"] = data.phone.strip()
+
+    row = Contact(
+        organization_id=ctx.org.id,
+        channel="manual",
+        external_id=f"manual-{uuid.uuid4()}",
+        display_name=data.display_name.strip(),
+        extra=extra,
+        lead_stage=data.lead_stage,
+        order_status=data.order_status or None,
+    )
+    session.add(row)
+    await session.flush()
+    return await get_contact(session, ctx, row.id)
+
+
 async def update_contact(
     session: AsyncSession, ctx: OrgContext, contact_id: uuid.UUID, data: schemas.UpdateContactRequest
 ) -> schemas.ContactDetail:
