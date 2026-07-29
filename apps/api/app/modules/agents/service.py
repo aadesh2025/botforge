@@ -391,6 +391,16 @@ async def update_version(
 ) -> schemas.VersionOut:
     rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
     await _get_agent(session, ctx, agent_id)
+
+    # Backward compatibility: appearance used to live at `persona.widget`. It now has its
+    # own unversioned store, so route a legacy write there rather than letting it land in
+    # the persona where nothing would ever read it again.
+    if data.persona and isinstance(data.persona.get("widget"), dict):
+        persona = dict(data.persona)
+        widget = persona.pop("widget")
+        await update_widget_config(session, ctx, agent_id, widget)
+        data = data.model_copy(update={"persona": persona or None})
+
     version = await _get_version(session, agent_id, number)
     if version.is_published:
         # Branch-on-edit (ADR-023): a published version is immutable, so the first edit

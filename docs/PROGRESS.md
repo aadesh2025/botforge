@@ -38,6 +38,17 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Invitations can actually be accepted (2026-07-29).** `accept_invitation()` was correct and
+  complete server-side, but **nothing in the web app ever called it** — the email link had
+  nowhere to land, so an invitation could never leave "pending" no matter what the recipient
+  did. Added the landing page at **`/invitations/accept`** — the path the invitation emails
+  have always pointed at, so already-sent invites work — outside the authenticated `(app)`
+  layout, since an invitee usually has no account yet. If signed in it redeems immediately;
+  otherwise it offers signup *or* login and continues straight to accepting rather than
+  dropping them on the dashboard having silently failed to join. The three server-modelled
+  failures each get their own explanation: expired/invalid, wrong email, org deleted. On
+  success the joined org is set active. 5 Playwright checks, including a brand-new user
+  going from email link to active membership.
 - **Widget appearance is unversioned and always live (2026-07-29).** `_theme()` read
   `persona.widget` off whatever `_live_version()` resolved — the same published-vs-draft unit
   as behaviour — so a colour change waited behind a publish approval. It only *looked*

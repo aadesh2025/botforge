@@ -39,6 +39,11 @@ export function updateOrg(
   return api<ApiOrg>(`/v1/orgs/${orgId}`, { method: "PATCH", body });
 }
 
+/** Accept an invitation. Requires an authenticated user whose email matches the invite. */
+export function acceptInvitation(token: string) {
+  return api<ApiOrg>(`/v1/orgs/invitations/${encodeURIComponent(token)}/accept`, { method: "POST" });
+}
+
 export function listMembers(orgId: string) {
   return api<ApiMember[]>(`/v1/orgs/${orgId}/members`);
 }

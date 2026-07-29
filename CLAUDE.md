@@ -153,6 +153,21 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-07-29 — Edit/publish split, live widget config, invite acceptance
+1. **RBAC split** (`59b8f6f`): new `AGENTS_PUBLISH` gates publish/rollback; `editor` is now the
+   **client role** (edit, knowledge, own channel credentials, inbox, Playground — no publish).
+   Builder shows "Awaiting review"; admin console gains an **Awaiting review** column per org.
+2. **Widget config** (`60c91b2`): moved out of `AgentVersion.persona.widget` into an unversioned
+   `widget_configs` table (migration `0014`). `_theme()` reads it by `agent_id`, bypassing
+   `_live_version()`. New `GET/PATCH /v1/agents/{id}/widget-config` on `AGENTS_WRITE`, never
+   `AGENTS_PUBLISH`. Legacy `persona.widget` writes are **routed** to the new store so old
+   callers keep working instead of writing to a field nothing reads.
+3. **Invite acceptance** (`3a1f0c9`): the real bug — no frontend route called `accept_invitation()`.
+   Page added at **`/invitations/accept`**, the path the emails already use (building at `/invite`
+   would have stranded every already-sent invitation).
+
+Suites: **297 pytest**, **73 vitest**, **46/46 Playwright**.
+
 ### 2026-07-29 — URL extraction fix, CRM rename + auto-capture
 1. **URL ingest** (`49e66ba`): `strip_html()` was structure-blind, so a docs site's nav menu
    opened the extracted text and dominated the first chunk. Added **trafilatura** +

@@ -56,7 +56,10 @@ async def test_widget_config_validation(client: AsyncClient) -> None:
         headers=headers,
     )
     assert ok.status_code == 200, ok.text
-    assert ok.json()["persona"]["widget"]["primaryColor"] == "#123456"
+    # Appearance now lives in its own unversioned store; a legacy `persona.widget` write is
+    # routed there rather than left in the persona where nothing would read it.
+    stored = await client.get(f"/v1/agents/{aid}/widget-config", headers=headers)
+    assert stored.json()["primaryColor"] == "#123456"
 
 
 async def test_widget_config_merge_on_write(client: AsyncClient) -> None:
@@ -84,12 +87,13 @@ async def test_widget_config_merge_on_write(client: AsyncClient) -> None:
         headers=headers,
     )
     assert patched.status_code == 200, patched.text
-    widget = patched.json()["persona"]["widget"]
+    widget = (await client.get(f"/v1/agents/{aid}/widget-config", headers=headers)).json()
     assert widget["logoUrl"] == "/v1/public/agents/x/widget-logo"
     assert widget["primaryColor"] == "#AABBCC"  # preserved
     assert widget["backgroundColor"] == "#101010"  # preserved — NOT nulled
     assert widget["fontFamily"] == "georgia"  # preserved
-    assert patched.json()["persona"]["displayName"] == "Concierge"  # sibling key preserved
+    # The sibling persona key survives the widget being split out of it.
+    assert patched.json()["persona"]["displayName"] == "Concierge"
 
 
 async def test_public_config_exposes_extended_theme(client: AsyncClient) -> None:
