@@ -25,6 +25,7 @@ from app.modules.canned_responses.router import router as canned_responses_route
 from app.modules.contacts.router import router as contacts_router
 from app.modules.conversations.router import router as conversations_router
 from app.modules.credentials.router import router as credentials_router
+from app.modules.help_articles.router import router as help_articles_router
 from app.modules.inbox.router import router as inbox_router
 from app.modules.knowledge.router import router as knowledge_router
 from app.modules.macros.router import inbox_router as macros_inbox_router
@@ -118,6 +119,7 @@ def create_app() -> FastAPI:
     app.include_router(macros_router)
     app.include_router(macros_inbox_router)
     app.include_router(contacts_router)
+    app.include_router(help_articles_router)
     app.include_router(webhooks_router)
     app.include_router(audit_router)
     app.include_router(admin_router)

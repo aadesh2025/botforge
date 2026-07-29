@@ -38,6 +38,22 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Help Center (2026-07-29).** Public-facing articles, deliberately a **separate store from
+  the RAG Knowledge module**: Knowledge is retrieval material for the model, this is prose a
+  human reads. `help_articles` (migration `0011`, slug unique per agent since slugs address
+  articles in public URLs); authenticated CRUD at `/v1/help-articles`; unauthenticated
+  `GET /v1/public/agents/{key}/help[/{slug}]` mirroring the widget-config pattern — a draft
+  404s exactly like a non-existent article, so unpublished titles can't be enumerated.
+  Authoring UI at `/knowledge/help-center` (plain `<textarea>`; no editor dependency), public
+  pages at `/help/{agentKey}[/{slug}]` outside the authenticated layout. **Opt-in RAG sync**
+  per article: publishing with "Also teach the AI" pushes the body into a knowledge base the
+  agent *actually retrieves from* — targeting an unread KB would look like it worked and
+  change nothing, so an agent with no RAG source gets a typed error instead. Editing replaces
+  the synced document rather than accumulating a stale copy, and unpublishing removes it (the
+  AI shouldn't answer from something a human can no longer read). Markdown rendered by a small
+  in-repo subset renderer that **escapes before formatting**, so raw HTML in a body can never
+  become live markup. 7 backend tests, 7 renderer unit tests, 3 Playwright checks.
+  Also adds `/contacts` to the auth guard — it was missed when that page shipped earlier today.
 - **Contacts / CRM (2026-07-29).** Extends the existing `Contact` (from the unified-inbox work)
   rather than introducing a second contact concept: `lead_stage`, `order_status`, `notes`,
   `labels` (migration `0010`, + a GIN index on labels and a composite on `(org, lead_stage)`

@@ -14,6 +14,8 @@ from app.core.logging import get_logger
 from app.core.ratelimit import rate_limit
 from app.db.session import SessionFactory, get_session
 from app.models import Conversation
+from app.modules.help_articles import schemas as help_schemas
+from app.modules.help_articles import service as help_service
 from app.modules.public import schemas, service
 from app.realtime.hub import conv_topic, hub
 
@@ -44,6 +46,23 @@ async def get_widget_logo(
         media_type=media_type,
         headers={"Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*"},
     )
+
+
+@router.get("/agents/{public_key}/help", response_model=list[help_schemas.PublicHelpArticleSummary])
+async def list_help_articles(
+    public_key: str, session: AsyncSession = Depends(get_session)
+) -> list[help_schemas.PublicHelpArticleSummary]:
+    """Published Help Center articles for this agent. Unauthenticated by design."""
+    agent, _version = await service._resolve_agent(session, public_key)
+    return await help_service.public_list(session, agent)
+
+
+@router.get("/agents/{public_key}/help/{slug}", response_model=help_schemas.PublicHelpArticle)
+async def get_help_article(
+    public_key: str, slug: str, session: AsyncSession = Depends(get_session)
+) -> help_schemas.PublicHelpArticle:
+    agent, _version = await service._resolve_agent(session, public_key)
+    return await help_service.public_get(session, agent, slug)
 
 
 @router.post(

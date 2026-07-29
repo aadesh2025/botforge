@@ -6,6 +6,7 @@ from app.models.canned_responses import CannedResponse
 from app.models.channels import Channel
 from app.models.contacts import Contact
 from app.models.conversations import Conversation, Message
+from app.models.help_articles import HelpArticle
 from app.models.identity import (
     EmailVerificationToken,
     Invitation,
@@ -46,6 +47,7 @@ __all__ = [
     "EmailVerificationToken",
     "FeatureFlag",
     "Handoff",
+    "HelpArticle",
     "Invitation",
     "KnowledgeBase",
     "Macro",

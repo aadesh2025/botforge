@@ -1,6 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-const PROTECTED = ["/dashboard", "/agents", "/knowledge", "/inbox", "/analytics", "/automations", "/settings", "/admin"];
+// `/help/:agentKey` is deliberately absent: the Help Center is public by design.
+const PROTECTED = [
+  "/dashboard",
+  "/agents",
+  "/knowledge",
+  "/inbox",
+  "/contacts",
+  "/analytics",
+  "/automations",
+  "/settings",
+  "/admin",
+];
 const AUTH_ROUTES = ["/login", "/signup"];
 
 export function proxy(request: NextRequest) {
@@ -30,6 +41,7 @@ export const config = {
     "/agents/:path*",
     "/knowledge/:path*",
     "/inbox/:path*",
+    "/contacts/:path*",
     "/analytics/:path*",
     "/automations/:path*",
     "/settings/:path*",
