@@ -148,6 +148,9 @@ async def _resolve_provider(
 def _persist_user_message(session: AsyncSession, conv: Conversation, text: str) -> Message:
     msg = Message(conversation_id=conv.id, organization_id=conv.organization_id, role="user", content=text)
     session.add(msg)
+    # Every inbound path funnels through here, so this is the one place the 24-hour
+    # WhatsApp window clock is reset.
+    conv.last_inbound_at = dt.datetime.now(tz=dt.UTC)
     return msg
 
 

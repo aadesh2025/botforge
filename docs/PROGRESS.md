@@ -38,6 +38,22 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **WhatsApp 24-hour customer-service window (2026-07-29).** A silent-failure bug, not a
+  missing feature: `send()` fired free-form text with no awareness of Meta's window, so a
+  reply sent more than 24h after the customer's last message was rejected (error `131047`)
+  and simply never arrived — while sitting in the transcript looking sent. Adds
+  `Conversation.last_inbound_at` (migration `0007`, backfilled from the newest `role="user"`
+  message) kept **separate from `last_message_at`**, which moves on our own outbound too and
+  would have made a bot reply look like customer activity and falsely re-open the window. New
+  `BaseChannel.check_can_send()` hook — overridden only by WhatsApp — is called *before* the
+  message is persisted, so a refusal leaves no phantom message; it raises a typed
+  `whatsapp_window_closed` (409) per CLAUDE.md §8 instead of a swallowed no-op. Meta's own
+  `131047` is honoured too, in case our clock disagrees. `send_template()` posts
+  `type: "template"` with positional body params; approved names live on `Channel.config`
+  (`templates`, comma-separated — Meta approval is a Meta-side process BotForge can't do).
+  `InboxDetail.send_window` reports `{open, closes_at, templates}` (null on channels with no
+  such limit), and the composer swaps the free-text box for a warning + template picker when
+  it's shut. 7 backend tests, 3 Playwright checks.
 - **Inbox shows every channel tab, connected or not (2026-07-29).** Reversal of a deliberate
   choice from the 07-28 inbox build: tabs were filtered to connected channels only, which hid
   exactly the platforms a user still needs to set up and made discovery depend on already

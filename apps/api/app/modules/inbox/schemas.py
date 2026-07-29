@@ -47,8 +47,23 @@ class InboxItemOut(BaseModel):
     contact: ContactOut | None = None
 
 
+class SendWindowOut(BaseModel):
+    """Platform limits on replying right now. Null on channels that impose none."""
+
+    open: bool
+    closes_at: dt.datetime | None
+    #: Pre-approved template names usable when the window is shut.
+    templates: list[str] = []
+
+
 class InboxDetail(InboxItemOut):
     messages: list[MessageOut]
+    send_window: SendWindowOut | None = None
+
+
+class TemplateRequest(BaseModel):
+    template: str = Field(min_length=1, max_length=255)
+    params: list[str] = Field(default_factory=list)
 
 
 class ReplyRequest(BaseModel):

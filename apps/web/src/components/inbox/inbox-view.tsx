@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Check, Headphones, Loader2, Send, User } from "lucide-react";
+import { Bot, Check, Headphones, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,7 +12,6 @@ import {
   handback,
   listInbox,
   openInboxSocket,
-  replyInbox,
   takeover,
 } from "@/lib/api/inbox";
 import { listChannels } from "@/lib/api/channels";
@@ -26,6 +25,7 @@ import {
 } from "@/lib/channel-meta";
 import { ContactAvatar, contactLabel } from "@/components/inbox/contact-avatar";
 import { ChannelNotConnected } from "@/components/inbox/channel-not-connected";
+import { ReplyBox } from "@/components/inbox/reply-box";
 import { useSession } from "@/lib/store/session";
 
 const STATUS_FILTERS = [
@@ -234,7 +234,6 @@ function ChannelTab({
 
 function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
   const qc = useQueryClient();
-  const [text, setText] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
 
   const { data: detail } = useQuery({
@@ -250,13 +249,6 @@ function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
   const doTakeover = useMutation({ mutationFn: () => takeover(cid), onSuccess: invalidate });
   const doHandback = useMutation({ mutationFn: () => handback(cid), onSuccess: invalidate });
   const doClose = useMutation({ mutationFn: () => closeConversation(cid), onSuccess: invalidate });
-  const doReply = useMutation({
-    mutationFn: (t: string) => replyInbox(cid, t),
-    onSuccess: () => {
-      setText("");
-      invalidate();
-    },
-  });
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
@@ -335,23 +327,7 @@ function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
       </div>
 
       {isHandoff && assigned ? (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (text.trim()) doReply.mutate(text.trim());
-          }}
-          className="flex items-center gap-2 border-t border-border p-3"
-        >
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Reply as an operator…"
-            className="h-10 flex-1 rounded-md border border-border bg-surface-2 px-3 text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
-          />
-          <Button type="submit" variant="primary" disabled={!text.trim() || doReply.isPending} aria-label="Send reply">
-            {doReply.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-          </Button>
-        </form>
+        <ReplyBox cid={cid} sendWindow={detail?.send_window ?? null} onSent={invalidate} />
       ) : (
         <div className="border-t border-border p-3 text-center text-xs text-muted">
           {isHandoff ? "Take over to reply." : "The assistant is handling this conversation."}

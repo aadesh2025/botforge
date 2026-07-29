@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -75,6 +76,15 @@ class BaseChannel:
 
     async def send(self, channel: Channel, to: str, text: str) -> None:
         raise NotImplementedError
+
+    def check_can_send(self, channel: Channel, *, last_inbound_at: dt.datetime | None) -> None:
+        """Raise if the platform forbids a free-form send right now.
+
+        Most platforms let you reply whenever; WhatsApp's 24-hour customer-service window
+        does not. Keeping the rule on the adapter means callers stay channel-agnostic
+        instead of growing `if channel == "whatsapp"` branches.
+        """
+        return None
 
     async def fetch_profile(self, channel: Channel, external_id: str) -> ContactProfile | None:
         """Look up a sender's name/avatar out-of-band.

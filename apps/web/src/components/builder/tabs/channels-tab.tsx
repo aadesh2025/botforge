@@ -511,8 +511,9 @@ const CHANNEL_SPECS: Record<
       { key: "access_token", label: "Access token", secret: true },
       { key: "verify_token", label: "Verify token (you choose)" },
       { key: "app_secret", label: "App secret", secret: true },
+      { key: "templates", label: "Approved template names (comma-separated)" },
     ],
-    hint: "Set the webhook URL below in Meta → WhatsApp → Configuration, using your verify token.",
+    hint: "Set the webhook URL below in Meta → WhatsApp → Configuration, using your verify token. Templates must be approved in Meta Business Manager first — list their names here so operators can reply after the 24-hour window closes.",
   },
   facebook: {
     label: "Facebook Messenger",

@@ -71,6 +71,17 @@ async def reply(
     return await service.operator_reply(session, ctx, cid, data.text)
 
 
+@router.post("/conversations/{cid}/template", response_model=MessageOut)
+async def send_template(
+    cid: uuid.UUID,
+    data: schemas.TemplateRequest,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> MessageOut:
+    """Re-open a WhatsApp conversation whose 24-hour free-form window has closed."""
+    return await service.send_template(session, ctx, cid, data.template, data.params)
+
+
 @router.post("/conversations/{cid}/assign", response_model=schemas.InboxItemOut)
 async def assign(
     cid: uuid.UUID,

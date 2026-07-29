@@ -37,8 +37,17 @@ export interface ApiInboxItem {
   contact: ApiContact | null;
 }
 
+/** Platform limits on replying right now. Null on channels that impose none. */
+export interface ApiSendWindow {
+  open: boolean;
+  closes_at: string | null;
+  /** Pre-approved template names, usable when the window is shut. */
+  templates: string[];
+}
+
 export interface ApiInboxDetail extends ApiInboxItem {
   messages: ApiMessage[];
+  send_window: ApiSendWindow | null;
 }
 
 export function listInbox(status?: string, channel?: string) {
@@ -70,6 +79,15 @@ export function replyInbox(cid: string, text: string) {
     method: "POST",
     orgScoped: true,
     body: { text },
+  });
+}
+
+/** Re-open a WhatsApp conversation whose 24-hour free-form window has closed. */
+export function sendTemplate(cid: string, template: string, params: string[] = []) {
+  return api<ApiMessage>(`/v1/inbox/conversations/${cid}/template`, {
+    method: "POST",
+    orgScoped: true,
+    body: { template, params },
   });
 }
 

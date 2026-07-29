@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.channels import get_channel
+from app.channels import get_channel, whatsapp
 from app.core import rbac
 from app.core.errors import AppError
 from app.core.logging import get_logger
@@ -140,7 +140,11 @@ async def get_detail(session: AsyncSession, ctx: OrgContext, cid: uuid.UUID) -> 
     base = await _item_out(session, conv)
     stmt = select(Message).where(Message.conversation_id == cid).order_by(Message.created_at.asc())
     msgs = list((await session.execute(stmt)).scalars().all())
-    return schemas.InboxDetail(**base.model_dump(), messages=[_message_out(m) for m in msgs])
+    return schemas.InboxDetail(
+        **base.model_dump(),
+        messages=[_message_out(m) for m in msgs],
+        send_window=await send_window(session, conv),
+    )
 
 
 # ── Operator actions ─────────────────────────────────────────────────────────────
@@ -232,9 +236,41 @@ async def set_tags(session: AsyncSession, ctx: OrgContext, cid: uuid.UUID, tags:
     return _handoff_out(handoff)  # type: ignore[return-value]
 
 
+async def _channel_row(session: AsyncSession, conv: Conversation) -> Channel | None:
+    stmt = (
+        select(Channel)
+        .where(
+            Channel.organization_id == conv.organization_id,
+            Channel.agent_id == conv.agent_id,
+            Channel.type == conv.channel,
+        )
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def send_window(session: AsyncSession, conv: Conversation) -> schemas.SendWindowOut | None:
+    """Platform-imposed limits on replying right now — null when there are none.
+
+    Only WhatsApp has one today, but the shape is generic so the UI doesn't need to know
+    which platforms are special.
+    """
+    if conv.channel != "whatsapp":
+        return None
+    channel = await _channel_row(session, conv)
+    return schemas.SendWindowOut(
+        open=whatsapp.window_open(conv.last_inbound_at),
+        closes_at=whatsapp.window_closes_at(conv.last_inbound_at),
+        templates=whatsapp.configured_templates(channel) if channel else [],
+    )
+
+
 async def operator_reply(session: AsyncSession, ctx: OrgContext, cid: uuid.UUID, text: str) -> MessageOut:
     rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
     conv = await _get_conversation(session, ctx, cid)
+    # Checked *before* persisting: a message we know can't be delivered shouldn't sit in
+    # the transcript looking sent. Raises a typed error the UI turns into a template prompt.
+    await _check_can_send(session, conv)
     msg = Message(
         conversation_id=conv.id,
         organization_id=conv.organization_id,
@@ -255,27 +291,79 @@ async def operator_reply(session: AsyncSession, ctx: OrgContext, cid: uuid.UUID,
     return _message_out(msg)
 
 
+async def _check_can_send(session: AsyncSession, conv: Conversation) -> None:
+    """Ask the adapter whether a free-form send is allowed before we commit to one."""
+    if conv.channel not in _CHANNEL_TYPES or not conv.channel_user_id:
+        return
+    adapter = get_channel(conv.channel)
+    channel = await _channel_row(session, conv)
+    if adapter is None or channel is None:
+        return
+    adapter.check_can_send(channel, last_inbound_at=conv.last_inbound_at)
+
+
 async def _deliver_to_user(session: AsyncSession, conv: Conversation, text: str) -> None:
     """Push the operator's reply to the end user's channel (widget receives it via the hub)."""
     if conv.channel not in _CHANNEL_TYPES or not conv.channel_user_id:
         return
-    stmt = (
-        select(Channel)
-        .where(
-            Channel.organization_id == conv.organization_id,
-            Channel.agent_id == conv.agent_id,
-            Channel.type == conv.channel,
-        )
-        .limit(1)
-    )
-    channel = (await session.execute(stmt)).scalar_one_or_none()
+    channel = await _channel_row(session, conv)
     adapter = get_channel(conv.channel)
     if channel is None or adapter is None:
         return
     try:
         await adapter.send(channel, conv.channel_user_id, text)
+    except AppError:
+        # A typed refusal (e.g. Meta closed the window under us) is the operator's
+        # problem to see, not a transport hiccup to log and forget.
+        raise
     except Exception as exc:  # delivery failure shouldn't fail the operator's action
         log.warning("operator_reply_delivery_failed", conversation=str(conv.id), error=str(exc))
+
+
+async def send_template(
+    session: AsyncSession,
+    ctx: OrgContext,
+    cid: uuid.UUID,
+    template: str,
+    params: list[str],
+) -> MessageOut:
+    """Re-open a WhatsApp conversation with a pre-approved template."""
+    rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
+    conv = await _get_conversation(session, ctx, cid)
+    if conv.channel != "whatsapp":
+        raise AppError("inbox.templates_unsupported", "Templates are a WhatsApp feature.", 400)
+    channel = await _channel_row(session, conv)
+    adapter = get_channel("whatsapp")
+    if channel is None or not isinstance(adapter, whatsapp.WhatsAppChannel):
+        raise AppError("inbox.channel_missing", "This agent has no WhatsApp channel.", 400)
+    approved = whatsapp.configured_templates(channel)
+    if approved and template not in approved:
+        # Meta rejects unregistered names anyway; failing here says why.
+        raise AppError(
+            "inbox.template_not_approved",
+            f"'{template}' isn't one of this channel's approved templates.",
+            400,
+            details={"approved": approved},
+        )
+    if not conv.channel_user_id:
+        raise AppError("inbox.no_recipient", "This conversation has no WhatsApp recipient.", 400)
+
+    await adapter.send_template(channel, conv.channel_user_id, template, params)
+
+    # Recorded as an operator message so the transcript shows what the customer received.
+    body = f"[template: {template}]" + (f" {' · '.join(params)}" if params else "")
+    msg = Message(
+        conversation_id=conv.id,
+        organization_id=conv.organization_id,
+        role="assistant",
+        content=body,
+        provider="operator",
+    )
+    session.add(msg)
+    conv.last_message_at = _now()
+    await session.flush()
+    await _publish_inbox(session, ctx, conv, "message.created")
+    return _message_out(msg)
 
 
 # ── Realtime ───────────────────────────────────────────────────────────────────────
