@@ -129,12 +129,23 @@ class WidgetConfigIn(BaseModel):
         return v
 
 
+class WidgetCampaign(BaseModel):
+    """A proactive message the widget may show unprompted (see modules/campaigns)."""
+
+    id: uuid.UUID
+    message: str
+    delay_seconds: int
+    url_pattern: str | None = None
+
+
 class PublicConfig(BaseModel):
     agent_id: uuid.UUID
     name: str
     welcome_message: str
     suggested_prompts: list[Any]
     theme: WidgetTheme
+    #: Active widget triggers only. Broadcasts never reach the public config.
+    campaigns: list[WidgetCampaign] = []
 
 
 class Visitor(BaseModel):

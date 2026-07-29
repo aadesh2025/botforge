@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Hash, Loader2, MessageSquare, Send, Trash2, Upload } from "lucide-react";
 import { Field, SectionCard } from "@/components/builder/field";
 import { CHANNEL_META } from "@/lib/channel-meta";
+import { CampaignsSection } from "@/components/builder/campaigns-section";
 import { WidgetChatIcon, WidgetDotsIcon, WidgetMessageIcon } from "@/lib/widget-icons";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -299,6 +300,7 @@ export function ChannelsTab() {
         </div>
       </div>
 
+      {agentId && <CampaignsSection agentId={agentId} />}
       {agentId && <MessagingChannels agentId={agentId} />}
     </div>
   );

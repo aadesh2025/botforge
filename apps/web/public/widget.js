@@ -411,6 +411,7 @@
   function refreshWelcome(text) {
     if (!els.msgs) return;
     if (state.hasConversation) return; // don't disturb an in-progress chat
+    if (state.campaignShown) return; // nor a proactive message the visitor is reading
     els.msgs.innerHTML = "";
     els.welcomeBubble = text ? addMessage("bot", text) : null;
   }
@@ -748,6 +749,53 @@
     applyConfig(merged);
   }
 
+
+  // ── Proactive campaigns ────────────────────────────────────────────────────
+  // A campaign opens the widget unprompted after a delay, optionally only on pages whose
+  // URL contains a pattern. Deliberately conservative: it fires at most once per visitor
+  // per campaign (sessionStorage), and never once a real conversation has started — an
+  // unprompted message on top of someone's in-progress chat is an interruption, not a
+  // greeting.
+  function campaignSeen(id) {
+    try {
+      return sessionStorage.getItem("bf-campaign-" + id) === "1";
+    } catch (e) {
+      return false; // private mode: better to show it than to crash
+    }
+  }
+
+  function markCampaignSeen(id) {
+    try {
+      sessionStorage.setItem("bf-campaign-" + id, "1");
+    } catch (e) {}
+  }
+
+  function campaignMatchesUrl(pattern) {
+    if (!pattern) return true;
+    try {
+      return location.href.indexOf(pattern) !== -1;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function scheduleCampaigns() {
+    var campaigns = (state.config && state.config.campaigns) || [];
+    campaigns.forEach(function (c) {
+      if (!c || !c.message || campaignSeen(c.id)) return;
+      if (!campaignMatchesUrl(c.url_pattern)) return;
+      var delay = Math.max(0, (c.delay_seconds || 10) * 1000);
+      setTimeout(function () {
+        // Re-checked at fire time: the visitor may have started chatting during the wait.
+        if (state.hasConversation || state.open) return;
+        markCampaignSeen(c.id);
+        state.campaignShown = true;
+        addMessage("bot", c.message);
+        api.open();
+      }, delay);
+    });
+  }
+
   async function init() {
     if (PREVIEW) {
       // Start from an empty/default config; the parent posts the real one immediately.
@@ -771,6 +819,7 @@
       return;
     }
     build();
+    scheduleCampaigns();
     window.BotForge = api;
   }
 

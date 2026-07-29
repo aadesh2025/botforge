@@ -19,6 +19,7 @@ from app.contacts import upsert_contact
 from app.core.errors import AppError
 from app.llm.types import StreamEvent
 from app.models import Agent, AgentVersion, Conversation
+from app.modules.campaigns import service as campaign_service
 from app.modules.conversations.service import _live_version
 from app.modules.public import schemas
 
@@ -88,6 +89,10 @@ async def get_config(session: AsyncSession, public_key: str) -> schemas.PublicCo
         welcome_message=version.welcome_message or "Hi! How can I help you today?",
         suggested_prompts=list(version.suggested_prompts or []),
         theme=_theme(version),
+        campaigns=[
+            schemas.WidgetCampaign(**c.model_dump())
+            for c in await campaign_service.active_widget_campaigns(session, agent)
+        ],
     )
 
 

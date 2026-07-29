@@ -36,6 +36,21 @@ Format each entry as below. Newest at the top.
 - **Verified live (Playwright):** signup→create-org→dashboard, login, agent create, builder
   autosave persisting across reload, publish, and SSE playground streaming.
 
+### ADR-039: Campaigns split — proactive widget triggers ship, broadcasts stay draft-only
+- **Date:** 2026-07-29
+- **Status:** accepted
+- **Context:** "Campaigns" names two features with very different risk. A proactive *widget*
+  message fires client-side to someone already on the site. An outbound *broadcast* messages
+  many contacts on WhatsApp/etc.
+- **Decision:** ship `widget_trigger` fully; model `broadcast` so the shape exists, but refuse
+  to move one out of `draft` (typed `campaigns.broadcast_disabled`). The prerequisites are not
+  cosmetic: an explicit consent flag on `Contact` (never message someone who didn't opt in), an
+  unsubscribe path, Celery-batched sending with rate limiting (Meta restricts numbers that
+  blast), and — since free-form WhatsApp can't originate outside the 24-hour window — the
+  template support from the same day's window work.
+- **Consequences:** a broadcast can be drafted and reviewed but not sent. Turning it on is a
+  deliberate decision to take on the compliance work, not a config change.
+
 ### ADR-038: Contact identity as its own table, scoped per channel
 - **Date:** 2026-07-28
 - **Status:** accepted

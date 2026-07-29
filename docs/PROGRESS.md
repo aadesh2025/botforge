@@ -38,6 +38,17 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Campaigns — proactive widget messages (2026-07-29).** `campaigns` (migration `0012`) with
+  two kinds. **`widget_trigger` ships live**: an active campaign rides the existing public
+  config, and the widget schedules it client-side — fires once per visitor per campaign
+  (sessionStorage), only on URLs matching an optional pattern, and **never once a real
+  conversation has started or the panel is already open** (an unprompted message on top of
+  someone's in-progress chat is an interruption, not a greeting). Delay is bounded 3–3600s:
+  firing on page load reads as a popup ad. **`broadcast` is draft-only by design** — the model
+  and UI exist but activating one is refused with a typed error until consent tracking, an
+  unsubscribe path and rate-limited batch sending are built (ADR-039). Builder section on the
+  Channels tab. 6 backend tests, 3 Playwright checks (including the real widget bundle opening
+  itself on a plain page).
 - **Help Center (2026-07-29).** Public-facing articles, deliberately a **separate store from
   the RAG Knowledge module**: Knowledge is retrieval material for the model, this is prose a
   human reads. `help_articles` (migration `0011`, slug unique per agent since slugs address
