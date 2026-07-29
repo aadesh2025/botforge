@@ -61,15 +61,25 @@ export function channelMeta(type: string): ChannelMeta {
 export type ConnectedChannel = { type: string; enabled: boolean; created_at?: string };
 
 /**
- * Which channel tabs the inbox shows.
+ * The inbox's channel tabs: every channel, always.
  *
- * Web Chat is always present — every agent has the embeddable widget inherently, there's
- * nothing to connect. Every other channel earns its tab by having at least one enabled
- * channel row in the org, so an unconnected platform simply isn't there.
+ * These used to be filtered down to connected channels only, which hid the platforms a
+ * user hasn't set up yet — precisely the ones they need to discover. Showing all of them
+ * turns the tab bar into the prompt to connect, instead of requiring someone to already
+ * know the builder's Channels tab exists. Connection status drives *styling*, not
+ * presence — see `isChannelConnected`.
  */
-export function visibleChannelTabs(channels: ConnectedChannel[] | undefined): InboxChannel[] {
-  const live = new Set((channels ?? []).filter((c) => c.enabled).map((c) => c.type));
-  return INBOX_CHANNEL_ORDER.filter((type) => type === "widget" || live.has(type));
+export function inboxChannelTabs(): InboxChannel[] {
+  return INBOX_CHANNEL_ORDER;
+}
+
+/** Whether messages can actually arrive on this channel right now. */
+export function isChannelConnected(
+  channels: ConnectedChannel[] | undefined,
+  type: InboxChannel,
+): boolean {
+  if (type === "widget") return true; // always on, nothing to connect
+  return (channels ?? []).some((c) => c.type === type && c.enabled);
 }
 
 const NEW_CHANNEL_DAYS = 7;

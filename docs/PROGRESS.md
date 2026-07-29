@@ -38,6 +38,22 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Inbox shows every channel tab, connected or not (2026-07-29).** Reversal of a deliberate
+  choice from the 07-28 inbox build: tabs were filtered to connected channels only, which hid
+  exactly the platforms a user still needs to set up and made discovery depend on already
+  knowing the builder's Channels tab exists. Now `inboxChannelTabs()` returns all 7
+  unconditionally (replacing `visibleChannelTabs`), and the new `isChannelConnected()` drives
+  *styling* instead of presence: an unconnected tab is dimmed with a hollow dot and an
+  `aria-label` of `"{Channel} (not connected)"`. Selecting one replaces both panels with
+  `"{Channel} isn't connected yet."` + a **Connect {Channel}** button — kept deliberately
+  distinct from the connected-but-quiet `"Nothing in the inbox yet."`, since a channel that
+  can't receive at all is a different situation from one that simply hasn't. **The credential
+  form is not duplicated**: channels belong to an agent while the inbox spans the org, so the
+  button resolves the target agent first (straight through when there's one, a picker when
+  there are several, a create-agent prompt when there are none) and deep-links to
+  `/agents/{id}?tab=channels&connect={type}`; `MessagingChannels` reads that param on mount,
+  opens the existing `ConnectDialog`, and strips it so a reload doesn't reopen it. 11 web unit
+  tests + 2 Playwright flows; analytics' channel breakdown is untouched.
 - **Per-channel analytics — Dashboard + Analytics breakdown (2026-07-28).** With up to 7 channel
   types per agent, analytics had no channel dimension at all: `usage()` grouped only by
   day/provider/model and `overview()` returned one flat aggregate. **Backend**
@@ -74,7 +90,8 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   ignored. Profiles come from the Graph API. **Inbox API:** nested `contact` on
   `InboxItemOut`/`InboxDetail` (batched, no N+1) and a `?channel=` filter so tabs page
   server-side. **Inbox UI:** a channel tab bar — Web Chat always (the widget needs no
-  connecting), every other tab only once that channel has an enabled row in the org, plus a
+  connecting), every other tab only once that channel has an enabled row in the org
+  (**superseded 2026-07-29: all 7 tabs now always render**, see the entry above), plus a
   "New" badge for the first week — and contact avatars with a platform badge in both the list
   row and the thread header. 9 backend tests, 12 web unit tests, 1 Playwright flow. New human
   secrets documented: `META_PAGE_ACCESS_TOKEN`, `INSTAGRAM_PAGE_ACCESS_TOKEN` (+ ids and a

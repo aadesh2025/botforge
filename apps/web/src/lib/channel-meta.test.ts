@@ -1,36 +1,54 @@
 import { describe, expect, it } from "vitest";
-import { CHANNEL_META, channelMeta, isNewChannel, visibleChannelTabs } from "./channel-meta";
+import {
+  CHANNEL_META,
+  INBOX_CHANNEL_ORDER,
+  channelMeta,
+  inboxChannelTabs,
+  isChannelConnected,
+  isNewChannel,
+} from "./channel-meta";
 
 const day = 24 * 60 * 60 * 1000;
 const ago = (days: number) => new Date(Date.now() - days * day).toISOString();
 
-describe("visibleChannelTabs", () => {
-  it("always shows Web Chat, even with no channels connected", () => {
-    expect(visibleChannelTabs([])).toEqual(["widget"]);
-    expect(visibleChannelTabs(undefined)).toEqual(["widget"]);
+describe("inboxChannelTabs", () => {
+  it("returns every channel regardless of what's connected", () => {
+    // The tab bar is how an operator discovers a platform they haven't set up, so the
+    // set never depends on connection state.
+    const all = ["widget", "facebook", "instagram", "whatsapp", "telegram", "slack", "discord"];
+    expect(inboxChannelTabs()).toEqual(all);
+    expect(inboxChannelTabs()).toHaveLength(7);
   });
 
-  it("shows a channel tab only once that channel is connected AND enabled", () => {
-    // Connected but switched off — the platform isn't receiving, so there's nothing to show.
-    expect(visibleChannelTabs([{ type: "instagram", enabled: false }])).toEqual(["widget"]);
-    expect(visibleChannelTabs([{ type: "instagram", enabled: true }])).toEqual(["widget", "instagram"]);
+  it("stays in a fixed order", () => {
+    expect(inboxChannelTabs()).toEqual(INBOX_CHANNEL_ORDER);
+  });
+});
+
+describe("isChannelConnected", () => {
+  it("treats Web Chat as always connected — there's nothing to set up", () => {
+    expect(isChannelConnected([], "widget")).toBe(true);
+    expect(isChannelConnected(undefined, "widget")).toBe(true);
   });
 
-  it("orders tabs consistently regardless of connection order", () => {
+  it("requires a row that is both present and enabled", () => {
+    expect(isChannelConnected([{ type: "instagram", enabled: true }], "instagram")).toBe(true);
+    // Connected then switched off: messages can't arrive, so it isn't connected.
+    expect(isChannelConnected([{ type: "instagram", enabled: false }], "instagram")).toBe(false);
+    expect(isChannelConnected([], "instagram")).toBe(false);
+    expect(isChannelConnected(undefined, "instagram")).toBe(false);
+  });
+
+  it("counts a channel connected on any one agent", () => {
     const channels = [
-      { type: "telegram", enabled: true },
-      { type: "instagram", enabled: true },
-      { type: "facebook", enabled: true },
+      { type: "whatsapp", enabled: false },
+      { type: "whatsapp", enabled: true },
     ];
-    expect(visibleChannelTabs(channels)).toEqual(["widget", "facebook", "instagram", "telegram"]);
+    expect(isChannelConnected(channels, "whatsapp")).toBe(true);
   });
 
-  it("de-duplicates a channel connected on several agents", () => {
-    const channels = [
-      { type: "whatsapp", enabled: true },
-      { type: "whatsapp", enabled: true },
-    ];
-    expect(visibleChannelTabs(channels)).toEqual(["widget", "whatsapp"]);
+  it("doesn't confuse one channel's row for another's", () => {
+    expect(isChannelConnected([{ type: "telegram", enabled: true }], "whatsapp")).toBe(false);
   });
 });
 
@@ -57,7 +75,9 @@ describe("channelMeta", () => {
     // Real conversation.channel values that aren't connectable surfaces.
     expect(channelMeta("dashboard").label).toBe("Dashboard");
     expect(channelMeta("api").label).toBe("API");
-    expect(visibleChannelTabs([{ type: "dashboard", enabled: true }])).toEqual(["widget"]);
+    // They stay out of the tab bar even now that it shows every channel.
+    expect(inboxChannelTabs()).not.toContain("dashboard");
+    expect(inboxChannelTabs()).not.toContain("api");
   });
 
   it("falls back for a channel value it has never seen, rather than rendering undefined", () => {

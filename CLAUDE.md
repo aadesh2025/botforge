@@ -153,6 +153,17 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-07-29 — Inbox shows every channel tab (connected or not)
+- **Reverses** the 07-28 filtering rule: `visibleChannelTabs` → `inboxChannelTabs()` (all 7, always)
+  + new `isChannelConnected()`. Unconnected tabs are dimmed with a hollow dot and an `aria-label`
+  of `"{Channel} (not connected)"` — status drives styling, not presence, so a user can discover
+  and connect a platform from the Inbox instead of needing to know the builder exists.
+- Selecting an unconnected tab replaces **both** panels with a connect prompt; the
+  connected-but-quiet `"Nothing in the inbox yet."` is deliberately kept separate.
+- **One credential form still**: the Inbox resolves which agent owns the channel (direct / picker /
+  create-agent) and deep-links `/agents/{id}?tab=channels&connect={type}`; `MessagingChannels`
+  consumes the param on mount to open the existing `ConnectDialog`, then strips it.
+
 ### 2026-07-28 — Per-channel analytics (Dashboard + Analytics breakdown)
 - **Backend** (`modules/analytics/`): `Overview.by_channel` (new `ChannelBucket`), `group_by=channel`
   on `usage()`, a `channels` CSV export kind, and a `channel=` filter on every endpoint. Channel set
@@ -177,7 +188,8 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
   `meta_signature.py` (all three Meta surfaces now share one verification path). Deliveries matched
   on webhook `object`; echoes/read receipts ignored. **Comment moderation deliberately excluded** — ADR-037.
 - **Inbox**: nested `contact` on list/detail (batched), `?channel=` filter, and a channel tab bar
-  (Web Chat always; others only once an enabled `Channel` row exists) with contact avatars +
+  (Web Chat always; others only once an enabled `Channel` row exists — **superseded 2026-07-29**,
+  all tabs now always render) with contact avatars +
   platform badges. ADR-036 (no Telegram avatar — its photo URLs embed the bot token), ADR-038.
 
 ### 2026-07-27 — Widget preview single-host + app sidebar

@@ -16,8 +16,16 @@ import {
   takeover,
 } from "@/lib/api/inbox";
 import { listChannels } from "@/lib/api/channels";
-import { CHANNEL_META, channelMeta, isNewChannel, visibleChannelTabs } from "@/lib/channel-meta";
+import {
+  CHANNEL_META,
+  channelMeta,
+  inboxChannelTabs,
+  isChannelConnected,
+  isNewChannel,
+  type InboxChannel,
+} from "@/lib/channel-meta";
 import { ContactAvatar, contactLabel } from "@/components/inbox/contact-avatar";
+import { ChannelNotConnected } from "@/components/inbox/channel-not-connected";
 import { useSession } from "@/lib/store/session";
 
 const STATUS_FILTERS = [
@@ -40,13 +48,15 @@ export function InboxView({ initialId }: { initialId?: string }) {
   const [channel, setChannel] = useState(""); // "" = every channel
   const [activeCid, setActiveCid] = useState<string | null>(initialId ?? null);
 
-  // Which channels this org has actually connected — decides which tabs exist at all.
+  // Every channel gets a tab; this decides which of them are live vs still to set up.
   const { data: channels } = useQuery({
     queryKey: ["channels", activeOrgId],
     queryFn: () => listChannels(),
     enabled: Boolean(activeOrgId),
   });
-  const tabs = visibleChannelTabs(channels);
+  const tabs = inboxChannelTabs();
+  // "" (All messages) is always viewable; a specific tab may point at an unset-up channel.
+  const selectedUnconnected = channel !== "" && !isChannelConnected(channels, channel as InboxChannel);
 
   const { data: items, isLoading } = useQuery({
     queryKey: ["inbox", activeOrgId, filter, channel],
@@ -73,7 +83,7 @@ export function InboxView({ initialId }: { initialId?: string }) {
 
   return (
     <div className="flex h-[calc(100vh-220px)] flex-col overflow-hidden rounded-lg border border-border bg-surface">
-      {/* Channel tabs — only for surfaces this org has actually connected. */}
+      {/* Every channel, connected or not — an unconnected tab is how you discover it. */}
       <div
         role="tablist"
         aria-label="Channels"
@@ -88,6 +98,7 @@ export function InboxView({ initialId }: { initialId?: string }) {
               label={meta.label}
               icon={<meta.Icon className="size-3.5" aria-hidden />}
               badge={isNewChannel(channels, type) ? "New" : undefined}
+              connected={isChannelConnected(channels, type)}
               active={channel === type}
               onClick={() => pickChannel(type)}
             />
@@ -111,11 +122,15 @@ export function InboxView({ initialId }: { initialId?: string }) {
             ))}
           </div>
           <div className="flex-1 overflow-y-auto scroll-thin">
-            {isLoading && <Skeleton className="m-3 h-16" />}
-            {!isLoading && (items ?? []).length === 0 && (
+            {/* A channel that can't receive at all reads differently from one that's
+                simply had no messages yet — don't collapse the two. */}
+            {selectedUnconnected && <ChannelNotConnected channel={channel as InboxChannel} compact />}
+            {!selectedUnconnected && isLoading && <Skeleton className="m-3 h-16" />}
+            {!selectedUnconnected && !isLoading && (items ?? []).length === 0 && (
               <p className="p-6 text-center text-sm text-muted">Nothing in the inbox yet.</p>
             )}
-            {(items ?? []).map((it) => (
+            {!selectedUnconnected &&
+              (items ?? []).map((it) => (
               <button
                 key={it.id}
                 onClick={() => setActiveCid(it.id)}
@@ -152,7 +167,11 @@ export function InboxView({ initialId }: { initialId?: string }) {
           </div>
         </div>
 
-        {activeCid ? (
+        {selectedUnconnected ? (
+          <div className="flex items-center justify-center">
+            <ChannelNotConnected channel={channel as InboxChannel} />
+          </div>
+        ) : activeCid ? (
           <Thread cid={activeCid} onChanged={() => qc.invalidateQueries({ queryKey: ["inbox", activeOrgId] })} />
         ) : (
           <div className="flex items-center justify-center text-sm text-muted">
@@ -169,27 +188,41 @@ function ChannelTab({
   icon,
   badge,
   active,
+  connected = true,
   onClick,
 }: {
   label: string;
   icon?: React.ReactNode;
   badge?: string;
   active: boolean;
+  /** Unconnected tabs stay clickable — that's how you get to the connect flow. */
+  connected?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       role="tab"
       aria-selected={active}
+      // Stated explicitly: the accessible name is computed by concatenating text nodes
+      // without separators, so a visually-hidden suffix would read as "Instagram(not
+      // connected)". Keeps the visible label as a prefix, per label-in-name.
+      aria-label={connected ? undefined : `${label} (not connected)`}
       onClick={onClick}
+      // Dimmed rather than disabled: "available, not set up yet", still reachable.
       className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
         active
           ? "border-ember text-ember-soft"
-          : "border-transparent text-muted hover:border-border-strong hover:text-text"
+          : connected
+            ? "border-transparent text-muted hover:border-border-strong hover:text-text"
+            : "border-transparent text-faint opacity-70 hover:border-border hover:text-muted hover:opacity-100"
       }`}
     >
       {icon}
       {label}
+      {/* A hollow dot reads as "off" at a glance; aria-label carries it for screen readers. */}
+      {!connected && (
+        <span aria-hidden className="ml-0.5 size-1.5 rounded-full border border-current opacity-70" />
+      )}
       {badge && (
         <Badge variant="ember" className="ml-0.5">
           {badge}

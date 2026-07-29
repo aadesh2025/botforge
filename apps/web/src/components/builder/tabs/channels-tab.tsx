@@ -560,6 +560,20 @@ function MessagingChannels({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
   const [connecting, setConnecting] = useState<ChannelType | null>(null);
 
+  // The Inbox links here with `?connect=<type>` when an operator picks an unconnected
+  // channel tab, so the credential form they came for is already open on arrival. The
+  // param is consumed once and stripped, so a reload or a Back doesn't reopen it.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const requested = url.searchParams.get("connect");
+    if (!requested || !(requested in CHANNEL_SPECS)) return;
+    url.searchParams.delete("connect");
+    window.history.replaceState(null, "", url.toString());
+    // One-time mount read of the URL (window is unavailable during SSR).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setConnecting(requested as ChannelType);
+  }, []);
+
   const { data: channels } = useQuery({
     queryKey: ["channels", agentId],
     queryFn: () => listChannels(agentId),

@@ -125,12 +125,14 @@ test("unified inbox: per-channel tabs and contact identity", async ({ page, cont
   await page.goto("/inbox");
   await expect(page.getByRole("heading", { name: /inbox/i })).toBeVisible();
 
-  // A tab per connected+enabled channel; Web Chat always; WhatsApp (unconnected) never.
+  // Every channel gets a tab; connection state shows in the name, not by hiding it.
+  // A just-connected channel also carries the "New" badge, hence the optional suffix.
   const tabs = page.getByRole("tablist", { name: "Channels" });
-  await expect(tabs.getByRole("tab", { name: "Web Chat" })).toBeVisible();
-  await expect(tabs.getByRole("tab", { name: /Instagram/ })).toBeVisible();
-  await expect(tabs.getByRole("tab", { name: /Telegram/ })).toBeVisible();
-  await expect(tabs.getByRole("tab", { name: /WhatsApp/ })).toHaveCount(0);
+  await expect(tabs.getByRole("tab", { name: "Web Chat", exact: true })).toBeVisible();
+  await expect(tabs.getByRole("tab", { name: /^Instagram( New)?$/ })).toBeVisible();
+  await expect(tabs.getByRole("tab", { name: /^Telegram( New)?$/ })).toBeVisible();
+  // Never connected in this test — present, but flagged rather than absent.
+  await expect(tabs.getByRole("tab", { name: "WhatsApp (not connected)" })).toBeVisible();
 
   // Telegram: the list row shows the contact's real name badged with the platform…
   await tabs.getByRole("tab", { name: /Telegram/ }).click();
