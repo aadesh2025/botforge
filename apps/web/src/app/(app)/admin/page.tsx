@@ -153,7 +153,20 @@ function FeatureFlags() {
   );
 }
 
-function OrgsTable({ orgs }: { orgs: { id: string; name: string; slug: string | null; members: number; agents: number; deleted: boolean; created_at: string }[] }) {
+function OrgsTable({
+  orgs,
+}: {
+  orgs: {
+    id: string;
+    name: string;
+    slug: string | null;
+    members: number;
+    agents: number;
+    agents_with_unpublished_changes?: number;
+    deleted: boolean;
+    created_at: string;
+  }[];
+}) {
   return (
     <section className="rounded-lg border border-border bg-surface">
       <div className="border-b border-border p-5">
@@ -167,6 +180,7 @@ function OrgsTable({ orgs }: { orgs: { id: string; name: string; slug: string | 
               <th className="px-5 py-3 font-medium">Slug</th>
               <th className="px-5 py-3 text-right font-medium">Members</th>
               <th className="px-5 py-3 text-right font-medium">Agents</th>
+              <th className="px-5 py-3 text-right font-medium">Awaiting review</th>
               <th className="px-5 py-3 font-medium">Created</th>
             </tr>
           </thead>
@@ -187,6 +201,14 @@ function OrgsTable({ orgs }: { orgs: { id: string; name: string; slug: string | 
                 <td className="px-5 py-3 font-mono text-xs text-muted">{o.slug ?? "—"}</td>
                 <td className="px-5 py-3 text-right font-mono text-muted">{o.members}</td>
                 <td className="px-5 py-3 text-right font-mono text-muted">{o.agents}</td>
+                <td className="px-5 py-3 text-right">
+                  {/* Clients can save but not publish — this is how staff notice work waiting. */}
+                  {o.agents_with_unpublished_changes ? (
+                    <Badge variant="warn">{o.agents_with_unpublished_changes} unpublished</Badge>
+                  ) : (
+                    <span className="font-mono text-muted">—</span>
+                  )}
+                </td>
                 <td className="px-5 py-3 text-faint">{new Date(o.created_at).toLocaleDateString()}</td>
               </tr>
             ))}

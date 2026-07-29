@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.probes import check_database, check_redis
 from app.models import (
     Agent,
+    AgentVersion,
     Conversation,
     FeatureFlag,
     Membership,
@@ -32,14 +33,41 @@ async def list_orgs(session: AsyncSession, limit: int = 100) -> list[schemas.Org
     agents = (
         select(Agent.organization_id, func.count().label("n")).group_by(Agent.organization_id).subquery()
     )
+    # Agents with a draft newer than what's live. Clients can save but not publish, so this
+    # is the signal that someone's changes are waiting — without opening each builder.
+    latest_version = (
+        select(AgentVersion.agent_id, func.max(AgentVersion.version).label("latest"))
+        .group_by(AgentVersion.agent_id)
+        .subquery()
+    )
+    pending = (
+        select(Agent.organization_id, func.count().label("n"))
+        .join(latest_version, latest_version.c.agent_id == Agent.id)
+        .outerjoin(
+            AgentVersion,
+            (AgentVersion.id == Agent.current_version_id),
+        )
+        .where(
+            Agent.deleted_at.is_(None),
+            # Never published at all, or the newest draft is past the live version.
+            or_(
+                Agent.current_version_id.is_(None),
+                latest_version.c.latest > AgentVersion.version,
+            ),
+        )
+        .group_by(Agent.organization_id)
+        .subquery()
+    )
     stmt = (
         select(
             Organization,
             func.coalesce(members.c.n, 0),
             func.coalesce(agents.c.n, 0),
+            func.coalesce(pending.c.n, 0),
         )
         .outerjoin(members, members.c.organization_id == Organization.id)
         .outerjoin(agents, agents.c.organization_id == Organization.id)
+        .outerjoin(pending, pending.c.organization_id == Organization.id)
         .order_by(Organization.created_at.desc())
         .limit(limit)
     )
@@ -51,10 +79,11 @@ async def list_orgs(session: AsyncSession, limit: int = 100) -> list[schemas.Org
             slug=org.slug,
             members=int(m),
             agents=int(a),
+            agents_with_unpublished_changes=int(p),
             created_at=org.created_at,
             deleted=org.deleted_at is not None,
         )
-        for org, m, a in rows
+        for org, m, a, p in rows
     ]
 
 

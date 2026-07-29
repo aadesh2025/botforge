@@ -8,6 +8,9 @@ export type Permission =
   | "org:manage"
   | "members:manage"
   | "agents:write"
+  // Separate from agents:write on purpose: editing a draft is private and reversible,
+  // publishing changes what every customer talks to.
+  | "agents:publish"
   | "kb:manage"
   | "tools:manage"
   | "analytics:view"
@@ -15,8 +18,9 @@ export type Permission =
   | "inbox:handle";
 
 const ROLE_PERMISSIONS: Record<string, Permission[]> = {
-  owner: ["org:manage", "members:manage", "agents:write", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle"],
-  admin: ["members:manage", "agents:write", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle"],
+  owner: ["org:manage", "members:manage", "agents:write", "agents:publish", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle"],
+  admin: ["members:manage", "agents:write", "agents:publish", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle"],
+  // The client role: shape, test and connect their own agent — but not put it live.
   editor: ["agents:write", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle"],
   viewer: ["analytics:view", "read"],
   operator: ["analytics:view", "read", "inbox:handle"],

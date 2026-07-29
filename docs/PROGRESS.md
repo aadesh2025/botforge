@@ -38,6 +38,16 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Editing and publishing are separate permissions (2026-07-29).** `AGENTS_WRITE` covered
+  both saving a draft and putting it live — one permission for two very different levels of
+  risk. New `AGENTS_PUBLISH` gates publish/rollback; `owner`/`admin` have both. **`editor` is
+  now the client role**: edit drafts, manage knowledge, connect their own Meta credentials
+  (`TOOLS_MANAGE` was already separate), work the inbox, and test in the Playground — but not
+  publish. The draft/publish machinery itself is untouched; only who may pull the trigger.
+  The builder shows "Awaiting review" instead of Publish for those roles, and the admin
+  console gains an **"Awaiting review" column** per org (agents never published, or whose
+  newest draft is past the live version) so staff notice waiting work without opening every
+  builder. 6 backend tests.
 - **CRM auto-capture with cross-channel identity (2026-07-29).** The "cross-channel merging
   belongs on top of this table" extension `Contact`'s own docstring anticipated. New
   `CrmContact` (migration `0013`) is the canonical *person*; `Contact` stays per-channel and

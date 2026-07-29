@@ -7,7 +7,11 @@ from app.core.errors import AppError
 # Capability keys used across modules.
 ORG_MANAGE = "org:manage"  # manage org settings / billing / delete
 MEMBERS_MANAGE = "members:manage"  # invite, change roles, remove
-AGENTS_WRITE = "agents:write"  # create/edit/delete agents
+AGENTS_WRITE = "agents:write"  # create/edit/delete agents, save drafts, use the Playground
+# Deliberately separate from AGENTS_WRITE: editing a draft is reversible and private, while
+# publishing changes what every customer talks to. A client can shape and test their agent
+# without being able to put it live.
+AGENTS_PUBLISH = "agents:publish"  # publish a version / roll back to one
 KB_MANAGE = "kb:manage"  # manage knowledge bases
 TOOLS_MANAGE = "tools:manage"  # tools / channels / API keys
 ANALYTICS_VIEW = "analytics:view"
@@ -18,13 +22,16 @@ ROLES = ("owner", "admin", "editor", "viewer", "operator")
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "owner": {
-        ORG_MANAGE, MEMBERS_MANAGE, AGENTS_WRITE, KB_MANAGE,
+        ORG_MANAGE, MEMBERS_MANAGE, AGENTS_WRITE, AGENTS_PUBLISH, KB_MANAGE,
         TOOLS_MANAGE, ANALYTICS_VIEW, READ, INBOX_HANDLE,
     },
     "admin": {
-        MEMBERS_MANAGE, AGENTS_WRITE, KB_MANAGE,
+        MEMBERS_MANAGE, AGENTS_WRITE, AGENTS_PUBLISH, KB_MANAGE,
         TOOLS_MANAGE, ANALYTICS_VIEW, READ, INBOX_HANDLE,
     },
+    # The client role. Everything needed to shape, test and connect their own agent —
+    # edit drafts, manage knowledge, wire up their own WhatsApp/Instagram credentials,
+    # work the inbox — but **not** AGENTS_PUBLISH: what goes live stays a staff decision.
     "editor": {AGENTS_WRITE, KB_MANAGE, TOOLS_MANAGE, ANALYTICS_VIEW, READ, INBOX_HANDLE},
     "viewer": {ANALYTICS_VIEW, READ},
     "operator": {ANALYTICS_VIEW, READ, INBOX_HANDLE},

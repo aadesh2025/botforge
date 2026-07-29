@@ -14,6 +14,9 @@ class OrgAdminOut(BaseModel):
     slug: str | None = None
     members: int
     agents: int
+    #: Agents whose newest draft is ahead of what's live. A client can edit but not publish,
+    #: so this is how staff notice work waiting for review without opening every builder.
+    agents_with_unpublished_changes: int = 0
     created_at: dt.datetime
     deleted: bool
 

@@ -403,7 +403,7 @@ async def update_version(
 
 
 async def publish_version(session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID, number: int) -> schemas.AgentOut:
-    rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
+    rbac.require_permission(ctx.role, rbac.AGENTS_PUBLISH)
     agent = await _get_agent(session, ctx, agent_id)
     version = await _get_version(session, agent_id, number)
     version.is_published = True
@@ -413,7 +413,7 @@ async def publish_version(session: AsyncSession, ctx: OrgContext, agent_id: uuid
 
 
 async def rollback(session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID, number: int) -> schemas.AgentOut:
-    rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
+    rbac.require_permission(ctx.role, rbac.AGENTS_PUBLISH)
     agent = await _get_agent(session, ctx, agent_id)
     version = await _get_version(session, agent_id, number)
     if not version.is_published:

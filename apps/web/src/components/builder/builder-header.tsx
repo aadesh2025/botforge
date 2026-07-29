@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Check, Cloud, Loader2, Rocket } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, Clock, Cloud, Loader2, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useBuilder } from "@/lib/store/builder";
 import { publishVersion } from "@/lib/api/agents";
+import { useCan } from "@/lib/rbac";
 import { agentStatusMeta } from "@/lib/display";
 import { relativeTime } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ export function BuilderHeader() {
     setPublished,
   } = useBuilder();
   const [publishing, setPublishing] = useState(false);
+  const canPublish = useCan("agents:publish");
   if (!draft) return null;
   const status = agentStatusMeta[draft.status];
 
@@ -73,10 +75,19 @@ export function BuilderHeader() {
             <Badge variant="success">
               <Check className="size-3" /> Published
             </Badge>
-          ) : (
+          ) : canPublish ? (
             <Button variant="primary" size="sm" onClick={onPublish} disabled={publishing || dirty}>
               {publishing ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />} Publish
             </Button>
+          ) : (
+            /* A client can save and test freely; going live is a staff decision. Their
+               saved draft shows up as "unpublished changes" in the admin console. */
+            <Badge
+              variant="warn"
+              title="Your changes are saved and testable in the Playground. Going live is done by the BotForge team."
+            >
+              <Clock className="size-3" /> Awaiting review
+            </Badge>
           )}
         </div>
       </div>
