@@ -16,7 +16,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import ForeignKey, Index, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKey
@@ -45,3 +45,13 @@ class Contact(Base, UUIDPrimaryKey, TimestampMixin):
     avatar_url: Mapped[str | None] = mapped_column(String(1024))
     # Whatever else the platform hands us: username, phone, email, locale.
     extra: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+
+    # ── CRM fields, set by operators rather than by the platform ────────────────
+    #: new|contacted|qualified|customer|lost
+    lead_stage: Mapped[str | None] = mapped_column(String(32))
+    #: Free text: what counts as an order status is business-specific.
+    order_status: Mapped[str | None] = mapped_column(String(64))
+    #: Same shape as Handoff.notes — {"by", "text", "at"} — so both render the same way.
+    notes: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, nullable=False)
+    #: Same shape as Handoff.tags.
+    labels: Mapped[list[str]] = mapped_column(ARRAY(String), default=list, nullable=False)

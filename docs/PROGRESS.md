@@ -38,6 +38,19 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Contacts / CRM (2026-07-29).** Extends the existing `Contact` (from the unified-inbox work)
+  rather than introducing a second contact concept: `lead_stage`, `order_status`, `notes`,
+  `labels` (migration `0010`, + a GIN index on labels and a composite on `(org, lead_stage)`
+  for the list filters). `notes` and `labels` deliberately mirror `Handoff.notes`/`.tags`
+  shapes so both timelines render the same way. New `/v1/contacts` module: paginated list
+  searchable by **name or platform id** (an operator searching a phone number means the phone
+  number), filterable by stage/label/channel; detail joins the contact's conversations;
+  PATCH for stage/order status, PATCH for labels, POST for notes. `lead_stage` is a fixed
+  funnel — free text would fragment into `qualified`/`Qualified`/`QUALIFIED` and break the
+  filter — while `order_status` stays free text because what counts as one is
+  business-specific. New `/contacts` page (table + detail panel reusing `ContactAvatar` and
+  the inbox's card style), a `Contacts` nav item under Operate, and the inbox thread header
+  now links the contact through to `/contacts/{id}`. 9 backend tests, 2 Playwright checks.
 - **Macros (2026-07-29).** A named, ordered list of inbox actions (`reply` / `add_tag` /
   `assign` / `resolve`) run against one conversation in a click — model + migration `0009`,
   CRUD at `/v1/macros`, execution at `POST /v1/inbox/conversations/{cid}/macros/{id}`.

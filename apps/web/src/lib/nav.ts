@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   Bot,
   BookOpen,
+  Contact,
   Inbox,
   BarChart3,
   MessagesSquare,
@@ -38,6 +39,7 @@ export const nav: NavGroup[] = [
     items: [
       { label: "Conversations", href: "/conversations", icon: MessagesSquare },
       { label: "Inbox", href: "/inbox", icon: Inbox },
+      { label: "Contacts", href: "/contacts", icon: Contact },
       { label: "Analytics", href: "/analytics", icon: BarChart3 },
     ],
   },

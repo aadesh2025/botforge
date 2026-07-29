@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Check, Headphones, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -269,7 +270,14 @@ function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
         />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-text">
-            {detail ? contactLabel(detail.contact, detail.channel_user_id) : "Conversation"}
+            {/* Linked when we know who this is, so the operator can reach their CRM record. */}
+            {detail?.contact ? (
+              <Link href={`/contacts/${detail.contact.id}`} className="hover:text-ember-soft hover:underline">
+                {contactLabel(detail.contact, detail.channel_user_id)}
+              </Link>
+            ) : (
+              (detail ? contactLabel(detail.contact, detail.channel_user_id) : "Conversation")
+            )}
           </div>
           <div className="truncate text-xs text-faint">
             {detail ? `${channelMeta(detail.channel).label} · ${detail.status}` : ""}
