@@ -21,6 +21,9 @@ dependencies = [
     "python-multipart>=0.0.12",
     "pypdf>=5.1",
     "python-docx>=1.1",
+    # Main-content extraction for URL ingest: strips nav/header/footer/cookie-banner
+    # boilerplate that a regex tag-strip would fold into the article text.
+    "trafilatura>=1.12",
     "sentry-sdk[fastapi]>=2.0",
 ]
 

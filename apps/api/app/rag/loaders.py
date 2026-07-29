@@ -10,6 +10,7 @@ import socket
 from urllib.parse import urlparse
 
 import httpx
+import trafilatura
 
 from app.core.logging import get_logger
 
@@ -25,11 +26,55 @@ class LoaderError(Exception):
     """Raised when a document cannot be parsed into text."""
 
 
+#: Below this, trafilatura probably returned a stub (a cookie wall, a JS-only shell) rather
+#: than an article — fall back rather than ingest a sentence and call it a document.
+_MIN_EXTRACTED_CHARS = 200
+
+
 def strip_html(html: str) -> str:
+    """Last-resort text extraction: drop every tag and keep what's left.
+
+    Structure-blind by nature — nav menus, headers and footers end up in the same stream as
+    the article. Kept only as the fallback for pages `extract_main_content` can't parse.
+    """
     html = _TAG_RE.sub(" ", html)
     text = _HTML_RE.sub(" ", html)
     text = _WS_RE.sub(" ", text)
     return _BLANKLINES_RE.sub("\n\n", text).strip()
+
+
+def extract_main_content(html: str, url: str | None = None) -> str:
+    """Article text, with nav/header/footer/sidebar boilerplate removed.
+
+    The regex strip this replaces had no notion of document structure, so on a docs site the
+    nav menu ("Docs Forum Changelog Get started Deploy Build Nodes…") landed in the same
+    text stream as the content and dominated the first chunk. trafilatura is built for this
+    one job.
+
+    Markdown output keeps heading structure, which the recursive chunker splits on — so
+    chunks land on section boundaries instead of mid-sentence.
+    """
+    try:
+        extracted = trafilatura.extract(
+            html,
+            url=url,
+            output_format="markdown",
+            include_tables=True,
+            include_links=False,
+        )
+    except Exception as exc:  # a parser failure must not fail the whole ingest
+        log.warning("trafilatura_extract_failed", url=url, error=str(exc))
+        extracted = None
+
+    if extracted and len(extracted.strip()) >= _MIN_EXTRACTED_CHARS:
+        return extracted.strip()
+
+    log.info(
+        "trafilatura_fallback_to_strip_html",
+        url=url,
+        extracted_chars=len(extracted.strip()) if extracted else 0,
+    )
+    return strip_html(html)
 
 
 def _is_blocked_host(host: str) -> bool:
@@ -64,7 +109,7 @@ async def load_url(url: str, *, transport: httpx.AsyncBaseTransport | None = Non
         content_type = resp.headers.get("content-type", "")
         body = resp.text
     if "html" in content_type or body.lstrip().lower().startswith(("<!doctype", "<html")):
-        return strip_html(body)
+        return extract_main_content(body, url)
     return body.strip()
 
 

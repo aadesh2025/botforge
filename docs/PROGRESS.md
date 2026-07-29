@@ -38,6 +38,18 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **URL ingest extracts the article, not the page chrome (2026-07-29).** `strip_html()`
+  removed `<script>`/`<style>` then regex-stripped every remaining tag with no notion of
+  document structure, so nav menus, headers, footers and cookie banners landed in the same
+  text stream as the content. On `https://docs.n8n.io/` the nav ("Forum Changelog Get started
+  Deploy Build Nodes Connect Administer Contribute") *opened* the extracted text and
+  dominated the first chunk — the chunk retrieval most often returns. Added **trafilatura**
+  and a new `extract_main_content()` used by `load_url()`, with `strip_html()` kept as the
+  fallback for pages it can't parse (a stub still ingests rather than failing). Markdown
+  output preserves headings, which the recursive chunker splits on, so chunks land on section
+  boundaries. The real docs.n8n.io page is committed as a test fixture — one test pins the
+  *old* broken behaviour so the file documents what was wrong, others assert the nav is gone
+  and the first chunk is content. 8 tests.
 - **Creating an organization is staff-only (2026-07-29).** BotForge is run as one org per
   client, provisioned for them — not a self-serve product where anyone spins up as many as
   they like. A client seeing "New organization" invites an empty, confusing second org.
