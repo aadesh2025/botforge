@@ -38,6 +38,18 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Team performance reporting (2026-07-29).** The analytics module reported on channels,
+  providers and models — never on *people*. New `agent_performance()` +
+  `GET /v1/analytics/agents` groups by `Handoff.assigned_to` and reports handoffs handled,
+  average first-response time (first `provider="operator"` message minus the handoff's
+  creation), average resolution time, and conversations closed. **No new tracking was added**
+  — every input already existed. Durations are `None`, not `0`, when there's nothing to
+  average: a teammate who has never resolved anything hasn't achieved a 0ms resolution time,
+  and the UI renders that as an em dash. Operator messages that predate a handoff are excluded
+  from the response average (they belong to an earlier handoff on the same conversation), and
+  unassigned handoffs are attributed to nobody. A "Team performance" section on the Analytics
+  page reuses the per-channel breakdown's visual language. 6 backend tests, 7 web unit tests,
+  2 Playwright checks.
 - **Campaigns — proactive widget messages (2026-07-29).** `campaigns` (migration `0012`) with
   two kinds. **`widget_trigger` ships live**: an active campaign rides the existing public
   config, and the widget schedules it client-side — fires once per visitor per campaign

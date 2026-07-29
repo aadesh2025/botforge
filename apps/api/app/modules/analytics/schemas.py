@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from pydantic import BaseModel
 
 
@@ -54,3 +56,19 @@ class LatencyStats(BaseModel):
 class QuestionCount(BaseModel):
     question: str
     count: int
+
+
+class AgentPerformanceBucket(BaseModel):
+    """One human teammate's inbox workload.
+
+    Distinct from the per-channel breakdown: this reports on *people*, not surfaces.
+    Durations are None rather than 0 when there's nothing to average — a teammate who has
+    never resolved anything hasn't achieved a 0ms resolution time.
+    """
+
+    user_id: uuid.UUID
+    name: str
+    handoffs: int
+    avg_first_response_ms: int | None
+    avg_resolution_ms: int | None
+    closed_count: int

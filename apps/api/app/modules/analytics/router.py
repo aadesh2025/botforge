@@ -46,6 +46,17 @@ async def usage(
     return await service.usage(session, ctx, agent_id, from_date, to_date, group_by, channel)
 
 
+@router.get("/agents", response_model=list[schemas.AgentPerformanceBucket])
+async def agent_performance(
+    from_date: dt.date | None = Query(default=None, alias="from"),
+    to_date: dt.date | None = Query(default=None, alias="to"),
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> list[schemas.AgentPerformanceBucket]:
+    """Per-teammate inbox workload. Reports on people, not channels."""
+    return await service.agent_performance(session, ctx, from_date, to_date)
+
+
 @router.get("/latency", response_model=schemas.LatencyStats)
 async def latency(
     agent_id: uuid.UUID | None = Query(default=None),

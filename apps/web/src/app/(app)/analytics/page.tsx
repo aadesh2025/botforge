@@ -7,10 +7,18 @@ import { StatCard } from "@/components/dashboard/stat-card";
 import { UsageChart } from "@/components/dashboard/usage-chart";
 import { BarList } from "@/components/analytics/bar-list";
 import { ChannelBreakdown } from "@/components/analytics/channel-breakdown";
+import { TeamPerformance } from "@/components/analytics/team-performance";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { channelMeta } from "@/lib/channel-meta";
-import { getLatency, getOverview, getTopQuestions, getUnanswered, getUsage } from "@/lib/api/analytics";
+import {
+  getAgentPerformance,
+  getLatency,
+  getOverview,
+  getTopQuestions,
+  getUnanswered,
+  getUsage,
+} from "@/lib/api/analytics";
 import { API_BASE } from "@/lib/api/config";
 import { getAccessToken, getActiveOrgId } from "@/lib/api/tokens";
 import { useSession } from "@/lib/store/session";
@@ -54,6 +62,11 @@ export default function AnalyticsPage() {
   const { data: usageChannel } = useQuery({
     queryKey: ["an-usage-channel", activeOrgId],
     queryFn: () => getUsage({ group_by: "channel" }),
+    enabled,
+  });
+  const { data: team, isLoading: teamLoading } = useQuery({
+    queryKey: ["an-team", activeOrgId],
+    queryFn: () => getAgentPerformance(),
     enabled,
   });
   const { data: top } = useQuery({ queryKey: ["an-top", activeOrgId], queryFn: () => getTopQuestions(), enabled });
@@ -189,6 +202,23 @@ export default function AnalyticsPage() {
           </div>
         </section>
       </div>
+
+      <section
+        aria-labelledby="an-team"
+        className="overflow-hidden rounded-lg border border-border bg-surface"
+      >
+        <div className="border-b border-border p-5">
+          <h3 id="an-team" className="font-display text-base font-semibold text-text">
+            Team performance
+          </h3>
+          <p className="text-sm text-muted">
+            How your teammates are handling conversations the bot escalated.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <TeamPerformance buckets={team} isLoading={teamLoading} />
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section className="rounded-lg border border-border bg-surface">

@@ -6,12 +6,12 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import Date, String, cast, distinct, func, select
+from sqlalchemy import Date, String, case, cast, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import Select
 
 from app.core import rbac
-from app.models import Channel, Conversation, Handoff, Message
+from app.models import Channel, Conversation, Handoff, Message, User
 from app.modules.analytics import schemas
 from app.modules.orgs.deps import OrgContext
 
@@ -325,6 +325,78 @@ async def usage(
             for c in sorted(connected - seen)
         )
         buckets.sort(key=lambda b: b.key)
+    return buckets
+
+
+async def agent_performance(
+    session: AsyncSession,
+    ctx: OrgContext,
+    from_date: dt.date | None,
+    to_date: dt.date | None,
+) -> list[schemas.AgentPerformanceBucket]:
+    """Per-teammate inbox workload.
+
+    Deliberately separate from the rest of this module, which reports on channels,
+    providers and models — this reports on *people*. Everything is derived from data that
+    already exists: `Handoff.assigned_to` and operator messages
+    (`Message.provider == "operator"`), so no new tracking was added.
+    """
+    rbac.require_permission(ctx.role, rbac.ANALYTICS_VIEW)
+    start, end = _range(from_date, to_date)
+
+    # First operator reply per conversation — the numerator of "time to first response".
+    first_reply = (
+        select(
+            Message.conversation_id.label("conversation_id"),
+            func.min(Message.created_at).label("first_at"),
+        )
+        .where(Message.organization_id == ctx.org.id, Message.provider == "operator")
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+
+    response_secs = func.extract("epoch", first_reply.c.first_at - Handoff.created_at)
+    resolution_secs = func.extract("epoch", Handoff.resolved_at - Handoff.created_at)
+
+    stmt = (
+        select(
+            Handoff.assigned_to,
+            User.full_name,
+            User.email,
+            func.count(distinct(Handoff.id)),
+            # Only count forward-in-time responses: an operator message that predates the
+            # handoff belongs to an earlier one on the same conversation.
+            func.avg(case((response_secs >= 0, response_secs), else_=None)),
+            func.avg(resolution_secs),
+            func.count(distinct(case((Conversation.status == "closed", Conversation.id), else_=None))),
+        )
+        .select_from(Handoff)
+        .join(Conversation, Conversation.id == Handoff.conversation_id)
+        .join(User, User.id == Handoff.assigned_to)
+        .outerjoin(first_reply, first_reply.c.conversation_id == Handoff.conversation_id)
+        .where(
+            Handoff.organization_id == ctx.org.id,
+            Handoff.assigned_to.is_not(None),
+            Handoff.created_at >= start,
+            Handoff.created_at <= end,
+        )
+        .group_by(Handoff.assigned_to, User.full_name, User.email)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    buckets = [
+        schemas.AgentPerformanceBucket(
+            user_id=r[0],
+            name=str(r[1] or r[2]),  # full name, falling back to the email they signed up with
+            handoffs=int(r[3]),
+            # None, not 0: nothing to average is not a zero-millisecond response.
+            avg_first_response_ms=int(float(r[4]) * 1000) if r[4] is not None else None,
+            avg_resolution_ms=int(float(r[5]) * 1000) if r[5] is not None else None,
+            closed_count=int(r[6]),
+        )
+        for r in rows
+    ]
+    buckets.sort(key=lambda b: (-b.handoffs, b.name))
     return buckets
 
 

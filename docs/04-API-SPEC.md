@@ -108,6 +108,8 @@ from it. Error model per `02 §8`.
   conversations/messages/tokens/cost/rates.
 - `GET /usage?agent_id=&from=&to=&channel=&group_by=day|provider|model|channel` → tokens + cost.
 - `GET /latency`, `GET /top-questions`, `GET /unanswered` — all take `channel=` too.
+- `GET /agents?from=&to=` → per-teammate inbox workload (handoffs handled, avg first-response,
+  avg resolution, conversations closed). Durations are null when there's nothing to average.
 - `GET /export?type=usage|conversations|channels` → CSV.
 - **Channel coverage:** `by_channel` and `group_by=channel` include every channel the org
   has an *enabled* `Channel` row for (plus `widget`, which every agent has inherently),

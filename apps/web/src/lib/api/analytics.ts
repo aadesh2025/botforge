@@ -41,6 +41,16 @@ export interface LatencyStats {
   p95_ms: number;
 }
 
+export interface AgentPerformanceBucket {
+  user_id: string;
+  name: string;
+  handoffs: number;
+  /** Null when there's nothing to average yet — not a zero-millisecond response. */
+  avg_first_response_ms: number | null;
+  avg_resolution_ms: number | null;
+  closed_count: number;
+}
+
 export interface QuestionCount {
   question: string;
   count: number;
@@ -66,6 +76,11 @@ export function getOverview(p: AnalyticsParams = {}) {
 
 export function getUsage(p: AnalyticsParams & { group_by?: "day" | "provider" | "model" | "channel" } = {}) {
   return api<UsageBucket[]>(`/v1/analytics/usage${qs(p)}`, { orgScoped: true });
+}
+
+/** Per-teammate inbox workload. Reports on people, not channels. */
+export function getAgentPerformance(p: AnalyticsParams = {}) {
+  return api<AgentPerformanceBucket[]>(`/v1/analytics/agents${qs(p)}`, { orgScoped: true });
 }
 
 export function getLatency(p: AnalyticsParams = {}) {
