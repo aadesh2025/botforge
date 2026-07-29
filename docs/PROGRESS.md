@@ -38,6 +38,20 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Creating an organization is staff-only (2026-07-29).** BotForge is run as one org per
+  client, provisioned for them — not a self-serve product where anyone spins up as many as
+  they like. A client seeing "New organization" invites an empty, confusing second org.
+  `OrgSwitcher` now gates the create item + dialog on `is_staff` (the same
+  `useSession((s) => Boolean(s.user?.is_staff))` pattern the Admin nav item uses); the
+  switcher itself stays visible, and **switching between orgs you were invited to keeps
+  working** — an agency may reasonably invite one person into several client orgs.
+  **Enforced server-side too**, since hiding a button doesn't stop a direct API call:
+  `POST /v1/orgs` returns a typed `orgs.create_forbidden` (403) when a non-staff user
+  already belongs to an org. The **first** org is always allowed — signup's create-first-org
+  step comes through the same endpoint and a brand-new user obviously isn't staff — and the
+  count ignores soft-deleted orgs, so deleting your only org doesn't strand the account.
+  Membership via *invite* counts too: the gate is "has an org", not "created one".
+  5 backend tests, 5 web unit tests.
 - **Team performance reporting (2026-07-29).** The analytics module reported on channels,
   providers and models — never on *people*. New `agent_performance()` +
   `GET /v1/analytics/agents` groups by `Handoff.assigned_to` and reports handoffs handled,

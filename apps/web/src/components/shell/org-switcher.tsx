@@ -25,6 +25,10 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
   const router = useRouter();
   const { orgs, activeOrgId, setOrgs, setActiveOrg } = useSession();
   const active = useSession(activeOrg);
+  // Each client gets one organization, provisioned for them — creating another is a staff
+  // action. Members can still *switch* between orgs they've been invited to. Same
+  // `is_staff` gate the Admin console nav item uses; the server enforces it too.
+  const isStaff = useSession((s) => Boolean(s.user?.is_staff));
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -87,27 +91,38 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
               {org.id === active.id && <Check className="size-4 text-ember-soft" />}
             </DropdownMenuItem>
           ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setCreating(true)}>
-            <Plus className="size-4" />
-            <span>New organization</span>
-          </DropdownMenuItem>
+          {isStaff && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setCreating(true)}>
+                <Plus className="size-4" />
+                <span>New organization</span>
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={creating} onOpenChange={setCreating}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New organization</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={onCreate} className="space-y-4">
-            <Input autoFocus placeholder="Organization name" value={name} onChange={(e) => setName(e.target.value)} />
-            <Button type="submit" variant="primary" className="w-full" disabled={busy || !name.trim()}>
-              {busy && <Loader2 className="size-4 animate-spin" />} Create
-            </Button>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {isStaff && (
+        <Dialog open={creating} onOpenChange={setCreating}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>New organization</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={onCreate} className="space-y-4">
+              <Input
+                autoFocus
+                placeholder="Organization name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+              <Button type="submit" variant="primary" className="w-full" disabled={busy || !name.trim()}>
+                {busy && <Loader2 className="size-4 animate-spin" />} Create
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }

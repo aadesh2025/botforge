@@ -70,9 +70,13 @@ async def test_create_list_get_org(client: AsyncClient) -> None:
 
 
 async def test_slug_uniqueness(client: AsyncClient) -> None:
-    token = await _signup(client, "a@example.com")
-    first = await _create_org(client, token, "Acme")
-    second = await _create_org(client, token, "Acme")
+    """Two different clients both called "Acme" — the realistic collision.
+
+    (This used to have one user create both. Creating a *second* org is staff-only now,
+    and slug collision was never really about one person naming two orgs the same.)
+    """
+    first = await _create_org(client, await _signup(client, "a@example.com"), "Acme")
+    second = await _create_org(client, await _signup(client, "b@example.com"), "Acme")
     assert first["slug"] == "acme"
     assert second["slug"] == "acme-2"
 

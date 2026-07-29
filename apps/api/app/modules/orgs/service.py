@@ -86,7 +86,41 @@ async def _active_membership(
 
 
 # ── Org CRUD ──────────────────────────────────────────────────────────────────
+async def _active_org_count(session: AsyncSession, user: User) -> int:
+    """Organizations this user is currently a member of (same filter as `list_orgs`).
+
+    A soft-deleted org doesn't count — otherwise deleting your only org would lock you out
+    of creating a replacement.
+    """
+    stmt = (
+        select(func.count())
+        .select_from(Membership)
+        .join(Organization, Organization.id == Membership.organization_id)
+        .where(
+            Membership.user_id == user.id,
+            Membership.status == "active",
+            Organization.deleted_at.is_(None),
+        )
+    )
+    return int((await session.execute(stmt)).scalar_one())
+
+
 async def create_org(session: AsyncSession, user: User, name: str) -> schemas.OrgOut:
+    """Create an organization.
+
+    BotForge is run as one organization per client, provisioned for them — not as a
+    self-serve product where anyone spins up as many as they like. So creating an
+    *additional* org is staff-only. The first one is always allowed: signup's
+    create-first-org step comes through here, and a brand-new user obviously isn't staff.
+    Enforced server-side because hiding the button doesn't stop a direct API call.
+    """
+    if not user.is_staff and await _active_org_count(session, user) > 0:
+        raise AppError(
+            "orgs.create_forbidden",
+            "Your account already belongs to an organization. Ask your BotForge contact to "
+            "set up another one.",
+            403,
+        )
     org = Organization(name=name, slug=await _unique_slug(session, name), created_by=user.id)
     session.add(org)
     await session.flush()
