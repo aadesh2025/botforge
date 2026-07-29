@@ -34,6 +34,7 @@ from app.models.platform import (
     WebhookEndpoint,
 )
 from app.models.tools import Tool, ToolRun
+from app.models.widget_configs import WidgetConfig
 
 __all__ = [
     "Agent",
@@ -71,4 +72,5 @@ __all__ = [
     "User",
     "WebhookDelivery",
     "WebhookEndpoint",
+    "WidgetConfig",
 ]

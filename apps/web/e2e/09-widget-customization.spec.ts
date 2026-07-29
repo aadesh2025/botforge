@@ -28,18 +28,15 @@ test("criterion: widget customization reflects on a live embed without re-pastin
   await expect(launcher).toHaveClass(/bf-pill/);
   const before = await launcher.evaluate((el) => getComputedStyle(el).backgroundColor);
 
-  // 2) "Builder save": change launcher design + accent color, then publish (branch-on-edit).
-  const detail = await (await request.get(`${API}/v1/agents/${id}`, { headers: auth(account) })).json();
-  const patched = await request.patch(`${API}/v1/agents/${id}/versions/${detail.draft_version}`, {
+  // 2) "Builder save": change launcher design + accent color. Appearance is unversioned,
+  //    so there is deliberately **no publish step here** — a save is live.
+  const patched = await request.patch(`${API}/v1/agents/${id}/widget-config`, {
     headers: auth(account),
-    data: { persona: { widget: { primaryColor: "#00AAFF", floatingButtonStyle: "circle-message" } } },
+    data: { primaryColor: "#00AAFF", floatingButtonStyle: "circle-message" },
   });
   expect(patched.ok(), await patched.text()).toBeTruthy();
-  const newVersion = (await patched.json()).version;
-  const pub = await request.post(`${API}/v1/agents/${id}/versions/${newVersion}/publish`, { headers: auth(account) });
-  expect(pub.ok(), await pub.text()).toBeTruthy();
 
-  // 3) Same embed, fresh page load → the new design + color are live.
+  // 3) Same embed, fresh page load → the new design + color are live, unpublished.
   await embed(page, publicKey);
   await expect(launcher).not.toHaveClass(/bf-pill/); // circle, not pill
   await expect(launcher.locator("svg")).toBeVisible(); // message icon

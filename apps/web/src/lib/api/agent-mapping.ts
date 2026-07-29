@@ -7,12 +7,18 @@ function num(v: unknown, fallback: number): number {
 }
 
 /** Map a backend agent + version into the builder's draft shape. */
-export function versionToDraft(agent: ApiAgent, v: ApiVersion): AgentDraft {
+export function versionToDraft(
+  agent: ApiAgent,
+  v: ApiVersion,
+  /** From the unversioned widget-config endpoint. Falls back to the legacy
+   *  `persona.widget` for a draft loaded before that migration ran. */
+  widgetConfig?: Record<string, unknown>,
+): AgentDraft {
   const mc = v.model_config ?? {};
   const rag = v.rag_config ?? {};
   const feat = v.features ?? {};
   const persona = v.persona ?? {};
-  const w = ((persona.widget as Record<string, unknown>) ?? {}) as Record<string, unknown>;
+  const w = (widgetConfig ?? (persona.widget as Record<string, unknown>) ?? {}) as Record<string, unknown>;
 
   return {
     id: agent.id,
@@ -89,23 +95,6 @@ export function draftToPatch(draft: AgentDraft): Record<string, unknown> {
       displayName: p.displayName,
       tone: p.tone,
       blockedTopics: p.blockedTopics,
-      widget: {
-        primaryColor: draft.widget.primaryColor,
-        position: draft.widget.position,
-        launcherText: draft.widget.launcherText,
-        branding: draft.widget.branding,
-        mode: draft.widget.mode,
-        widgetStyle: draft.widget.widgetStyle,
-        backgroundColor: draft.widget.backgroundColor,
-        textColor: draft.widget.textColor,
-        bubbleColor: draft.widget.bubbleColor,
-        typingAreaColor: draft.widget.typingAreaColor,
-        fontFamily: draft.widget.fontFamily,
-        logoUrl: draft.widget.logoUrl,
-        floatingButtonStyle: draft.widget.floatingButtonStyle,
-        floatingButtonColor: draft.widget.floatingButtonColor,
-        inputBarButtons: draft.widget.inputBarButtons,
-      },
     },
     model_config: {
       provider: m.provider,
@@ -126,5 +115,30 @@ export function draftToPatch(draft: AgentDraft): Record<string, unknown> {
       hybrid: k.hybrid,
     },
     features: { tools_enabled: f.tools, memory_enabled: f.memory, handoff_enabled: f.handoff },
+  };
+}
+
+/** The widget's appearance, for the unversioned `PATCH /agents/{id}/widget-config`.
+ *
+ * Deliberately *not* part of `draftToPatch`: appearance is live on save, while everything
+ * else in the draft waits for a publish. */
+export function draftToWidgetConfig(draft: AgentDraft): Record<string, unknown> {
+  const w = draft.widget;
+  return {
+    primaryColor: w.primaryColor,
+    position: w.position,
+    launcherText: w.launcherText,
+    branding: w.branding,
+    mode: w.mode,
+    widgetStyle: w.widgetStyle,
+    backgroundColor: w.backgroundColor,
+    textColor: w.textColor,
+    bubbleColor: w.bubbleColor,
+    typingAreaColor: w.typingAreaColor,
+    fontFamily: w.fontFamily,
+    logoUrl: w.logoUrl,
+    floatingButtonStyle: w.floatingButtonStyle,
+    floatingButtonColor: w.floatingButtonColor,
+    inputBarButtons: w.inputBarButtons,
   };
 }

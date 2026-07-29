@@ -14,9 +14,9 @@ import { ChannelsTab } from "@/components/builder/tabs/channels-tab";
 import { VersionsTab } from "@/components/builder/tabs/versions-tab";
 import { SettingsTab } from "@/components/builder/tabs/settings-tab";
 import { useBuilder } from "@/lib/store/builder";
-import { getAgent, listVersions, patchVersion } from "@/lib/api/agents";
+import { getAgent, getWidgetConfig, listVersions, patchVersion, patchWidgetConfig } from "@/lib/api/agents";
 import { ApiError } from "@/lib/api/client";
-import { draftToPatch, versionToDraft } from "@/lib/api/agent-mapping";
+import { draftToPatch, draftToWidgetConfig, versionToDraft } from "@/lib/api/agent-mapping";
 import { useSession } from "@/lib/store/session";
 
 const TABS = ["persona", "model", "knowledge", "tools", "channels", "versions", "settings"] as const;
@@ -44,9 +44,14 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
   const { data, isLoading, isError } = useQuery({
     queryKey: ["agent", id, activeOrgId],
     queryFn: async () => {
-      const [agent, versions] = await Promise.all([getAgent(id), listVersions(id)]);
+      const [agent, versions, widget] = await Promise.all([
+        getAgent(id),
+        listVersions(id),
+        // Appearance lives outside the version, so it loads alongside rather than within.
+        getWidgetConfig(id).catch(() => ({}) as Record<string, unknown>),
+      ]);
       const latest = versions.reduce((a, b) => (b.version > a.version ? b : a), versions[0]);
-      return { agent, latest };
+      return { agent, latest, widget };
     },
     enabled: Boolean(activeOrgId),
   });
@@ -55,7 +60,12 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
   useEffect(() => {
     if (data && loadedFor.current !== id) {
       loadedFor.current = id;
-      init(versionToDraft(data.agent, data.latest), data.agent.id, data.latest.version, data.latest.is_published);
+      init(
+        versionToDraft(data.agent, data.latest, data.widget),
+        data.agent.id,
+        data.latest.version,
+        data.latest.is_published,
+      );
     }
   }, [data, id, init]);
 
@@ -73,7 +83,12 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
     const timer = setTimeout(async () => {
       beginSave();
       try {
-        const saved = await patchVersion(agentId, versionNumber, draftToPatch(draft));
+        // Two writes, deliberately: appearance is live on save, everything else waits for
+        // a publish. Sent together so one debounce covers both.
+        const [saved] = await Promise.all([
+          patchVersion(agentId, versionNumber, draftToPatch(draft)),
+          patchWidgetConfig(agentId, draftToWidgetConfig(draft)),
+        ]);
         // Branch-on-edit: if the backend forked a new draft off a published version, the
         // returned version number is higher — re-point the builder at that new draft.
         if (saved.version !== versionNumber) retarget(saved.version);

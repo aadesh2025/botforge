@@ -38,6 +38,19 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Widget appearance is unversioned and always live (2026-07-29).** `_theme()` read
+  `persona.widget` off whatever `_live_version()` resolved — the same published-vs-draft unit
+  as behaviour — so a colour change waited behind a publish approval. It only *looked*
+  instant in testing because a never-published agent's latest draft and its live version are
+  the same thing by coincidence; with a real publish history it would have got stuck. New
+  `widget_configs` table (migration `0014`, one row per agent, **no version**), seeded from
+  the version actually being served today — the published one if there is one, else the
+  newest draft, since picking wrong would silently restyle a live widget. `_theme()` now
+  reads it by `agent_id`, bypassing `_live_version()` entirely. New
+  `GET/PATCH /v1/agents/{id}/widget-config` gated on `AGENTS_WRITE`, never `AGENTS_PUBLISH` —
+  making a client wait for review to fix their own branding would be absurd. Merge-on-write
+  preserved. Runtime behaviour (live fetch, CSS variables, preview postMessage) unchanged.
+  7 backend tests; the widget E2E now asserts the change goes live **with no publish step**.
 - **Editing and publishing are separate permissions (2026-07-29).** `AGENTS_WRITE` covered
   both saving a draft and putting it live — one permission for two very different levels of
   risk. New `AGENTS_PUBLISH` gates publish/rollback; `owner`/`admin` have both. **`editor` is

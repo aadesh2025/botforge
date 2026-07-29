@@ -154,3 +154,25 @@ async def playground_chat(
             media_type="text/event-stream",
         )
     return await service.playground_once(session, ctx, agent_id, data)
+
+
+# ── Widget appearance ─────────────────────────────────────────────────────────
+# Separate from the versioned draft on purpose: a save here is live immediately, which is
+# what the embed snippet already promises. It needs AGENTS_WRITE, never AGENTS_PUBLISH.
+@router.get("/{agent_id}/widget-config", response_model=dict)
+async def get_widget_config(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> dict[str, Any]:
+    return await service.get_widget_config(session, ctx, agent_id)
+
+
+@router.patch("/{agent_id}/widget-config", response_model=dict)
+async def update_widget_config(
+    agent_id: uuid.UUID,
+    data: dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> dict[str, Any]:
+    return await service.update_widget_config(session, ctx, agent_id, data)

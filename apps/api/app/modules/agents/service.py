@@ -22,7 +22,7 @@ from app.llm.base import ChatProvider
 from app.llm.fake import FakeChatProvider
 from app.llm.registry import get_chat_provider, get_chat_provider_chain
 from app.llm.types import ChatRequest, Message
-from app.models import Agent, AgentVersion
+from app.models import Agent, AgentVersion, WidgetConfig
 from app.modules.agents import schemas
 from app.modules.orgs.deps import OrgContext
 from app.rag.agent_retrieval import retrieve_for_version
@@ -548,3 +548,56 @@ async def agent_count(session: AsyncSession, org_id: uuid.UUID) -> int:
         Agent.organization_id == org_id, Agent.deleted_at.is_(None)
     )
     return int((await session.execute(stmt)).scalar_one())
+
+
+# ── Widget appearance (unversioned — a save is live) ─────────────────────────────
+def _validate_widget(config: dict[str, Any]) -> None:
+    from pydantic import ValidationError
+
+    from app.modules.public.schemas import WidgetConfigIn
+
+    try:
+        WidgetConfigIn(**config)
+    except ValidationError as exc:
+        raise AppError(
+            "widget.invalid_config",
+            "Invalid widget configuration.",
+            400,
+            details=[{"field": e["loc"][-1], "error": e["msg"]} for e in exc.errors()],
+        ) from exc
+
+
+async def get_widget_config(
+    session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID
+) -> dict[str, Any]:
+    rbac.require_permission(ctx.role, rbac.READ)
+    agent = await _get_agent(session, ctx, agent_id)
+    row = (
+        await session.execute(select(WidgetConfig).where(WidgetConfig.agent_id == agent.id))
+    ).scalar_one_or_none()
+    return dict(row.theme) if row else {}
+
+
+async def update_widget_config(
+    session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID, config: dict[str, Any]
+) -> dict[str, Any]:
+    """Save the widget's appearance. Live immediately — no draft, no publish.
+
+    Gated on AGENTS_WRITE, never AGENTS_PUBLISH: a colour is not a behaviour change, and
+    making a client wait for review to fix their own branding would be absurd.
+    Merge-on-write, so a partial update (just a logo) never nulls sibling colours.
+    """
+    rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
+    agent = await _get_agent(session, ctx, agent_id)
+    _validate_widget(config)
+
+    row = (
+        await session.execute(select(WidgetConfig).where(WidgetConfig.agent_id == agent.id))
+    ).scalar_one_or_none()
+    if row is None:
+        row = WidgetConfig(agent_id=agent.id, theme=config)
+        session.add(row)
+    else:
+        row.theme = {**row.theme, **config}
+    await session.flush()
+    return dict(row.theme)

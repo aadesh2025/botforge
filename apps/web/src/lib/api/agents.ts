@@ -66,3 +66,16 @@ export function playgroundStream(
     signal,
   );
 }
+
+/** The widget's appearance. Unversioned: a save is live immediately, no publish involved. */
+export function getWidgetConfig(agentId: string) {
+  return api<Record<string, unknown>>(`/v1/agents/${agentId}/widget-config`, { orgScoped: true });
+}
+
+export function patchWidgetConfig(agentId: string, config: Record<string, unknown>) {
+  return api<Record<string, unknown>>(`/v1/agents/${agentId}/widget-config`, {
+    method: "PATCH",
+    orgScoped: true,
+    body: config,
+  });
+}

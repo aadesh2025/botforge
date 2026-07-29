@@ -18,7 +18,7 @@ from app.chat.inbound import InboundTurn
 from app.contacts import upsert_contact
 from app.core.errors import AppError
 from app.llm.types import StreamEvent
-from app.models import Agent, AgentVersion, Conversation
+from app.models import Agent, AgentVersion, Conversation, WidgetConfig
 from app.modules.campaigns import service as campaign_service
 from app.modules.conversations.service import _live_version
 from app.modules.public import schemas
@@ -33,10 +33,8 @@ async def _resolve_agent(session: AsyncSession, public_key: str) -> tuple[Agent,
     return agent, version
 
 
-def _theme(version: AgentVersion) -> schemas.WidgetTheme:
-    persona = version.persona or {}
-    widget = persona.get("widget") if isinstance(persona.get("widget"), dict) else {}
-    widget = widget or {}
+def _theme_from(widget: dict[str, Any]) -> schemas.WidgetTheme:
+    """Map the stored camelCase config onto the widget's snake_case response shape."""
     buttons = widget.get("inputBarButtons")
     return schemas.WidgetTheme(
         primary_color=widget.get("primaryColor", "#E8590C"),
@@ -79,6 +77,18 @@ def widget_logo_file(org_id: uuid.UUID, agent_id: uuid.UUID) -> tuple[str, str] 
     return str(path), _LOGO_MEDIA.get(path.suffix.lower(), "application/octet-stream")
 
 
+async def widget_theme(session: AsyncSession, agent: Agent) -> schemas.WidgetTheme:
+    """Appearance comes from `widget_configs`, **not** from the resolved version.
+
+    Deliberately bypasses `_live_version()`: a colour change shouldn't wait behind a publish
+    approval meant for changes to what the AI says. A save here is live immediately.
+    """
+    row = (
+        await session.execute(select(WidgetConfig).where(WidgetConfig.agent_id == agent.id))
+    ).scalar_one_or_none()
+    return _theme_from(row.theme if row else {})
+
+
 async def get_config(session: AsyncSession, public_key: str) -> schemas.PublicConfig:
     agent, version = await _resolve_agent(session, public_key)
     persona = version.persona or {}
@@ -88,7 +98,7 @@ async def get_config(session: AsyncSession, public_key: str) -> schemas.PublicCo
         name=name,
         welcome_message=version.welcome_message or "Hi! How can I help you today?",
         suggested_prompts=list(version.suggested_prompts or []),
-        theme=_theme(version),
+        theme=await widget_theme(session, agent),
         campaigns=[
             schemas.WidgetCampaign(**c.model_dump())
             for c in await campaign_service.active_widget_campaigns(session, agent)
