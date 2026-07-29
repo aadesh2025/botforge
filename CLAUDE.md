@@ -153,6 +153,26 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-07-29 — Seven-feature batch (WhatsApp window → team performance)
+Built in dependency order, one commit each:
+1. **WhatsApp 24h window** (`fb6140f`) — a silent-failure bug, not a gap. `last_inbound_at`
+   (separate from `last_message_at`, which our own outbound moves), `check_can_send()` hook run
+   *before* persisting, typed `whatsapp_window_closed` (409), `send_template()`, Meta `131047`.
+2. **Canned responses** (`39e582a`) — `/` picker in the composer (triggers only at start/after
+   whitespace). Also fixed a pre-existing 500: any `field_validator` raising `ValueError`
+   returned `internal_error` instead of 422.
+3. **Macros** (`987feda`) — reuse the inbox service fns the manual buttons call; validate every
+   step *before* applying any (a rollback can't un-send a message), then SAVEPOINT.
+4. **Contacts CRM** (`37826fa`) — extends the existing `Contact`; `/contacts` page + nav.
+5. **Help Center** (`61f1788`) — separate store from RAG, public pages, opt-in KB sync into a KB
+   the agent *actually reads*. In-repo markdown renderer escapes before formatting.
+6. **Campaigns** (`3b27bf8`) — widget triggers live; **broadcasts draft-only** (ADR-039).
+7. **Team performance** (`9281d27`) — `/v1/analytics/agents`, people not channels.
+
+Migrations `0007`–`0012`. Suites after the batch: **251 pytest**, **68 vitest**, **38 Playwright**.
+**Note:** run the API *without* `CELERY_TASK_ALWAYS_EAGER` when a real worker is up — eager mode
+makes the API run the async ingest task inline, where it never awaits, so ingestion never lands.
+
 ### 2026-07-29 — Inbox shows every channel tab (connected or not)
 - **Reverses** the 07-28 filtering rule: `visibleChannelTabs` → `inboxChannelTabs()` (all 7, always)
   + new `isChannelConnected()`. Unconnected tabs are dimmed with a hollow dot and an `aria-label`
