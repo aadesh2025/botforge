@@ -153,6 +153,26 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-07-29 — URL extraction fix, CRM rename + auto-capture
+1. **URL ingest** (`49e66ba`): `strip_html()` was structure-blind, so a docs site's nav menu
+   opened the extracted text and dominated the first chunk. Added **trafilatura** +
+   `extract_main_content()`, `strip_html` kept as fallback. Real docs.n8n.io committed as a
+   fixture; one test pins the *old* behaviour so the file records the bug.
+2. **CRM rename + manual creation** (`d93b5ec`): nav/title → "CRM" (`/contacts` route kept),
+   `POST /v1/contacts` with `channel="manual"` + synthetic `external_id`. `manual` added to
+   `channel-meta.ts`'s `REPORTING_ONLY` so it can never become an Inbox tab.
+3. **CRM auto-capture** (`a120b1f`): `CrmContact` = canonical person, `Contact` = per-channel
+   handle linked via `crm_contact_id`; CRM fields moved up with a backfill (migration `0013`).
+   Regex gate → one small-model call only when email/phone-shaped text exists. **Matching is by
+   email/phone, never name.** Org toggle `auto_crm_capture_enabled`, on by default. Hook is in
+   `_persist_user_message` (covers handoff-paused messages too).
+   **Note:** the CRM now lists *people*, so a visitor who never shares an email/phone doesn't
+   appear there — only in the Inbox.
+
+Suites: **284 pytest**, **73 vitest**, **41/41 Playwright**. The E2E suite now intermittently
+trips the hardcoded `public_chat`/`channel_webhook` rate limits on a full back-to-back run —
+see the roadmap note in `docs/PROGRESS.md`.
+
 ### 2026-07-29 — Seven-feature batch (WhatsApp window → team performance)
 Built in dependency order, one commit each:
 1. **WhatsApp 24h window** (`fb6140f`) — a silent-failure bug, not a gap. `last_inbound_at`
