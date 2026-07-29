@@ -38,6 +38,19 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Macros (2026-07-29).** A named, ordered list of inbox actions (`reply` / `add_tag` /
+  `assign` / `resolve`) run against one conversation in a click — model + migration `0009`,
+  CRUD at `/v1/macros`, execution at `POST /v1/inbox/conversations/{cid}/macros/{id}`.
+  Execution **reuses the same inbox service functions the manual buttons call**, so a macro
+  can't drift from what those do (RBAC, webhook events, realtime publishes included).
+  Atomic in two layers: every step is **validated before any is applied** — a DB rollback can
+  undo a tag but cannot un-send a WhatsApp message, so a deleted canned response or a
+  departed teammate fails while the conversation is still untouched — and execution is then
+  wrapped in a SAVEPOINT. `add_tag` merges rather than replacing, and re-running doesn't
+  duplicate. Per-action params are validated at *save* time, so a half-formed macro can't be
+  stored and discovered later by an operator. Builder UI with reorder/remove; a Run macro
+  dropdown in the thread header that stays hidden until the org has one. 8 backend tests,
+  3 Playwright checks.
 - **Canned responses (2026-07-29).** Org-scoped reply snippets (`canned_responses`, migration
   `0008`, unique per `(org, shortcut)` — shortcuts are typed rather than picked, so a duplicate
   would make the picker ambiguous). CRUD module at `/v1/canned-responses`; reading needs only

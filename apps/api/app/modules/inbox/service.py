@@ -236,6 +236,14 @@ async def set_tags(session: AsyncSession, ctx: OrgContext, cid: uuid.UUID, tags:
     return _handoff_out(handoff)  # type: ignore[return-value]
 
 
+async def get_tags(session: AsyncSession, ctx: OrgContext, cid: uuid.UUID) -> list[str]:
+    """Current tags — so callers that *add* one (macros) don't clobber the rest."""
+    rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
+    conv = await _get_conversation(session, ctx, cid)
+    handoff = await _require_open_handoff(session, conv)
+    return list(handoff.tags)
+
+
 async def _channel_row(session: AsyncSession, conv: Conversation) -> Channel | None:
     stmt = (
         select(Channel)

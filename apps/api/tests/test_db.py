@@ -19,7 +19,7 @@ EXPECTED_TABLES = {
     "agents", "agent_versions", "provider_credentials",
     "knowledge_bases", "documents", "chunks",
     "canned_responses", "contacts", "conversations", "messages",
-    "tools", "tool_runs", "channels", "handoffs",
+    "tools", "tool_runs", "channels", "handoffs", "macros",
     "api_keys", "webhook_endpoints", "webhook_deliveries",
     "audit_logs", "usage_records", "quotas", "subscriptions",
     "feature_flags",

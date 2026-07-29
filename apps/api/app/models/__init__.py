@@ -19,6 +19,7 @@ from app.models.identity import (
 )
 from app.models.inbox import Handoff
 from app.models.knowledge import Chunk, Document, KnowledgeBase
+from app.models.macros import Macro
 from app.models.platform import (
     ApiKey,
     AuditLog,
@@ -47,6 +48,7 @@ __all__ = [
     "Handoff",
     "Invitation",
     "KnowledgeBase",
+    "Macro",
     "MagicLinkToken",
     "Membership",
     "Message",

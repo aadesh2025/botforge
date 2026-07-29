@@ -26,6 +26,7 @@ import {
 import { ContactAvatar, contactLabel } from "@/components/inbox/contact-avatar";
 import { ChannelNotConnected } from "@/components/inbox/channel-not-connected";
 import { ReplyBox } from "@/components/inbox/reply-box";
+import { RunMacro } from "@/components/inbox/run-macro";
 import { useSession } from "@/lib/store/session";
 
 const STATUS_FILTERS = [
@@ -285,6 +286,7 @@ function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
             <Bot className="size-4" /> Hand back
           </Button>
         )}
+        <RunMacro cid={cid} onRan={invalidate} />
         {detail?.status !== "closed" && (
           <Button size="sm" variant="outline" onClick={() => doClose.mutate()} disabled={doClose.isPending}>
             <Check className="size-4" /> Close
