@@ -162,7 +162,7 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
    `_live_version()`. New `GET/PATCH /v1/agents/{id}/widget-config` on `AGENTS_WRITE`, never
    `AGENTS_PUBLISH`. Legacy `persona.widget` writes are **routed** to the new store so old
    callers keep working instead of writing to a field nothing reads.
-3. **Invite acceptance** (`3a1f0c9`): the real bug — no frontend route called `accept_invitation()`.
+3. **Invite acceptance** (`0ef0b65`): the real bug — no frontend route called `accept_invitation()`.
    Page added at **`/invitations/accept`**, the path the emails already use (building at `/invite`
    would have stranded every already-sent invitation).
 
