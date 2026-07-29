@@ -21,6 +21,8 @@ export interface ApiContact {
   id: string;
   display_name: string | null;
   avatar_url: string | null;
+  /** Set once this handle is matched to a CRM person — the link target for the name. */
+  crm_contact_id: string | null;
 }
 
 export interface ApiInboxItem {

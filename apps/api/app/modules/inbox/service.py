@@ -14,7 +14,7 @@ from app.channels import get_channel, whatsapp
 from app.core import rbac
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.models import Channel, Contact, Conversation, Handoff, Message
+from app.models import Channel, Contact, Conversation, CrmContact, Handoff, Message
 from app.modules.conversations.schemas import MessageOut
 from app.modules.conversations.service import _message_out
 from app.modules.inbox import schemas
@@ -69,11 +69,18 @@ async def _message_count(session: AsyncSession, conversation_id: uuid.UUID) -> i
     return int((await session.execute(stmt)).scalar_one())
 
 
-def _contact_out(contact: Contact | None) -> schemas.ContactOut | None:
+def _contact_out(
+    contact: Contact | None, person: CrmContact | None = None
+) -> schemas.ContactOut | None:
+    """The name to show. A CRM link wins: a customer recognised by phone on a channel
+    they've never used before should still appear as themselves, not as a raw handle."""
     if contact is None:
         return None
     return schemas.ContactOut(
-        id=contact.id, display_name=contact.display_name, avatar_url=contact.avatar_url
+        id=contact.id,
+        display_name=(person.display_name if person else None) or contact.display_name,
+        avatar_url=contact.avatar_url,
+        crm_contact_id=contact.crm_contact_id,
     )
 
 
@@ -93,6 +100,11 @@ async def _item_out(
 ) -> schemas.InboxItemOut:
     if contact is None and conv.contact_id is not None:
         contact = await session.get(Contact, conv.contact_id)
+    person = (
+        await session.get(CrmContact, contact.crm_contact_id)
+        if contact is not None and contact.crm_contact_id is not None
+        else None
+    )
     return schemas.InboxItemOut(
         id=conv.id,
         agent_id=conv.agent_id,
@@ -104,7 +116,7 @@ async def _item_out(
         last_message_at=conv.last_message_at,
         created_at=conv.created_at,
         handoff=_handoff_out(await _latest_handoff(session, conv.id)),
-        contact=_contact_out(contact),
+        contact=_contact_out(contact, person),
     )
 
 

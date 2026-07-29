@@ -55,22 +55,35 @@ export function ContactDetailPanel({ contactId, onClose }: { contactId: string; 
 
   if (isLoading || !contact) {
     return (
-      <aside className="flex w-[360px] shrink-0 items-center justify-center border-l border-border">
+      <aside
+        aria-label="Contact details"
+        className="flex w-[360px] shrink-0 items-center justify-center border-l border-border"
+      >
         <Loader2 className="size-5 animate-spin text-ember-soft" />
       </aside>
     );
   }
 
-  const name = contact.display_name || contact.external_id;
+  const name = contact.display_name || contact.email || contact.phone || "Unnamed contact";
+  const primary = contact.channels[0];
   const orderValue = orderStatus ?? contact.order_status ?? "";
 
   return (
-    <aside className="flex w-[360px] shrink-0 flex-col overflow-y-auto border-l border-border scroll-thin">
+    <aside
+      aria-label="Contact details"
+      className="flex w-[360px] shrink-0 flex-col overflow-y-auto border-l border-border scroll-thin"
+    >
       <div className="flex items-start gap-3 border-b border-border p-4">
-        <ContactAvatar channel={contact.channel} name={name} avatarUrl={contact.avatar_url} />
+        <ContactAvatar
+          channel={primary?.channel ?? "manual"}
+          name={name}
+          avatarUrl={primary?.avatar_url ?? null}
+        />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-text">{name}</div>
-          <div className="text-xs text-faint">{channelMeta(contact.channel).label}</div>
+          <div className="text-xs text-faint">
+            {contact.channels.map((c) => channelMeta(c.channel).label).join(" · ") || "No channels yet"}
+          </div>
         </div>
         <button
           onClick={onClose}
@@ -85,13 +98,18 @@ export function ContactDetailPanel({ contactId, onClose }: { contactId: string; 
         <h3 className="text-xs font-medium uppercase tracking-wide text-faint">About</h3>
         <dl className="space-y-1.5 text-sm">
           <div className="flex justify-between gap-3">
-            <dt className="text-muted">Channel ID</dt>
-            <dd className="truncate font-mono text-xs text-text">{contact.external_id}</dd>
+            <dt className="text-muted">Email</dt>
+            <dd className="truncate text-text">{contact.email || "—"}</dd>
           </div>
-          {Object.entries(contact.extra).map(([k, v]) => (
-            <div key={k} className="flex justify-between gap-3">
-              <dt className="capitalize text-muted">{k}</dt>
-              <dd className="truncate text-text">{String(v)}</dd>
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted">Phone</dt>
+            <dd className="truncate text-text">{contact.phone || "—"}</dd>
+          </div>
+          {/* Every handle this person has been recognised on. */}
+          {contact.channels.map((c) => (
+            <div key={c.id} className="flex justify-between gap-3">
+              <dt className="text-muted">{channelMeta(c.channel).label}</dt>
+              <dd className="truncate font-mono text-xs text-text">{c.external_id}</dd>
             </div>
           ))}
           <div className="flex justify-between gap-3">

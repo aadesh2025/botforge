@@ -92,7 +92,7 @@ export function ContactsView({ initialId }: { initialId?: string }) {
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-faint">
                 <th scope="col" className="px-4 py-2.5 font-medium">Contact</th>
-                <th scope="col" className="px-3 py-2.5 font-medium">Channel</th>
+                <th scope="col" className="px-3 py-2.5 font-medium">Channels</th>
                 <th scope="col" className="px-3 py-2.5 font-medium">Stage</th>
                 <th scope="col" className="px-3 py-2.5 text-right font-medium">Convos</th>
                 <th scope="col" className="px-4 py-2.5 text-right font-medium">Last active</th>
@@ -112,7 +112,10 @@ export function ContactsView({ initialId }: { initialId?: string }) {
                 </tr>
               )}
               {items.map((c) => {
-                const name = c.display_name || c.external_id;
+                const name = c.display_name || c.email || c.phone || "Unnamed contact";
+                // The channel badge shows where they've messaged from — several, once
+                // they've been recognised on more than one.
+                const primary = c.channels[0]?.channel ?? "manual";
                 return (
                   <tr
                     key={c.id}
@@ -123,7 +126,12 @@ export function ContactsView({ initialId }: { initialId?: string }) {
                   >
                     <th scope="row" className="px-4 py-2.5 text-left font-normal">
                       <span className="flex items-center gap-2.5">
-                        <ContactAvatar channel={c.channel} name={name} avatarUrl={c.avatar_url} size="sm" />
+                        <ContactAvatar
+                          channel={primary}
+                          name={name}
+                          avatarUrl={c.channels[0]?.avatar_url ?? null}
+                          size="sm"
+                        />
                         <span className="min-w-0">
                           <span className="block truncate text-text">{name}</span>
                           {c.labels.length > 0 && (
@@ -135,7 +143,14 @@ export function ContactsView({ initialId }: { initialId?: string }) {
                       </span>
                     </th>
                     <td className="whitespace-nowrap px-3 py-2.5 text-muted">
-                      {channelMeta(c.channel).label}
+                      <span className="flex flex-wrap gap-1">
+                        {c.channels.length === 0 && <span className="text-xs text-faint">—</span>}
+                        {c.channels.map((ch) => (
+                          <Badge key={ch.id} variant="default">
+                            {channelMeta(ch.channel).label}
+                          </Badge>
+                        ))}
+                      </span>
                     </td>
                     <td className="px-3 py-2.5">
                       {c.lead_stage ? (

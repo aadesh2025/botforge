@@ -62,7 +62,7 @@ class InboundTurn:
         org_id = conv.organization_id
 
         history = await _load_history(session, conv.id)
-        _persist_user_message(session, conv, self.message)
+        await _persist_user_message(session, conv, self.message)
         await session.flush()
 
         # Paused for a human — persist the visitor message, but the bot stays silent.

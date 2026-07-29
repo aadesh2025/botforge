@@ -31,6 +31,14 @@ export interface ApiInvitation {
   expires_at: string;
 }
 
+/** Update org settings. Currently the auto-CRM-capture toggle; name/avatar live here too. */
+export function updateOrg(
+  orgId: string,
+  body: { name?: string; avatar_url?: string; auto_crm_capture_enabled?: boolean },
+) {
+  return api<ApiOrg>(`/v1/orgs/${orgId}`, { method: "PATCH", body });
+}
+
 export function listMembers(orgId: string) {
   return api<ApiMember[]>(`/v1/orgs/${orgId}/members`);
 }

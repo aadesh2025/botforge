@@ -7,7 +7,9 @@ person keep their identity across several conversations on the same channel.
 
 Identity is scoped per channel on purpose: the same human on Instagram and on WhatsApp
 arrives with two unrelated platform ids and no reliable way to link them. Cross-channel
-merging, if it's ever wanted, belongs on top of this table rather than inside it.
+merging lives *on top of* this table, in `CrmContact` (see `models/crm.py`) — which is
+where the person-level fields (lead stage, notes, labels) now live too, since they describe
+the human rather than one of their handles.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import ForeignKey, Index, String
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKey
@@ -46,12 +48,8 @@ class Contact(Base, UUIDPrimaryKey, TimestampMixin):
     # Whatever else the platform hands us: username, phone, email, locale.
     extra: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
 
-    # ── CRM fields, set by operators rather than by the platform ────────────────
-    #: new|contacted|qualified|customer|lost
-    lead_stage: Mapped[str | None] = mapped_column(String(32))
-    #: Free text: what counts as an order status is business-specific.
-    order_status: Mapped[str | None] = mapped_column(String(64))
-    #: Same shape as Handoff.notes — {"by", "text", "at"} — so both render the same way.
-    notes: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, nullable=False)
-    #: Same shape as Handoff.tags.
-    labels: Mapped[list[str]] = mapped_column(ARRAY(String), default=list, nullable=False)
+    #: The canonical person this handle belongs to, once we can tell. Null until an
+    #: email/phone links it — most contacts never share either.
+    crm_contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("crm_contacts.id", ondelete="SET NULL")
+    )

@@ -270,9 +270,13 @@ function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
         />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-text">
-            {/* Linked when we know who this is, so the operator can reach their CRM record. */}
-            {detail?.contact ? (
-              <Link href={`/contacts/${detail.contact.id}`} className="hover:text-ember-soft hover:underline">
+            {/* Linked only once this handle is matched to a CRM person — `contact.id` is
+                the per-channel handle, which the CRM (which lists people) can't resolve. */}
+            {detail?.contact?.crm_contact_id ? (
+              <Link
+                href={`/contacts/${detail.contact.crm_contact_id}`}
+                className="hover:text-ember-soft hover:underline"
+              >
                 {contactLabel(detail.contact, detail.channel_user_id)}
               </Link>
             ) : (

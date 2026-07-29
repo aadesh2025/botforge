@@ -6,18 +6,27 @@ import { api } from "./client";
 export const LEAD_STAGES = ["new", "contacted", "qualified", "customer", "lost"] as const;
 export type LeadStage = (typeof LEAD_STAGES)[number];
 
-export interface ApiCrmContact {
+/** One handle a person has messaged from. */
+export interface ApiLinkedChannel {
   id: string;
   channel: string;
   external_id: string;
   display_name: string | null;
   avatar_url: string | null;
+}
+
+/** A person, not a handle — several channels can belong to one of these. */
+export interface ApiCrmContact {
+  id: string;
+  display_name: string | null;
+  email: string | null;
+  phone: string | null;
   lead_stage: LeadStage | null;
   order_status: string | null;
   labels: string[];
-  extra: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  channels: ApiLinkedChannel[];
   last_active_at: string | null;
   conversation_count: number;
 }
@@ -85,7 +94,13 @@ export function getContact(id: string) {
 
 export function updateContact(
   id: string,
-  body: { lead_stage?: string | null; order_status?: string | null; display_name?: string },
+  body: {
+    lead_stage?: string | null;
+    order_status?: string | null;
+    display_name?: string;
+    email?: string | null;
+    phone?: string | null;
+  },
 ) {
   return api<ApiContactDetail>(`/v1/contacts/${id}`, { method: "PATCH", orgScoped: true, body });
 }

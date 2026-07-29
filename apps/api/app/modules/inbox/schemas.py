@@ -29,6 +29,8 @@ class ContactOut(BaseModel):
     id: uuid.UUID
     display_name: str | None
     avatar_url: str | None
+    #: Set once this handle has been matched to a CRM person, so the UI can link there.
+    crm_contact_id: uuid.UUID | None = None
 
 
 class InboxItemOut(BaseModel):

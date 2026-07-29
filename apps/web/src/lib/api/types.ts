@@ -37,6 +37,8 @@ export interface ApiOrg {
   slug: string;
   plan: string;
   avatar_url: string | null;
+  /** Detect contact details customers share in chat and file them in the CRM. */
+  auto_crm_capture_enabled?: boolean;
   role: string;
   created_at: string;
   updated_at: string;

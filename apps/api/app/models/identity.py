@@ -104,6 +104,10 @@ class Organization(Base, UUIDPrimaryKey, TimestampMixin, SoftDeleteMixin):
     avatar_url: Mapped[str | None] = mapped_column(String(1024))
     plan: Mapped[str] = mapped_column(String(32), default="free", nullable=False)  # free|pro|enterprise
     settings: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    #: Detect names/emails/phones customers share in chat and file them in the CRM.
+    #: Org-wide rather than per-agent: a client thinks about their business's CRM, not
+    #: about which bot happened to take the message. On by default, with an off switch.
+    auto_crm_capture_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
 
 

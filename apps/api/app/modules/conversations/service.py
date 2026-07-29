@@ -18,6 +18,7 @@ from app.core import rbac
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.crm import capture_from_message
 from app.llm.base import ChatProvider
 from app.llm.fake import FakeChatProvider, RefusalProvider
 from app.llm.registry import get_chat_provider, get_chat_provider_chain
@@ -145,12 +146,18 @@ async def _resolve_provider(
 
 
 # ── Persistence ─────────────────────────────────────────────────────────────────
-def _persist_user_message(session: AsyncSession, conv: Conversation, text: str) -> Message:
+async def _persist_user_message(session: AsyncSession, conv: Conversation, text: str) -> Message:
     msg = Message(conversation_id=conv.id, organization_id=conv.organization_id, role="user", content=text)
     session.add(msg)
     # Every inbound path funnels through here, so this is the one place the 24-hour
     # WhatsApp window clock is reset.
     conv.last_inbound_at = dt.datetime.now(tz=dt.UTC)
+    # …and the one place CRM capture can see every customer message, including ones sent
+    # while a human has taken the conversation over (which never reach a bot turn).
+    try:
+        await capture_from_message(session, conv, text)
+    except Exception as exc:  # capture is an enrichment, never a reason to drop a message
+        log.warning("crm_capture_failed", conversation=str(conv.id), error=str(exc))
     return msg
 
 
@@ -222,7 +229,7 @@ async def _prepare_turn(
     conv = await _get_or_create_conversation(session, ctx, agent, data.conversation_id)
 
     history = await _load_history(session, conv.id)
-    _persist_user_message(session, conv, data.message)
+    await _persist_user_message(session, conv, data.message)
     await session.flush()
 
     context_block, citations = await retrieve_for_version(session, ctx.org.id, version, data.message)

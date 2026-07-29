@@ -69,6 +69,7 @@ def _org_out(org: Organization, role: str) -> schemas.OrgOut:
         plan=org.plan,
         avatar_url=org.avatar_url,
         role=role,
+        auto_crm_capture_enabled=org.auto_crm_capture_enabled,
         created_at=org.created_at,
         updated_at=org.updated_at,
     )
@@ -151,6 +152,8 @@ async def update_org(session: AsyncSession, ctx: OrgContext, data: schemas.Updat
         ctx.org.avatar_url = data.avatar_url
     if data.settings is not None:
         ctx.org.settings = data.settings
+    if data.auto_crm_capture_enabled is not None:
+        ctx.org.auto_crm_capture_enabled = data.auto_crm_capture_enabled
     await _write_audit(session, ctx.org.id, ctx.user.id, "org.updated", target_type="org", target_id=str(ctx.org.id))
     return _org_out(ctx.org, ctx.role)
 

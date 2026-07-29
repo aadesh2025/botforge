@@ -7,6 +7,7 @@ from app.models.canned_responses import CannedResponse
 from app.models.channels import Channel
 from app.models.contacts import Contact
 from app.models.conversations import Conversation, Message
+from app.models.crm import CrmContact
 from app.models.help_articles import HelpArticle
 from app.models.identity import (
     EmailVerificationToken,
@@ -45,6 +46,7 @@ __all__ = [
     "Chunk",
     "Contact",
     "Conversation",
+    "CrmContact",
     "Document",
     "EmailVerificationToken",
     "FeatureFlag",

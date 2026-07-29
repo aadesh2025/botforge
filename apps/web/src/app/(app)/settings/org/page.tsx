@@ -16,7 +16,9 @@ import {
   listMembers,
   removeMember,
   revokeInvitation,
+  updateOrg,
 } from "@/lib/api/orgs";
+import { Switch } from "@/components/ui/switch";
 import { useSession, activeOrg } from "@/lib/store/session";
 import { useCan } from "@/lib/rbac";
 
@@ -25,9 +27,21 @@ const ASSIGNABLE = ["admin", "editor", "viewer", "operator"];
 export default function OrgSettingsPage() {
   const qc = useQueryClient();
   const org = useSession(activeOrg);
+  const orgs = useSession((s) => s.orgs);
+  const setOrgs = useSession((s) => s.setOrgs);
   const orgId = org?.id ?? "";
   const canManage = useCan("members:manage");
+  const canManageOrg = useCan("org:manage");
   const [inviteOpen, setInviteOpen] = useState(false);
+
+  const captureOn = org?.auto_crm_capture_enabled ?? true;
+  const saveCapture = useMutation({
+    mutationFn: (enabled: boolean) => updateOrg(orgId, { auto_crm_capture_enabled: enabled }),
+    onSuccess: (updated) => {
+      // Keep the session store in step so the switch doesn't snap back on re-render.
+      setOrgs(orgs.map((o) => (o.id === updated.id ? updated : o)));
+    },
+  });
 
   const { data: members } = useQuery({
     queryKey: ["members", orgId],
@@ -53,6 +67,26 @@ export default function OrgSettingsPage() {
 
   return (
     <div className="space-y-6">
+      <Section
+        title="Automatic CRM capture"
+        description="Automatically detect names, emails, and phone numbers customers share in chat and add them to your CRM."
+      >
+        <label className="flex items-center gap-3 text-sm text-text">
+          <Switch
+            aria-label="Automatic CRM capture"
+            checked={captureOn}
+            disabled={!canManageOrg || saveCapture.isPending}
+            onCheckedChange={(next) => saveCapture.mutate(next)}
+          />
+          <span>{captureOn ? "On" : "Off"}</span>
+          {saveCapture.isPending && <Loader2 className="size-4 animate-spin text-faint" />}
+        </label>
+        <p className="mt-2 text-xs text-faint">
+          Only runs when a message actually contains an email or phone number, and matches
+          returning customers by those — never by name.
+        </p>
+      </Section>
+
       <Section title="Organization profile" description="How your workspace appears across BotForge.">
         <div className="grid gap-5 sm:grid-cols-2">
           <div>

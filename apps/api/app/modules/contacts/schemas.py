@@ -1,10 +1,14 @@
-"""Contacts CRM schemas."""
+"""CRM schemas.
+
+These describe a **person** (`CrmContact`), not a handle. The per-channel `Contact` rows
+that belong to them are exposed as `channels` — that's what makes a returning customer
+visibly the same human across Instagram, WhatsApp and the web widget.
+"""
 
 from __future__ import annotations
 
 import datetime as dt
 import uuid
-from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -13,25 +17,34 @@ from pydantic import BaseModel, Field, field_validator
 LEAD_STAGES = ("new", "contacted", "qualified", "customer", "lost")
 
 
-class ContactOut(BaseModel):
+class LinkedChannelOut(BaseModel):
+    """One handle this person has messaged from."""
+
     id: uuid.UUID
     channel: str
     external_id: str
     display_name: str | None
     avatar_url: str | None
+
+
+class CrmContactOut(BaseModel):
+    id: uuid.UUID
+    display_name: str | None
+    email: str | None
+    phone: str | None
     lead_stage: str | None
     order_status: str | None
     labels: list[str]
-    extra: dict[str, Any]
     created_at: dt.datetime
     updated_at: dt.datetime
-    #: Newest activity across this contact's conversations — the CRM list's "last active".
+    channels: list[LinkedChannelOut] = []
+    #: Newest activity across every linked channel — the CRM list's "last active".
     last_active_at: dt.datetime | None = None
     conversation_count: int = 0
 
 
 class ContactListOut(BaseModel):
-    items: list[ContactOut]
+    items: list[CrmContactOut]
     total: int
     limit: int
     offset: int
@@ -53,19 +66,21 @@ class ContactNote(BaseModel):
     at: str
 
 
-class ContactDetail(ContactOut):
+class ContactDetail(CrmContactOut):
     notes: list[ContactNote]
     conversations: list[ContactConversationOut]
 
 
-class CreateContactRequest(BaseModel):
-    """Operator-created contact.
+def _validate_stage(v: str | None) -> str | None:
+    if v in (None, ""):
+        return None
+    if v not in LEAD_STAGES:
+        raise ValueError(f"must be one of {', '.join(LEAD_STAGES)}")
+    return v
 
-    Every other `Contact` row is upserted by an inbound channel message, so it arrives with
-    a real platform id. A manually-added one has none — it gets `channel="manual"` and a
-    synthetic `external_id`, which keeps the `(org, channel, external_id)` uniqueness
-    constraint meaningful instead of special-casing it.
-    """
+
+class CreateContactRequest(BaseModel):
+    """Operator-created contact — the one path into the CRM that isn't a chat message."""
 
     display_name: str = Field(min_length=1, max_length=255)
     email: str | None = Field(default=None, max_length=255)
@@ -76,26 +91,20 @@ class CreateContactRequest(BaseModel):
     @field_validator("lead_stage")
     @classmethod
     def _stage(cls, v: str | None) -> str | None:
-        if v in (None, ""):
-            return None
-        if v not in LEAD_STAGES:
-            raise ValueError(f"must be one of {', '.join(LEAD_STAGES)}")
-        return v
+        return _validate_stage(v)
 
 
 class UpdateContactRequest(BaseModel):
     lead_stage: str | None = Field(default=None, max_length=32)
     order_status: str | None = Field(default=None, max_length=64)
     display_name: str | None = Field(default=None, max_length=255)
+    email: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=64)
 
     @field_validator("lead_stage")
     @classmethod
     def _stage(cls, v: str | None) -> str | None:
-        if v in (None, ""):
-            return None
-        if v not in LEAD_STAGES:
-            raise ValueError(f"must be one of {', '.join(LEAD_STAGES)}")
-        return v
+        return _validate_stage(v)
 
 
 class LabelsRequest(BaseModel):
@@ -104,7 +113,7 @@ class LabelsRequest(BaseModel):
     @field_validator("labels")
     @classmethod
     def _clean(cls, v: list[str]) -> list[str]:
-        # De-duplicated, trimmed, order preserved — labels are chips, not a set the user sorts.
+        # De-duplicated, trimmed, order preserved — labels are chips, not a sorted set.
         seen: set[str] = set()
         out: list[str] = []
         for raw in v:

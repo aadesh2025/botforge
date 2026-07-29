@@ -19,6 +19,8 @@ class UpdateOrgRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     avatar_url: str | None = Field(default=None, max_length=1024)
     settings: dict[str, Any] | None = None
+    #: Detect contact details customers share in chat and file them in the CRM.
+    auto_crm_capture_enabled: bool | None = None
 
 
 class OrgOut(BaseModel):
@@ -28,6 +30,7 @@ class OrgOut(BaseModel):
     plan: str
     avatar_url: str | None
     role: str
+    auto_crm_capture_enabled: bool = True
     created_at: dt.datetime
     updated_at: dt.datetime
 

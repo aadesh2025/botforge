@@ -1,16 +1,22 @@
-"""Contacts CRM: list/segment/annotate the people behind conversations."""
+"""CRM: browse, segment and annotate the *people* behind conversations.
+
+Operates on `CrmContact` (one row per human) rather than `Contact` (one row per handle).
+The linked handles come along as `channels`, so an operator can see that the person who
+just messaged on Instagram is the same one who emailed last week.
+"""
 
 from __future__ import annotations
 
 import datetime as dt
 import uuid
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import rbac
 from app.core.errors import AppError
-from app.models import Contact, Conversation
+from app.crm.extract import normalize_email, normalize_phone
+from app.models import Contact, Conversation, CrmContact
 from app.modules.contacts import schemas
 from app.modules.orgs.deps import OrgContext
 
@@ -19,57 +25,64 @@ def _now_iso() -> str:
     return dt.datetime.now(tz=dt.UTC).isoformat()
 
 
-def _base_out(row: Contact, *, last_active: dt.datetime | None, conversations: int) -> schemas.ContactOut:
-    return schemas.ContactOut(
+def _linked_out(contact: Contact) -> schemas.LinkedChannelOut:
+    return schemas.LinkedChannelOut(
+        id=contact.id,
+        channel=contact.channel,
+        external_id=contact.external_id,
+        display_name=contact.display_name,
+        avatar_url=contact.avatar_url,
+    )
+
+
+def _base_out(
+    row: CrmContact,
+    *,
+    channels: list[Contact],
+    last_active: dt.datetime | None,
+    conversations: int,
+) -> schemas.CrmContactOut:
+    return schemas.CrmContactOut(
         id=row.id,
-        channel=row.channel,
-        external_id=row.external_id,
         display_name=row.display_name,
-        avatar_url=row.avatar_url,
+        email=row.email,
+        phone=row.phone,
         lead_stage=row.lead_stage,
         order_status=row.order_status,
         labels=list(row.labels),
-        extra=row.extra,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        channels=[_linked_out(c) for c in channels],
         last_active_at=last_active,
         conversation_count=conversations,
     )
 
 
-async def _get(session: AsyncSession, ctx: OrgContext, contact_id: uuid.UUID) -> Contact:
-    row = await session.get(Contact, contact_id)
+async def _get(session: AsyncSession, ctx: OrgContext, contact_id: uuid.UUID) -> CrmContact:
+    row = await session.get(CrmContact, contact_id)
     if row is None or row.organization_id != ctx.org.id:
         raise AppError("contacts.not_found", "Contact not found.", 404)
     return row
 
 
-def _apply_filters(
-    stmt: Select[tuple[Contact]],
-    *,
-    query: str | None,
-    lead_stage: str | None,
-    channel: str | None,
-    label: str | None,
-) -> Select[tuple[Contact]]:
-    if query:
-        # Name *or* platform id: an operator searching "15551234" means the phone number.
-        like = f"%{query.strip()}%"
-        stmt = stmt.where(Contact.display_name.ilike(like) | Contact.external_id.ilike(like))
-    if lead_stage:
-        stmt = stmt.where(Contact.lead_stage == lead_stage)
-    if channel:
-        stmt = stmt.where(Contact.channel == channel)
-    if label:
-        # `@>` containment, which is what the GIN index on `labels` serves.
-        stmt = stmt.where(Contact.labels.contains([label]))
-    return stmt
+async def _linked_contacts(
+    session: AsyncSession, person_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[Contact]]:
+    """Every handle for a page of people, in one query rather than one per row."""
+    if not person_ids:
+        return {}
+    stmt = select(Contact).where(Contact.crm_contact_id.in_(person_ids))
+    out: dict[uuid.UUID, list[Contact]] = {}
+    for c in (await session.execute(stmt)).scalars().all():
+        if c.crm_contact_id is not None:
+            out.setdefault(c.crm_contact_id, []).append(c)
+    return out
 
 
 async def _activity(
     session: AsyncSession, contact_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, tuple[dt.datetime | None, int]]:
-    """Last-active + conversation count for a page of contacts, in one query."""
+    """Last-active + conversation count, keyed by the *handle* they belong to."""
     if not contact_ids:
         return {}
     stmt = (
@@ -82,6 +95,38 @@ async def _activity(
         .group_by(Conversation.contact_id)
     )
     return {r[0]: (r[1], int(r[2])) for r in (await session.execute(stmt)).all()}
+
+
+def _apply_filters(
+    stmt: Select[tuple[CrmContact]],
+    *,
+    query: str | None,
+    lead_stage: str | None,
+    channel: str | None,
+    label: str | None,
+) -> Select[tuple[CrmContact]]:
+    if query:
+        # Name, email or phone on the person — or the raw platform id of any linked handle,
+        # since an operator searching "15551234" means the number they see in the inbox.
+        like = f"%{query.strip()}%"
+        handle_match = select(Contact.crm_contact_id).where(Contact.external_id.ilike(like))
+        stmt = stmt.where(
+            or_(
+                CrmContact.display_name.ilike(like),
+                CrmContact.email.ilike(like),
+                CrmContact.phone.ilike(like),
+                CrmContact.id.in_(handle_match),
+            )
+        )
+    if lead_stage:
+        stmt = stmt.where(CrmContact.lead_stage == lead_stage)
+    if channel:
+        # "People reachable on X" — expressed through their handles.
+        on_channel = select(Contact.crm_contact_id).where(Contact.channel == channel)
+        stmt = stmt.where(CrmContact.id.in_(on_channel))
+    if label:
+        stmt = stmt.where(CrmContact.labels.contains([label]))
+    return stmt
 
 
 async def list_contacts(
@@ -98,7 +143,7 @@ async def list_contacts(
     rbac.require_permission(ctx.role, rbac.READ)
 
     filtered = _apply_filters(
-        select(Contact).where(Contact.organization_id == ctx.org.id),
+        select(CrmContact).where(CrmContact.organization_id == ctx.org.id),
         query=query,
         lead_stage=lead_stage,
         channel=channel,
@@ -106,42 +151,66 @@ async def list_contacts(
     )
     total = int(
         (
-            await session.execute(
-                select(func.count()).select_from(filtered.order_by(None).subquery())
-            )
+            await session.execute(select(func.count()).select_from(filtered.order_by(None).subquery()))
         ).scalar_one()
     )
     rows = (
-        (await session.execute(filtered.order_by(Contact.updated_at.desc()).limit(limit).offset(offset)))
-        .scalars()
-        .all()
-    )
-    activity = await _activity(session, [r.id for r in rows])
-    items = [
-        _base_out(r, last_active=activity.get(r.id, (None, 0))[0], conversations=activity.get(r.id, (None, 0))[1])
-        for r in rows
-    ]
-    return schemas.ContactListOut(items=items, total=total, limit=limit, offset=offset)
-
-
-async def get_contact(session: AsyncSession, ctx: OrgContext, contact_id: uuid.UUID) -> schemas.ContactDetail:
-    rbac.require_permission(ctx.role, rbac.READ)
-    row = await _get(session, ctx, contact_id)
-    convs = (
         (
             await session.execute(
-                select(Conversation)
-                .where(Conversation.contact_id == row.id)
-                .order_by(func.coalesce(Conversation.last_message_at, Conversation.created_at).desc())
+                filtered.order_by(CrmContact.updated_at.desc()).limit(limit).offset(offset)
             )
         )
         .scalars()
         .all()
     )
-    last_active = max(
-        (c.last_message_at or c.created_at for c in convs), default=None
+
+    linked = await _linked_contacts(session, [r.id for r in rows])
+    handle_ids = [c.id for group in linked.values() for c in group]
+    activity = await _activity(session, handle_ids)
+
+    items: list[schemas.CrmContactOut] = []
+    for row in rows:
+        handles = linked.get(row.id, [])
+        stats = [activity.get(c.id, (None, 0)) for c in handles]
+        last_active = max((s[0] for s in stats if s[0] is not None), default=None)
+        items.append(
+            _base_out(
+                row,
+                channels=handles,
+                last_active=last_active,
+                conversations=sum(s[1] for s in stats),
+            )
+        )
+    return schemas.ContactListOut(items=items, total=total, limit=limit, offset=offset)
+
+
+async def get_contact(
+    session: AsyncSession, ctx: OrgContext, contact_id: uuid.UUID
+) -> schemas.ContactDetail:
+    rbac.require_permission(ctx.role, rbac.READ)
+    row = await _get(session, ctx, contact_id)
+    handles = (
+        (await session.execute(select(Contact).where(Contact.crm_contact_id == row.id)))
+        .scalars()
+        .all()
     )
-    base = _base_out(row, last_active=last_active, conversations=len(convs))
+    convs = []
+    if handles:
+        convs = list(
+            (
+                await session.execute(
+                    select(Conversation)
+                    .where(Conversation.contact_id.in_([c.id for c in handles]))
+                    .order_by(
+                        func.coalesce(Conversation.last_message_at, Conversation.created_at).desc()
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    last_active = max((c.last_message_at or c.created_at for c in convs), default=None)
+    base = _base_out(row, channels=list(handles), last_active=last_active, conversations=len(convs))
     return schemas.ContactDetail(
         **base.model_dump(),
         notes=[schemas.ContactNote(**n) for n in row.notes],
@@ -163,31 +232,35 @@ async def get_contact(session: AsyncSession, ctx: OrgContext, contact_id: uuid.U
 async def create_contact(
     session: AsyncSession, ctx: OrgContext, data: schemas.CreateContactRequest
 ) -> schemas.ContactDetail:
-    """Add a contact by hand — the first operator-initiated creation path.
+    """Add a person by hand — the one path into the CRM that isn't a chat message.
 
-    Everything else in this table is upserted from an inbound message, so it carries a real
-    platform id. A manual one has none, hence `channel="manual"` and a generated
-    `external_id`: the uniqueness constraint stays meaningful rather than being special-cased.
+    A `manual` handle is created alongside so the origin is visible in the channels row,
+    and so the person is reachable by the same `(org, channel, external_id)` lookups as
+    everyone else.
     """
     rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
-    extra: dict[str, str] = {}
-    if data.email:
-        extra["email"] = data.email.strip()
-    if data.phone:
-        extra["phone"] = data.phone.strip()
-
-    row = Contact(
+    person = CrmContact(
         organization_id=ctx.org.id,
-        channel="manual",
-        external_id=f"manual-{uuid.uuid4()}",
         display_name=data.display_name.strip(),
-        extra=extra,
+        email=normalize_email(data.email),
+        phone=normalize_phone(data.phone),
         lead_stage=data.lead_stage,
         order_status=data.order_status or None,
     )
-    session.add(row)
+    session.add(person)
     await session.flush()
-    return await get_contact(session, ctx, row.id)
+
+    session.add(
+        Contact(
+            organization_id=ctx.org.id,
+            channel="manual",
+            external_id=f"manual-{uuid.uuid4()}",
+            display_name=person.display_name,
+            crm_contact_id=person.id,
+        )
+    )
+    await session.flush()
+    return await get_contact(session, ctx, person.id)
 
 
 async def update_contact(
@@ -201,8 +274,12 @@ async def update_contact(
     if "order_status" in fields:
         row.order_status = data.order_status or None
     if "display_name" in fields and data.display_name:
-        # Operator-set names win: a later platform payload only fills blanks.
         row.display_name = data.display_name
+    # Normalised on write so a hand-typed detail still matches an auto-captured one later.
+    if "email" in fields:
+        row.email = normalize_email(data.email)
+    if "phone" in fields:
+        row.phone = normalize_phone(data.phone)
     await session.flush()
     return await get_contact(session, ctx, contact_id)
 

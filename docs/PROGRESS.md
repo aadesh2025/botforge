@@ -38,6 +38,26 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **CRM auto-capture with cross-channel identity (2026-07-29).** The "cross-channel merging
+  belongs on top of this table" extension `Contact`'s own docstring anticipated. New
+  `CrmContact` (migration `0013`) is the canonical *person*; `Contact` stays per-channel and
+  gains `crm_contact_id`. `lead_stage`/`order_status`/`notes`/`labels` moved off `Contact`
+  onto it (they describe the human, not a handle), with a backfill so no operator's data was
+  lost. **Extraction is gated**: a free regex pass answers "is there anything email- or
+  phone-shaped here?", and only then does one small-model call run — over just that message,
+  reusing the memory summarizer's provider pattern — to pull out an associated name and tidy
+  formatting. The regex result is the floor, so a useless model reply still keeps real data.
+  **Identity resolution matches on email or phone only, never name** — names collide, and a
+  wrong merge silently mixes two customers' histories. Normalisation (lowercased email,
+  digits-with-`+` phone) is what makes the same detail written three ways match itself.
+  Learning fills blanks only, so an operator's correction isn't overwritten by a later guess.
+  Org-level `auto_crm_capture_enabled`, **on by default with an off switch** on Settings.
+  The hook lives in `_persist_user_message`, the one place every inbound path funnels
+  through — including messages sent while a human has taken over, which never reach a bot
+  turn. 14 capture tests, 15 CRM tests, 3 Playwright checks.
+  **Behaviour change worth knowing:** the CRM lists people, so a visitor who never shares an
+  email or phone no longer appears there — they remain in the Inbox as a per-channel handle.
+  A CRM full of `anon-9f2c` rows would help nobody, but this is a visible difference.
 - **Contacts → CRM, plus manual contact creation (2026-07-29).** Nav item and page title
   renamed to "CRM"; the `/contacts` route is unchanged, so the Inbox's contact link still
   resolves. New `POST /v1/contacts` adds the first **operator-initiated** creation path —
@@ -289,6 +309,12 @@ List any provider/channel/billing key that is stubbed and needs a real value. (S
   record via the signed callback, but a late result is not re-injected into the same generation
   turn. Options: a "pending → notify" follow-up message on the conversation, or a short bounded
   wait on the callback before the turn ends. Deferred; the callback + record resolution work.
+- **The E2E suite has outgrown the hardcoded public rate limits.** At 41 specs, a full
+  back-to-back `playwright test` run intermittently trips `public_chat` (60/min) and
+  `channel_webhook` (120/min) — 19 `429`s in one observed run — so a handful of specs fail and
+  pass again in isolation. `AUTH_RATE_LIMIT` is already env-tunable for exactly this reason;
+  these two are not. Fix: make their limits settings-driven and lift them in the E2E env,
+  rather than raising them in production defaults.
 - **Dashboard `AgentsPanel` / `ConversationsPanel` still render mock data.** `dashboard/page.tsx`
   passes `agents` and `recentConversations` from `@/lib/mock/data` into those two panels, so a
   fresh org sees invented agents ("Support Concierge", 1.3K chats) and invented conversations
