@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import rbac
 from app.core.audit import write_audit
 from app.core.config import settings
-from app.core.email import EmailMessage, get_email_backend
+from app.core.email import EmailMessage, queue_email
+from app.core.email_templates import invitation_email
 from app.core.errors import AppError
 from app.core.security import generate_opaque_token, hash_token
 from app.models import AuditLog, Invitation, Membership, Organization, User
@@ -253,13 +254,8 @@ async def create_invitation(
     await session.flush()
 
     link = f"{settings.web_base_url}/invitations/accept?token={raw}"
-    await get_email_backend().send(
-        EmailMessage(
-            to=email,
-            subject=f"You're invited to {ctx.org.name}",
-            body=f"Join {ctx.org.name} as {role}: {link}\nToken: {raw}",
-        )
-    )
+    subject, text, html = invitation_email(ctx.org.name, role, link, raw)
+    await queue_email(EmailMessage(to=email, subject=subject, body=text, html_body=html))
     await _write_audit(
         session, ctx.org.id, ctx.user.id, "invitation.created",
         target_type="invitation", target_id=str(invitation.id), meta={"email": email, "role": role},

@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -87,10 +87,31 @@ class Settings(BaseSettings):
     github_client_secret: str | None = None
 
     # --- Email ---
+    # `console` logs to an in-memory outbox (dev/test). `smtp` delivers for real through any
+    # SMTP relay — Resend/Postmark/SendGrid/SES/Mailgun all speak it, so switching provider is
+    # an env change, never a code change.
     email_backend: Literal["console", "smtp"] = "console"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    smtp_from: str = ""
+    # How long a request will wait to hand an email to the queue before giving up on it.
+    # Small on purpose: the queue being unreachable must not become the user's problem.
+    email_enqueue_timeout_seconds: float = 2.0
 
     # --- Observability ---
     sentry_dsn: str | None = None
+
+    @field_validator("smtp_port", mode="before")
+    @classmethod
+    def _blank_port_is_the_default(cls, v: object) -> object:
+        """`SMTP_PORT=` (blank, as shipped in .env.example) means "use the default", not a crash.
+
+        Same blank-is-unset convention ADR-020 applied to env-provided provider keys — an
+        unfilled placeholder must never stop the app booting.
+        """
+        return 587 if v is None or (isinstance(v, str) and not v.strip()) else v
 
     @property
     def cors_origin_list(self) -> list[str]:

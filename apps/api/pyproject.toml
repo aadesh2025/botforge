@@ -25,6 +25,9 @@ dependencies = [
     # boilerplate that a regex tag-strip would fold into the article text.
     "trafilatura>=1.12",
     "sentry-sdk[fastapi]>=2.0",
+    # Async SMTP: the stdlib `smtplib` is blocking and would stall the event loop on
+    # every send. One SMTP client covers every relay (Resend/Postmark/SendGrid/SES/...).
+    "aiosmtplib>=3.0",
 ]
 
 [dependency-groups]

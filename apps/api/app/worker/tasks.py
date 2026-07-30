@@ -85,6 +85,29 @@ def deliver_webhook_task(self: object, delivery_id: str) -> bool:
     return ok
 
 
+async def _run_send_email(to: str, subject: str, body: str, html_body: str | None) -> None:
+    from app.core.email import EmailMessage, get_email_backend
+
+    await get_email_backend().send(
+        EmailMessage(to=to, subject=subject, body=body, html_body=html_body)
+    )
+
+
+@celery_app.task(name="email.send", bind=True, max_retries=3)  # type: ignore[untyped-decorator]
+def send_email_task(
+    self: object, to: str, subject: str, body: str, html_body: str | None = None
+) -> None:
+    """Deliver one email out-of-band so a slow relay never blocks an HTTP request.
+
+    Retries with backoff: a relay that is briefly down shouldn't lose someone's invitation.
+    """
+    try:
+        _run(_run_send_email(to, subject, body, html_body))
+    except Exception as exc:
+        log.warning("email_task_failed", to=to, subject=subject, error=str(exc))
+        raise self.retry(countdown=60, exc=exc) from exc  # type: ignore[attr-defined]
+
+
 async def _run_sweep() -> int:
     from app.webhooks.dispatch import sweep_due_deliveries
 

@@ -38,6 +38,41 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Email actually gets delivered (2026-07-30).** `app/core/email.py` had exactly one backend —
+  `ConsoleEmailBackend`, an in-memory outbox — and `get_email_backend()`'s `"smtp"` branch logged
+  `smtp_backend_not_implemented` and fell back to it. So **no email this app sent had ever reached
+  a real inbox**: not invitations, not signup verification, not password reset, not magic-link
+  sign-in. All four already funnelled through one `send()` call, so this was a one-place fix.
+  New `SmtpEmailBackend` over **aiosmtplib** (async — stdlib `smtplib` would block the event loop
+  on every send). **Plain SMTP, not a provider SDK**: Resend/Postmark/SendGrid/Mailgun/SES all
+  expose a relay taking the same five settings, so switching provider is an env change. TLS mode
+  is derived from the port (465 = implicit, everything else = STARTTLS) because providers publish
+  both and the flag they want isn't something an operator should have to know; TLS is never
+  optional. Unset `SMTP_HOST`/`SMTP_FROM` raises a typed `email.not_configured` rather than
+  dropping the message (CLAUDE.md §7) — a swallowed invitation looks exactly like a delivered one.
+  New `app/core/email_templates.py` gives the four emails an HTML part (plain text alone reads as
+  broken/spam in a modern inbox); the text part **keeps its `Token: …` line**, which is load-bearing
+  — a dozen test files recover tokens by parsing it out of the console outbox.
+  **Sending moved off the request path** onto a new `email.send` Celery task, and two real hazards
+  turned up while verifying it live: (1) `.delay()` is blocking socket I/O, so on the event loop it
+  would stall every concurrent request, not just its own; (2) against a dead broker kombu retries
+  the connection 20× with 1s sleeps **regardless of `retry=False`**, which measured as a **30-second
+  hung signup**. The enqueue therefore runs in a worker thread under a bounded
+  `email_enqueue_timeout_seconds` (default 2s) and is abandoned on timeout — losing a queued email
+  beats losing the signup that triggered it. Measured after the fix: 6.2s vs a 4.3s
+  console-backend-with-dead-Redis control, i.e. ~2s of email cost, down from ~26s.
+  Console mode still sends **inline**, deliberately not through eager Celery: eager tasks run in the
+  caller's thread where `app/worker/tasks._run`'s `asyncio.run()` raises inside the already-running
+  loop — the same trap that silently broke eager ingestion (CLAUDE.md §12). That's also what keeps
+  the test outbox synchronous, so every existing email test is untouched.
+  `SMTP_PORT=` ships blank in `.env.example`, which pydantic can't coerce to `int`, so a
+  before-validator reads blank as the default 587 (ADR-020's blank-is-unset convention) — an
+  unfilled placeholder must never stop the app booting. 18 backend tests.
+  **Still needs a human:** sign up with an SMTP provider, verify the sending domain (SPF/DKIM), and
+  fill in `SMTP_*`. No code can skip that — it's how Gmail decides the mail isn't spoofed.
+  **Noticed, not fixed:** with Redis down, a signup takes ~4.3s even on the console backend — the
+  rate limiter's Redis probe has no timeout before falling back to in-memory. Pre-existing and
+  unrelated to email; logged in the roadmap below.
 - **Invitations can actually be accepted (2026-07-29).** `accept_invitation()` was correct and
   complete server-side, but **nothing in the web app ever called it** — the email link had
   nowhere to land, so an invitation could never leave "pending" no matter what the recipient
@@ -339,6 +374,13 @@ List any provider/channel/billing key that is stubbed and needs a real value. (S
   behind the same `subscribe`/`unsubscribe`/`publish` interface; cross-node delivery is tested.
 - ✅ ~~**Webhook retry sweep.**~~ **DONE (Phase 20).** `webhooks.sweep_pending` Celery beat job
   re-enqueues `pending` deliveries past `next_retry_at`; a `beat` service runs it.
+- **The rate limiter has no timeout on its Redis probe.** Measured 2026-07-30 while verifying the
+  email work: with Redis unreachable, a signup takes **~4.3s** before `ratelimit_redis_unavailable`
+  fires and the in-memory fallback takes over — per request, on every rate-limited endpoint (auth,
+  public chat, channel webhooks). The fallback is correct, it's just reached slowly. Fix: a short
+  connect/op timeout on the limiter's Redis client, or a cached "Redis is down" flag with a
+  re-probe interval so only the first request pays. Unrelated to email; email's own enqueue is
+  already bounded.
 - **Async n8n late-result re-injection** (from ADR-025): async n8n tools resolve the `tool_run`
   record via the signed callback, but a late result is not re-injected into the same generation
   turn. Options: a "pending → notify" follow-up message on the conversation, or a short bounded

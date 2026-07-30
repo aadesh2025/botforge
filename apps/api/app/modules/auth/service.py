@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.crypto import encrypt
-from app.core.email import EmailMessage, get_email_backend
+from app.core.email import EmailMessage, queue_email
+from app.core.email_templates import (
+    magic_link_email,
+    password_reset_email,
+    verification_email,
+)
 from app.core.errors import AppError
 from app.core.security import (
     create_access_token,
@@ -71,8 +76,9 @@ async def _issue_tokens(
     return schemas.TokenPair(access_token=create_access_token(user.id), refresh_token=refresh)
 
 
-async def _send_email(to: str, subject: str, body: str) -> None:
-    await get_email_backend().send(EmailMessage(to=to, subject=subject, body=body))
+async def _send_email(to: str, template: tuple[str, str, str]) -> None:
+    subject, text, html = template
+    await queue_email(EmailMessage(to=to, subject=subject, body=text, html_body=html))
 
 
 async def _get_user_by_email(session: AsyncSession, email: str) -> User | None:
@@ -183,7 +189,7 @@ async def _create_and_send_verification(session: AsyncSession, user: User) -> No
         )
     )
     link = f"{settings.web_base_url}/verify?token={raw}"
-    await _send_email(user.email, "Verify your email", f"Confirm your email: {link}\nToken: {raw}")
+    await _send_email(user.email, verification_email(link, raw))
 
 
 async def verify_email(session: AsyncSession, token: str) -> None:
@@ -217,7 +223,7 @@ async def forgot_password(session: AsyncSession, email: str) -> None:
         PasswordResetToken(user_id=user.id, token_hash=hash_token(raw), expires_at=_now() + RESET_TTL)
     )
     link = f"{settings.web_base_url}/reset?token={raw}"
-    await _send_email(user.email, "Reset your password", f"Reset your password: {link}\nToken: {raw}")
+    await _send_email(user.email, password_reset_email(link, raw))
 
 
 async def reset_password(session: AsyncSession, token: str, new_password: str) -> None:
@@ -252,7 +258,7 @@ async def magic_link(session: AsyncSession, email: str) -> None:
         MagicLinkToken(user_id=user.id, token_hash=hash_token(raw), expires_at=_now() + MAGIC_TTL)
     )
     link = f"{settings.web_base_url}/magic?token={raw}"
-    await _send_email(user.email, "Your sign-in link", f"Sign in: {link}\nToken: {raw}")
+    await _send_email(user.email, magic_link_email(link, raw))
 
 
 async def magic_link_verify(

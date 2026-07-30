@@ -63,7 +63,31 @@ serves photos from token-bearing URLs we deliberately never persist (see ADR-036
 | `N8N_WEBHOOK_SIGNING_SECRET` | sign BotForge→n8n calls | generate |
 
 ## Email
-`SMTP_HOST/PORT/USER/PASS/FROM` or `EMAIL_BACKEND=console` (dev). Console needs no human.
+
+Four emails go out: organization invitations, signup verification, password reset, and
+magic-link sign-in. All four funnel through one backend chosen by `EMAIL_BACKEND`.
+
+| Var | Purpose | Needs human |
+|---|---|---|
+| `EMAIL_BACKEND` | `console` (in-memory outbox, dev/test default) or `smtp` (real delivery) | no |
+| `SMTP_HOST` | relay hostname, e.g. `smtp.resend.com` | yes |
+| `SMTP_PORT` | relay port; blank is read as the default `587` (STARTTLS) | no |
+| `SMTP_USER` / `SMTP_PASS` | relay credentials from your provider | yes |
+| `SMTP_FROM` | envelope sender, e.g. `BotForge <noreply@yourdomain.com>` | yes |
+
+**Plain SMTP on purpose.** Resend, Postmark, SendGrid, Mailgun and Amazon SES all expose an
+SMTP relay with exactly these settings, so changing provider is an env change and never a code
+change. Resend or Postmark are the easiest starting points for a solo operator.
+
+**Code alone does not get you delivered mail.** You still have to verify your sending domain
+with the provider (SPF/DKIM DNS records — their dashboard walks you through it). Without it the
+receiving server has no way to tell your mail from a spoof, and Gmail will bin it.
+
+With `EMAIL_BACKEND=smtp`, sends run on the **Celery worker**, so a slow or dead relay can never
+hang or 500 a signup/invite/reset request; failures retry with backoff. `console` sends inline —
+there is nothing to protect the request from — which is also what keeps the test outbox
+synchronous. If `SMTP_HOST`/`SMTP_FROM` are unset while the backend is `smtp`, a send raises
+`email.not_configured` rather than silently dropping the message.
 
 ## Billing (optional)
 `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_*` — needs-human; unset → billing
