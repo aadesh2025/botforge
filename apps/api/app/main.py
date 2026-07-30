@@ -54,6 +54,19 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 def _warn_missing_secrets() -> None:
     """Loudly note stubbed features so the human knows what to fill in (CLAUDE.md §7)."""
+    if settings.llm_force_fake:
+        # Announce this at the top and unmissably. A fake-forced process answers every chat
+        # with a literal "echo: <your message>" stub, which reads exactly like a broken or
+        # lobotomised model rather than a config choice — an hour was lost to a Playground
+        # pointed at the E2E instance before anyone suspected the flag.
+        log.warning(
+            "llm_force_fake_enabled",
+            effect="EVERY chat reply is a stub echo and EVERY embedding is fake",
+            impact="test/CI only — never serve a Playground, widget or customer from this process",
+            fix="unset LLM_FORCE_FAKE to use the agent's configured provider",
+        )
+        if settings.is_prod:
+            log.error("llm_force_fake_in_production", effect="all AI replies are stubs")
     if settings.secret_key == "dev-insecure-change-me" and settings.is_prod:
         log.warning("insecure_secret_key", hint="Set SECRET_KEY in production")
     if not settings.groq_api_key:

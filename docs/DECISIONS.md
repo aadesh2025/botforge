@@ -63,9 +63,69 @@ Format each entry as below. Newest at the top.
   `settings`) have no importers at all and are dead files — left in place rather than widening
   this change, and noted in the roadmap.
 
+### ADR-042: n8n workflow visibility flipped to deny-by-default
+- **Date:** 2026-07-31
+- **Status:** accepted (supersedes the permissive default in ADR-040)
+- **Context:** ADR-040 scoped workflows by n8n tag but kept **untagged = visible to every org**,
+  a deliberate transition default so the operator's existing, not-yet-tagged workflows didn't
+  vanish the moment it shipped. Live testing showed what that means in practice: a brand-new,
+  empty org opens Automations and sees every other client's automations plus the internal ones
+  that aren't caught by the `SHARED —` name check. Untagged is the state every workflow starts
+  in and the one nobody remembers to leave, so "untagged" was never a small residual set — it
+  was the whole inventory. ADR-040 itself flagged this as the follow-up to do "before ~20
+  clients share one n8n"; the live evidence moved it forward.
+- **Decision:** `workflow_visible_to_org` is now **deny-by-default**. A workflow reaches an org
+  only when it is tagged with that org's slug, or with **`shared-template`** — an explicit,
+  opt-in escape hatch for genuinely reusable starters every org may browse. Internal tags still
+  hide unconditionally and now take precedence over `shared-template` too, so labelling
+  something both ways still fails closed. The `SHARED —` name check is kept as a safety net:
+  redundant under deny-by-default (untagged is hidden anyway), but it still catches an internal
+  workflow that someone mistakenly tags with a client slug.
+- **Why `shared-template` rather than nothing:** without it, the only way to share a starter
+  workflow with every client is to tag it with each org's slug and remember to add the next one.
+  It is strictly opt-in, so it cannot cause the accidental exposure the old default did.
+- **Consequences:** an operator who forgets to tag now leaks nothing — the workflow simply
+  doesn't appear until it is labelled, which is a visible, fixable annoyance rather than a silent
+  cross-tenant disclosure. The cost is real, though: **every existing untagged workflow became
+  invisible the moment this shipped**, including ones already bound as tools. A bound-but-hidden
+  tool keeps working (the runtime calls the stored `webhook_url` and never re-checks visibility),
+  but it can no longer be re-bound or discovered. `scripts/tag-n8n-workflows.mjs` applies the
+  known mapping, and the admin console's Automations table (below) lists what is still unowned.
+  Binding by a pasted webhook URL remains uncovered, exactly as in ADR-040 — treat those URLs as
+  secrets.
+- **Provisioning now tags at clone time.** `provision-client.mjs` tags each cloned workflow with
+  the new org's real slug (from the API, not `slugify(name)` — the backend suffixes on collision)
+  **before** binding it. This ordering is load-bearing: `POST /v1/tools/n8n/bind` resolves by
+  `workflow_id` and applies the same visibility rule, so an untagged clone would be refused with
+  `tools.n8n_forbidden`. A tag failure is therefore fatal to the run rather than a warning —
+  continuing would hand the client an automation they cannot see.
+- **Operational prerequisite:** tagging needs an n8n API key with **tag read/create** scopes plus
+  workflow "update tags". A workflow-only key returns 403 on every tag call. Both the one-off
+  script and the provisioner preflight this and say so, rather than half-tagging an inventory.
+
+### ADR-043: Cross-org automations overview in the admin console
+- **Date:** 2026-07-31
+- **Status:** accepted
+- **Context:** with visibility deny-by-default, "which workflow belongs to whom" became
+  operationally load-bearing, and the only way to answer it was to switch into each org in turn —
+  which by definition cannot show internal or unowned workflows at all.
+- **Decision:** `GET /v1/admin/automations` (staff-only, org-agnostic — the ADR-032 pattern)
+  returns every n8n workflow with its tag-derived owner, active state, and the BotForge tools
+  bound to it, joined from `tools.config->>'workflow_id'`. It **reports** rather than filters:
+  `_resolve_owner` mirrors `workflow_visible_to_org`'s precedence but classifies instead of
+  hiding, so staff see the `internal`, `untagged` and `unknown-org` rows a client never would.
+  Unowned rows sort first — the table is a to-do list for the tagging backlog, not a catalogue.
+- **Consequences:** an unreachable or keyless n8n returns `200` with an `error` string and an
+  empty list rather than a 500, so the console can say "couldn't reach n8n" instead of rendering
+  an empty table that reads as "no automations exist". `unknown-org` (a tag matching no
+  organization slug) is surfaced separately from `untagged` because it is almost always a typo,
+  and the two need different fixes.
+
 ### ADR-040: n8n workflow visibility scoped per org by tag, not shown unfiltered
 - **Date:** 2026-07-30
-- **Status:** accepted
+- **Status:** **superseded by ADR-042** — the permissive "untagged = visible to all" default
+  described below was reversed to deny-by-default on 2026-07-31. The tag mechanism, the internal
+  tags and the `SHARED —` safety net all still stand.
 - **Context:** `GET /v1/tools/n8n/workflows` called `N8nClient.list_workflows()` and returned
   *every* workflow in the single shared n8n instance to *every* org — no tenant filtering at
   all. Once real client orgs exist alongside platform-internal workflows (e.g. an admin

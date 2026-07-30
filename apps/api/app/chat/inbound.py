@@ -109,7 +109,12 @@ class InboundTurn:
         )
         provider_name = (self.version.model_config_json or {}).get("provider", "fake")
         provider = await _resolve_provider(
-            session, org_id, self.agent, provider_name, self.version.model_config_json or {}
+            session,
+            org_id,
+            self.agent,
+            provider_name,
+            self.version.model_config_json or {},
+            fallback_message=self.version.fallback_message,
         )
         req = _build_chat_request(self.version, messages, stream=True)
 

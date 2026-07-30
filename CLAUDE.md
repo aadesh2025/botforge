@@ -153,6 +153,48 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-07-31 — Playground answered "echo: …"; a missing key did the same to real customers
+- **Root cause was environmental, not code.** The dev web server was pointed at `:8010` — the
+  keyless **E2E** API, which runs `LLM_FORCE_FAKE=true`. `get_chat_provider()` checks that flag
+  *before* any per-agent config, so every agent answers with the stub echo. Proved by asking the
+  same agent the same question on both ports: `:8000` → grounded Groq answer with citations,
+  `:8010` → `echo: …`. The agent's stored config was never `fake` (published v1–v3 are Groq).
+  Fixed by repointing the web at `:8000`; verified with a real multi-turn conversation.
+- **The serious find, live in production code:** `conversations/service._resolve_provider` caught
+  provider-resolution failures and substituted `FakeChatProvider()` — so an expired or revoked
+  API key would answer **every visitor on a client's site** with `echo: <their own words>`. Now
+  returns `RefusalProvider(fallback_message)` + logs `chat_provider_unavailable` at error level.
+  The Playground re-raises the typed `llm.provider_unavailable` instead of stubbing, and
+  `LLM_FORCE_FAKE=true` now announces itself loudly at startup (error-level under prod).
+- **Latent bug it exposed:** `provider: "fake"` never actually resolved (`fake` isn't in
+  `PROVIDER_CATALOG`, so it hit the requires-a-key branch) — it only worked because those same
+  catch-alls swallowed the error. Resolved before the key check now.
+- **⚠️ Needs a human:** the "aurozen ai" **draft** (v4) is `openai/gpt-4o` with no `OPENAI_API_KEY`,
+  and the Playground always runs the draft — it will now say "No API key configured for 'openai'"
+  rather than echo. Switch the Model tab back to Groq or add a key; published v3 is fine.
+- Suites: **331 pytest**, ruff + mypy clean.
+
+### 2026-07-31 — n8n visibility flipped to deny-by-default + staff automations console
+- **The permissive default was wrong and live testing proved it.** ADR-040 kept "untagged =
+  visible to every org" as a transition aid; a brand-new, empty org still saw every untagged
+  workflow — other clients' automations and internal ones alike — because untagged is the state
+  every workflow starts in. `workflow_visible_to_org` now grants access **only** on the org's
+  slug tag or the new opt-in `shared-template`; internal tags beat both. Verified live: a fresh
+  org gets `[]` where it used to get the whole list. ADR-042 supersedes ADR-040.
+- **Provisioning tags at clone time**, using the org's real slug from the API (not
+  `slugify(name)` — the backend suffixes on collision) and **before** the bind, since
+  `/v1/tools/n8n/bind` applies the same rule and would refuse an untagged clone.
+- **New staff console section** (ADR-043): `GET /v1/admin/automations` + an Automations table on
+  `/admin` — every workflow across every tenant with tag-derived owner, active state and its
+  bindings. Unowned rows sort first; it doubles as the tagging backlog. n8n being down returns a
+  typed `error`, not a 500. Plus `scripts/tag-n8n-workflows.mjs` (dry-run by default, idempotent).
+- **⚠️ The tagging itself is BLOCKED and nothing is tagged yet:** the n8n API key has workflow
+  scopes but **403s on all tag endpoints**, so every workflow is currently invisible to every org.
+  Bound tools keep working (the runtime uses the stored `webhook_url`), but nothing can be
+  discovered or re-bound until a key with tag scopes is minted and the script re-run. `:5678` is
+  a different instance entirely and 401s BotForge's key.
+- Suites: **327 pytest**, ruff + mypy clean, 10 `node --test`, tsc + eslint clean.
+
 ### 2026-07-31 — logged out right after logging in (AuthGate treated an abort as a 401)
 - **A navigation during session bootstrap logged the user out.** `AuthGate` runs
   `Promise.all([me(), listOrgs()])` on every page load under a bare `catch` that called

@@ -154,6 +154,13 @@ async def get_chat_provider(
     # E2E/CI override: run every agent on the deterministic Fake provider (no keys).
     if settings.llm_force_fake:
         return FakeChatProvider()
+    # An agent deliberately configured for `fake` (the test suites do this) resolves here,
+    # before the key check: `fake` isn't in PROVIDER_CATALOG, so it would otherwise fall into
+    # the requires-a-key branch and raise. That went unnoticed while callers caught the error
+    # and substituted the fake provider themselves — which is exactly the behaviour that let a
+    # missing *real* key answer customers with `echo:`.
+    if provider == "fake":
+        return FakeChatProvider()
     api_key, base_url = await resolve_credential(session, org_id, provider, agent_id=agent_id)
     meta = PROVIDER_CATALOG.get(provider, {})
     if meta.get("requires_key", True) and not api_key:

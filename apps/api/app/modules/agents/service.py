@@ -19,7 +19,6 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.llm.base import ChatProvider
-from app.llm.fake import FakeChatProvider
 from app.llm.registry import get_chat_provider, get_chat_provider_chain
 from app.llm.types import ChatRequest, Message
 from app.models import Agent, AgentVersion, WidgetConfig
@@ -483,9 +482,14 @@ async def _resolve_playground_provider(
             )
         return await get_chat_provider(session, ctx.org.id, provider, agent_id=agent.id)
     except AppError:
-        # No key configured → stub with the fake provider so the build isn't blocked (CLAUDE §7).
-        log.warning("playground_stub_provider", provider=provider, agent_id=str(agent.id))
-        return FakeChatProvider()
+        # Deliberately re-raised rather than stubbed. The Playground exists to answer "is my
+        # agent configured correctly?", and a fake reply answers it wrongly: `echo: hi` looks
+        # like a broken model, so the operator debugs the persona instead of the missing key.
+        # The typed `llm.provider_unavailable` names the actual problem. (This supersedes the
+        # CLAUDE §7 build-time stub here; §7 is about not blocking the *build*, and the fake
+        # provider is still reachable by configuring `provider: "fake"` explicitly.)
+        log.warning("playground_provider_unavailable", provider=provider, agent_id=str(agent.id))
+        raise
 
 
 async def _playground_tooling(

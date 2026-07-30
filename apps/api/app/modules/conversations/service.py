@@ -20,7 +20,7 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.crm import capture_from_message
 from app.llm.base import ChatProvider
-from app.llm.fake import FakeChatProvider, RefusalProvider
+from app.llm.fake import RefusalProvider
 from app.llm.registry import get_chat_provider, get_chat_provider_chain
 from app.llm.types import ChatRequest, StreamEvent
 from app.llm.types import Message as LLMMessage
@@ -132,17 +132,32 @@ async def _resolve_provider(
     agent: Agent,
     provider: str,
     model_config: dict[str, Any] | None = None,
+    fallback_message: str | None = None,
 ) -> ChatProvider:
-    """The agent's provider, wrapped in its configured fallback chain when it has one."""
+    """The agent's provider, wrapped in its configured fallback chain when it has one.
+
+    When no provider can be resolved — key missing, revoked, or every fallback exhausted —
+    the visitor gets the agent's own fallback message. It must **never** be the fake provider:
+    that answers with a literal `echo: <whatever they just typed>`, so an expired API key
+    would have every customer on a client's site talking to a parrot that repeats them back,
+    with nothing but a log line to say why. A plain "I can't answer right now" is honest, and
+    the loud error below is what tells the operator to go fix the key.
+    """
     try:
         if model_config:
             return await get_chat_provider_chain(
                 session, org_id, model_config, agent_id=agent.id, resolve=get_chat_provider
             )
         return await get_chat_provider(session, org_id, provider, agent_id=agent.id)
-    except AppError:
-        log.warning("chat_stub_provider", provider=provider, agent_id=str(agent.id))
-        return FakeChatProvider()
+    except AppError as exc:
+        log.error(
+            "chat_provider_unavailable",
+            provider=provider,
+            agent_id=str(agent.id),
+            error=exc.message,
+            effect="answering with the agent's fallback message",
+        )
+        return RefusalProvider(fallback_message or _DEFAULT_REFUSAL, name="unavailable")
 
 
 # ── Persistence ─────────────────────────────────────────────────────────────────
@@ -243,7 +258,12 @@ async def _prepare_turn(
     )
     provider_name = (version.model_config_json or {}).get("provider", "fake")
     provider = await _resolve_provider(
-        session, ctx.org.id, agent, provider_name, version.model_config_json or {}
+        session,
+        ctx.org.id,
+        agent,
+        provider_name,
+        version.model_config_json or {},
+        fallback_message=version.fallback_message,
     )
     req = _build_chat_request(version, messages, stream=stream)
 

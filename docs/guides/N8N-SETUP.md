@@ -62,23 +62,62 @@ triggers the workflow and uses its response. (This full roundtrip was verified l
 ## 5. Multi-tenant visibility — tag each client's workflows
 
 BotForge is one shared n8n instance behind every org, so **`Automations` scopes what each org
-can see by n8n tag**, not by anything n8n itself knows about tenants:
+can see by n8n tag**, not by anything n8n itself knows about tenants. Visibility is
+**deny-by-default**: a workflow reaches an org only if it is tagged for it.
 
-- Tag a workflow with a client's **org slug** (Settings → org slug, or the org list) and only
-  that org sees it in Automations / can bind it.
-- Tag a workflow `internal` (or `shared-internal` / `platform-internal`) and it's hidden from
-  **every** org, regardless of who's logged in — use this for platform-owned workflows (an
-  admin provisioner, a master router) that no client should ever see or bind a tool to.
-- **Untagged workflows stay visible to every org** — a deliberate permissive default so
-  existing workflows don't disappear the moment you start tagging. This means an untagged
-  workflow is *not* private to the client it was built for until you tag it. Tag every
-  client-specific workflow as soon as you create it.
+| Tag on the workflow | Who sees it in Automations |
+|---|---|
+| the client's **org slug** (e.g. `acme-co`) | only that org |
+| `shared-template` | every org — for genuinely reusable starters |
+| `internal` / `shared-internal` / `platform-internal` | **nobody**, ever |
+| *nothing* | **nobody** — untagged is hidden, not shared |
+
+- **Untagged means invisible.** Tag every client-specific workflow as soon as you create it, or
+  the client can't see or bind their own automation. This reverses the original permissive
+  default: untagged used to mean "visible to everyone", which meant a brand-new empty org saw
+  every other client's automations. Forgetting to tag is now a visible annoyance instead of a
+  silent cross-tenant leak.
+- `internal` beats everything, including `shared-template`, so mislabelling a platform workflow
+  both ways still hides it.
+- A workflow whose name starts with `SHARED —` is treated as internal even if untagged — a
+  safety net for the platform workflows that predate tagging.
 - Binding by `workflow_id` re-checks the same rule server-side (an org can't bind a workflow it
   was never shown just by knowing its id). Binding by pasting a raw webhook URL directly is
   **not** covered — treat webhook URLs for client-specific workflows as secrets.
 
-Set tags in the n8n UI: open the workflow → the tag field near the title. See ADR-040 in
+Set tags in the n8n UI: open the workflow → the tag field near the title. See ADR-042 in
 `docs/DECISIONS.md` for the full reasoning.
+
+### Tagging the existing inventory
+
+`scripts/tag-n8n-workflows.mjs` applies a known name → tag mapping in bulk. It is dry-run by
+default and safe to re-run — a workflow that already carries its tag is skipped, and existing
+tags are preserved rather than replaced:
+
+```bash
+node scripts/tag-n8n-workflows.mjs                                  # show what it would do
+node scripts/tag-n8n-workflows.mjs --apply                          # write the tags
+node scripts/tag-n8n-workflows.mjs --apply --base-url http://localhost:5678
+```
+
+It also lists any workflow that is untagged *and* unmapped — i.e. currently hidden from
+everyone and waiting for a human to decide who owns it.
+
+> **The API key needs tag scopes.** Reading and writing workflows is not enough: creating a tag
+> and attaching it are separate permissions, and a workflow-only key returns **403** on every
+> tag call. Mint the key in n8n → Settings → API with tag read/create **and** workflow "update
+> tags". Both this script and `scripts/provision-client.mjs` check up front and stop with that
+> message rather than tagging half the inventory.
+
+New clients are tagged automatically: `provision-client.mjs` tags each cloned workflow with the
+new org's slug *before* binding it as a tool (the bind would otherwise be refused with
+`tools.n8n_forbidden`).
+
+### Seeing everything at once
+
+Platform staff get a cross-tenant view at **/admin → Automations**: every workflow, the org its
+tags resolve to, whether it's active, and which agents bind it. Rows that are `untagged` or
+whose tag matches no organization sort to the top — that list is the tagging backlog.
 
 ## 6. n8n → BotForge (the other direction)
 

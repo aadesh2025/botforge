@@ -38,6 +38,78 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **"echo: <your message>" instead of an AI reply — diagnosed and hardened (2026-07-31).**
+  Reported against the Playground for the "aurozen ai" agent. **Root cause: environmental, not a
+  product defect.** The web dev server had been started with
+  `NEXT_PUBLIC_API_BASE_URL=http://localhost:8010` — the **keyless E2E instance**, which runs with
+  `LLM_FORCE_FAKE=true`. `get_chat_provider()` checks that flag *first*, before any per-agent
+  config, so every agent on that process answers with `FakeChatProvider`'s stub echo no matter
+  what it's configured for. Proved by asking the same agent the same question on both ports:
+  `:8000` returned a grounded, cited answer from Groq; `:8010` returned `echo: …`. The agent's
+  stored config was never `fake` — published v1–v3 are `groq/llama-3.3-70b-versatile` (the newest
+  **draft** v4 is `openai/gpt-4o`, which matters below). Fixed by repointing the dev web server at
+  `:8000`; verified with a real multi-turn conversation, including a follow-up ("how much does
+  **the first one** cost?") that correctly resolved the referent, so memory/context works.
+  Three code hardenings so this can't silently recur or bite a customer:
+  1. **A loud startup warning.** `LLM_FORCE_FAKE=true` now logs `llm_force_fake_enabled` at
+     startup spelling out that every reply is a stub and every embedding fake, and escalates to
+     `error` under `ENV=prod`. Nothing announced it before — the flag silently changed every
+     answer, which is exactly why it reads as a broken model rather than a config choice.
+  2. **A missing key no longer answers customers with an echo.** `conversations/service._resolve_provider`
+     caught `AppError` and substituted `FakeChatProvider()` — so an expired or revoked Groq key
+     would have had **every visitor on a client's site answered by a parrot repeating their own
+     words back**, with only a log line to say why. It now returns `RefusalProvider(agent's
+     fallback_message)` and logs `chat_provider_unavailable` at error level. This is the
+     production bug the report asked us to look for, and it was live.
+  3. **The Playground surfaces the real error.** It stubbed the same way (CLAUDE §7 "don't block
+     the build"), which answers "is my agent configured correctly?" wrongly — `echo: hi` sends the
+     operator to debug their persona instead of the missing key. It now re-raises the typed
+     `llm.provider_unavailable`, naming the provider.
+  **A latent bug fell out of that:** an agent explicitly configured `provider: "fake"` never
+  actually resolved — `fake` isn't in `PROVIDER_CATALOG`, so it hit the requires-a-key branch and
+  raised; it only *appeared* to work because those same catch-all handlers swallowed the error.
+  `get_chat_provider` now resolves `fake` before the key check, which is what keeps the test
+  suites (which configure it deliberately) working under the stricter rules. 4 backend tests.
+  **Still needs a human:** the "aurozen ai" **draft** (v4) is set to `openai/gpt-4o` and no
+  `OPENAI_API_KEY` is configured, so the Playground — which always runs the draft — will now show
+  a clear "No API key configured for 'openai'" instead of an echo. Switch the Model tab back to
+  Groq or add an OpenAI key. The **published** agent (v3, Groq) is unaffected and answering.
+- **n8n visibility is deny-by-default, plus a cross-org automations console (2026-07-31).**
+  ADR-040's permissive "untagged = visible to every org" default was proven wrong by live
+  testing: a brand-new, empty org opened Automations and still saw every untagged workflow —
+  other clients' automations and platform-internal ones alike. Untagged is the state every
+  workflow starts in, so the "small residual set" the default was meant to protect was in fact
+  the entire inventory. `workflow_visible_to_org` now grants access **only** on a tag matching
+  the org's slug, or the new opt-in `shared-template` for genuinely reusable starters; internal
+  tags still hide unconditionally and now beat `shared-template`, so labelling something both
+  ways still fails closed. Verified live: a freshly created org gets `[]` from
+  `GET /v1/tools/n8n/workflows`, where it previously got the whole list. See ADR-042.
+  **Provisioning tags at clone time** (`provision-client.mjs`), using the org's *real* slug from
+  the API rather than `slugify(name)` — the backend suffixes on collision — and it does so
+  **before** binding, because `POST /v1/tools/n8n/bind` resolves by `workflow_id` and applies the
+  same rule, so an untagged clone would be refused with `tools.n8n_forbidden`. A tag failure is
+  fatal to the run by design: continuing would hand the client an automation they cannot see.
+  **New staff console section** (ADR-043): `GET /v1/admin/automations` + an Automations table on
+  `/admin` listing every workflow across every tenant with its tag-derived owner, active state
+  and the agents that bind it — the one place to see all clients' automations without switching
+  org, and the working view for the tagging backlog (unowned rows sort first). An unreachable or
+  keyless n8n returns a typed `error` with an empty list rather than a 500, so the table says
+  "couldn't reach n8n" instead of looking like "no automations exist". `unknown-org` (a tag
+  matching no org slug) is reported separately from `untagged` because it's nearly always a typo.
+  New `scripts/tag-n8n-workflows.mjs` applies a name→tag mapping in bulk, dry-run by default,
+  idempotent, preserving existing tags, and reporting anything untagged-and-unmapped.
+  7 backend tests, 2 script tests.
+  **Blocked, needs a human:** the tagging could not actually be applied. The n8n API key has
+  workflow read/write but **not tag scopes** — `GET /api/v1/tags`, `POST /api/v1/tags` and
+  `PUT /api/v1/workflows/{id}/tags` all return **403 Forbidden** on `:5679`. The script
+  preflights this and stops rather than half-tagging. Mint a key with tag read/create + workflow
+  "update tags" (n8n → Settings → API) and re-run
+  `node scripts/tag-n8n-workflows.mjs --apply`. **Until then every workflow is untagged and
+  therefore invisible to every org** — including `Acme Co — Starter Automation` and
+  `Globex Inc — Starter Automation`, which are still bound as tools and keep working at runtime
+  (the runtime calls the stored `webhook_url` and never re-checks visibility) but can no longer
+  be discovered or re-bound. The `:5678` inventory could not be touched at all: that instance
+  belongs to the separate AUROZEN AI compose and rejects BotForge's key with 401.
 - **Logged out seconds after logging in — fixed (2026-07-31).** `AuthGate` bootstraps every page
   load with `Promise.all([me(), listOrgs()])` under a bare `catch` that ran `clearAuth()` and
   bounced to `/login`. Navigating *while that bootstrap is still in flight* **aborts** those
@@ -544,12 +616,21 @@ List any provider/channel/billing key that is stubbed and needs a real value. (S
   behind the same `subscribe`/`unsubscribe`/`publish` interface; cross-node delivery is tested.
 - ✅ ~~**Webhook retry sweep.**~~ **DONE (Phase 20).** `webhooks.sweep_pending` Celery beat job
   re-enqueues `pending` deliveries past `next_retry_at`; a `beat` service runs it.
-- **`provision-client.mjs` doesn't tag the workflows it clones.** The script predates ADR-040 by a
-  few hours, so every client it provisions gets an **untagged** workflow — visible to every org
-  under the permissive default until someone tags it by hand, which is precisely the state the
-  tagging rule exists to end. The org slug is already in scope at clone time (it's what builds the
-  webhook path), so the fix is to set the tag in the same `POST /api/v1/workflows` call, plus
-  `internal` on the template itself. Until then, provisioning quietly grows the tagging backlog.
+- ✅ ~~**`provision-client.mjs` doesn't tag the workflows it clones.**~~ **DONE (2026-07-31,
+  ADR-042)** — it now tags each clone with the org's real slug, before binding it.
+- **The n8n API key needs tag scopes before any tagging can happen.** Blocking the ADR-042
+  rollout as of 2026-07-31: the current key does workflows but **403s on every tag endpoint**
+  (`GET`/`POST /api/v1/tags`, `PUT /api/v1/workflows/{id}/tags`), so
+  `scripts/tag-n8n-workflows.mjs --apply` stops at its preflight and the whole inventory stays
+  untagged — which under deny-by-default means invisible to every org. Mint a key with tag
+  read/create **plus** workflow "update tags" (n8n → Settings → API) and re-run. Separately, the
+  `:5678` instance (AUROZEN AI's, not BotForge's) rejects BotForge's key with 401, so its
+  workflows can only be tagged with that project's own key or by hand in its UI.
+- **Two `:5678` workflow groups have no BotForge org to map to.** `00001 — Load KB` /
+  `00001 — Main Agent`, `00002 — …`, and `Website Lead — Contact Form` have no corresponding
+  `organizations` row (checked by slug and by name), and `Website Lead — Contact Form` is bound
+  as a tool by nobody. They look like AUROZEN AI clients rather than BotForge tenants; decide per
+  workflow whether to create the org, tag it `internal`, or leave it to the other project.
 - **No `PATCH /v1/auth/me`, so the profile page can't be edited.** Name and email render
   read-only (2026-07-30) because the endpoint doesn't exist — the page previously showed inputs
   and a Save button that discarded the edit. Adding it is small (validate + update `User`,
@@ -566,10 +647,11 @@ List any provider/channel/billing key that is stubbed and needs a real value. (S
   have no importers anywhere in `apps/web/src` (verified 2026-07-30 while removing `data.ts`).
   They're harmless but they're also exactly how this bug happened — a fixture sitting in the tree
   long enough to look importable. Delete them once nothing is mid-flight against those screens.
-- **Consider deny-by-default for n8n visibility** (ADR-040 follow-up): once most workflows carry
-  tags, flip the untagged default from visible-to-all to visible-to-none, or replace tags with a
-  BotForge-side `workflow_id → org_id` mapping table that doesn't depend on the operator
-  remembering. Worth doing before ~20 clients share one n8n.
+- ✅ ~~**Consider deny-by-default for n8n visibility**~~ **DONE (2026-07-31, ADR-042)** — untagged
+  is now visible-to-none. The alternative floated at the time, a BotForge-side
+  `workflow_id → org_id` mapping table that doesn't depend on the operator remembering to tag, is
+  still the more robust design and worth revisiting if tagging discipline slips; n8n tags were
+  kept because they need no migration and no second place to look.
 - **`docker-compose.prod.yml` has no `n8n` service.** It passes `N8N_BASE_URL: http://n8n:5678`
   to api/worker, but nothing in that file defines an `n8n` host, so every n8n feature (tools,
   automations, `scripts/provision-client.mjs` step 5) fails against a prod stack unless an
