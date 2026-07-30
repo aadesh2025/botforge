@@ -2,7 +2,7 @@
 
 import { api, ApiError } from "./client";
 import { clearAuth, setAccessToken } from "./tokens";
-import type { AuthResponse, MeResponse } from "./types";
+import type { ApiSession, AuthResponse, MeResponse } from "./types";
 
 // Auth goes through the same-origin Next BFF (`/api/auth/*`) so the refresh token is stored in
 // an httpOnly cookie the browser JS can't read. Only the access token comes back to the client.
@@ -35,6 +35,15 @@ export async function login(email: string, password: string) {
 
 export async function me() {
   return api<MeResponse>("/v1/auth/me");
+}
+
+/** Devices with a live refresh token. Not org-scoped — sessions belong to the user. */
+export async function listSessions() {
+  return api<ApiSession[]>("/v1/auth/sessions");
+}
+
+export async function revokeSession(id: string) {
+  return api<void>(`/v1/auth/sessions/${id}`, { method: "DELETE" });
 }
 
 export async function logout() {

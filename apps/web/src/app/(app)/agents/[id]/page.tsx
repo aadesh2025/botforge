@@ -153,7 +153,7 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
               <ChannelsTab />
             </TabsContent>
             <TabsContent value="versions">
-              <VersionsTab />
+              <VersionsTab agentId={id} currentVersionId={data?.agent.current_version_id ?? null} />
             </TabsContent>
             <TabsContent value="settings">
               <SettingsTab />

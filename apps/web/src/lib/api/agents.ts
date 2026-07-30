@@ -49,6 +49,15 @@ export function publishVersion(id: string, version: number) {
   });
 }
 
+/** Re-point the live version at an older published one. */
+export function rollbackVersion(id: string, version: number) {
+  return api<ApiAgent>(`/v1/agents/${id}/rollback`, {
+    method: "POST",
+    orgScoped: true,
+    body: { version },
+  });
+}
+
 export interface PlaygroundTurn {
   role: "user" | "assistant";
   content: string;

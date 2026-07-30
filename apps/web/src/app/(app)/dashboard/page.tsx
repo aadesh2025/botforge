@@ -4,7 +4,6 @@ import { DashboardStats } from "@/components/dashboard/dashboard-stats";
 import { AgentsPanel } from "@/components/dashboard/agents-panel";
 import { ConversationsPanel } from "@/components/dashboard/conversations-panel";
 import { Button } from "@/components/ui/button";
-import { agents, recentConversations } from "@/lib/mock/data";
 
 export default function DashboardPage() {
   return (
@@ -31,10 +30,10 @@ export default function DashboardPage() {
       {/* Two-column body */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
-          <AgentsPanel agents={agents} />
+          <AgentsPanel />
         </div>
         <div className="xl:col-span-1">
-          <ConversationsPanel conversations={recentConversations} />
+          <ConversationsPanel />
         </div>
       </div>
     </div>

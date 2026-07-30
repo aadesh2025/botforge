@@ -31,6 +31,17 @@ export interface MeResponse {
   memberships: ApiMembership[];
 }
 
+/** A refresh-token session — one row per signed-in device (`GET /v1/auth/sessions`). */
+export interface ApiSession {
+  id: string;
+  user_agent: string | null;
+  ip: string | null;
+  created_at: string;
+  expires_at: string;
+  /** True for the session backing the request that listed them. */
+  current: boolean;
+}
+
 export interface ApiOrg {
   id: string;
   name: string;

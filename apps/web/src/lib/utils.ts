@@ -19,6 +19,15 @@ export function usd(n: number): string {
   }).format(n);
 }
 
+/** Avatar initials for a user: first+last initial, falling back to the email. */
+export function initials(name: string | null, email: string): string {
+  if (name) {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length) return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
+  }
+  return email.slice(0, 2).toUpperCase();
+}
+
 /** "3m ago" style relative time from an ISO string. */
 export function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();

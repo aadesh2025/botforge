@@ -13,13 +13,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { createAgent, listAgents } from "@/lib/api/agents";
 import { useSession } from "@/lib/store/session";
+import { apiAgentStatusMeta as statusMeta } from "@/lib/display";
 import { relativeTime } from "@/lib/utils";
-
-const statusMeta: Record<string, { label: string; variant: "success" | "warn" | "default" }> = {
-  published: { label: "Live", variant: "success" },
-  draft: { label: "Draft", variant: "default" },
-  archived: { label: "Archived", variant: "warn" },
-};
 
 export default function AgentsPage() {
   const router = useRouter();

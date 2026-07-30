@@ -1,18 +1,40 @@
-import Link from "next/link";
-import { ArrowUpRight } from "lucide-react";
-import type { Agent } from "@/lib/mock/types";
-import { Badge } from "@/components/ui/badge";
-import { ChannelIcon } from "@/components/shared/channel-icon";
-import { agentStatusMeta, providerLabel } from "@/lib/display";
-import { compact } from "@/lib/utils";
+"use client";
 
-export function AgentsPanel({ agents }: { agents: Agent[] }) {
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowUpRight, Bot } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { listAgents } from "@/lib/api/agents";
+import { useSession } from "@/lib/store/session";
+import { apiAgentStatusMeta } from "@/lib/display";
+import { relativeTime } from "@/lib/utils";
+
+/**
+ * The org's real agents. Deliberately renders only what `GET /v1/agents` returns — name,
+ * status, description, draft version, updated_at. The panel used to show per-agent "7d
+ * chats" and a resolution rate, but those came from the mock fixture; the agents endpoint
+ * carries no traffic figures, and fetching per-agent analytics would be one request per
+ * row. The aggregate numbers live in the stat cards directly above.
+ */
+export function AgentsPanel() {
+  const activeOrgId = useSession((s) => s.activeOrgId);
+  const { data: agents, isLoading } = useQuery({
+    queryKey: ["agents", activeOrgId],
+    queryFn: listAgents,
+    enabled: Boolean(activeOrgId),
+  });
+
+  const rows = agents ?? [];
+
   return (
     <div className="rounded-lg border border-border bg-surface">
       <div className="flex items-center justify-between border-b border-border p-5">
         <div>
           <h3 className="font-display text-base font-semibold text-text">Your agents</h3>
-          <p className="text-sm text-muted">{agents.length} total</p>
+          <p className="text-sm text-muted">
+            {isLoading ? "Loading…" : `${rows.length} total`}
+          </p>
         </div>
         <Link
           href="/agents"
@@ -21,53 +43,70 @@ export function AgentsPanel({ agents }: { agents: Agent[] }) {
           View all <ArrowUpRight className="size-3.5" />
         </Link>
       </div>
-      <ul className="divide-y divide-border">
-        {agents.map((agent) => {
-          const status = agentStatusMeta[agent.status];
-          return (
-            <li key={agent.id}>
-              <Link
-                href={`/agents/${agent.id}`}
-                className="group flex items-center gap-4 px-5 py-3.5 transition-colors hover:bg-surface-2/50"
-              >
-                <span className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-surface-2 font-display text-sm font-semibold text-muted">
-                  {agent.name[0]}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-text">{agent.name}</span>
-                    <Badge variant={status.variant}>
-                      {agent.status === "live" && (
-                        <span className="size-1.5 rounded-full bg-success" />
-                      )}
-                      {status.label}
-                    </Badge>
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-2 text-xs text-faint">
-                    <span className="font-mono">{providerLabel[agent.provider]}</span>
-                    <span className="text-border-strong">·</span>
-                    <span className="truncate font-mono">{agent.model}</span>
-                  </div>
-                </div>
-                <div className="hidden items-center gap-1 text-faint sm:flex">
-                  {agent.channels.map((c) => (
-                    <span
-                      key={c}
-                      className="grid size-6 place-items-center rounded border border-border bg-surface-2"
-                    >
-                      <ChannelIcon channel={c} />
-                    </span>
-                  ))}
-                </div>
-                <div className="w-16 text-right">
-                  <div className="text-sm font-semibold text-text">{compact(agent.conversations7d)}</div>
-                  <div className="text-[11px] text-faint">7d chats</div>
-                </div>
-              </Link>
+
+      {isLoading ? (
+        <ul className="divide-y divide-border" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <li key={i} className="flex items-center gap-4 px-5 py-3.5">
+              <Skeleton className="size-9 shrink-0 rounded-md" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-3.5 w-40" />
+                <Skeleton className="h-3 w-24" />
+              </div>
             </li>
-          );
-        })}
-      </ul>
+          ))}
+        </ul>
+      ) : rows.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 px-5 py-10 text-center">
+          <span className="grid size-11 place-items-center rounded-lg border border-border bg-surface-2 text-muted">
+            <Bot className="size-5" />
+          </span>
+          <div>
+            <p className="text-sm font-medium text-text">No agents yet</p>
+            <p className="text-sm text-muted">Your agents will appear here once you build one.</p>
+          </div>
+          <Link
+            href="/agents"
+            className="inline-flex items-center gap-1 text-sm font-medium text-ember-soft hover:text-ember"
+          >
+            Create your first agent <ArrowUpRight className="size-3.5" />
+          </Link>
+        </div>
+      ) : (
+        <ul className="divide-y divide-border">
+          {rows.map((agent) => {
+            const status = apiAgentStatusMeta[agent.status];
+            return (
+              <li key={agent.id}>
+                <Link
+                  href={`/agents/${agent.id}`}
+                  className="group flex items-center gap-4 px-5 py-3.5 transition-colors hover:bg-surface-2/50"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-surface-2 font-display text-sm font-semibold text-muted">
+                    {agent.name[0]?.toUpperCase()}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium text-text">{agent.name}</span>
+                      <Badge variant={status?.variant ?? "default"}>
+                        {agent.status === "published" && <span className="size-1.5 rounded-full bg-success" />}
+                        {status?.label ?? agent.status}
+                      </Badge>
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-faint">
+                      {agent.description || "No description yet."}
+                    </p>
+                  </div>
+                  <div className="hidden shrink-0 text-right sm:block">
+                    <div className="font-mono text-xs text-muted">v{agent.draft_version} draft</div>
+                    <div className="text-[11px] text-faint">updated {relativeTime(agent.updated_at)}</div>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

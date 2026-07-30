@@ -35,3 +35,18 @@ export const convoStatusMeta: Record<
   handoff: { label: "Needs human", variant: "ember" },
   closed: { label: "Closed", variant: "default" },
 };
+
+/** Status meta keyed by what the API actually returns, as opposed to the mock layer's
+ *  `live|draft|paused`. `agents.status` is `draft|published|archived`. */
+export const apiAgentStatusMeta: Record<string, { label: string; variant: "success" | "warn" | "default" }> = {
+  published: { label: "Live", variant: "success" },
+  draft: { label: "Draft", variant: "default" },
+  archived: { label: "Archived", variant: "warn" },
+};
+
+/** Ditto for `conversations.status` (`active|handoff|closed`) — note `active`, not `open`. */
+export const apiConvoStatusMeta: Record<string, { label: string; variant: "info" | "ember" | "default" }> = {
+  active: { label: "Active", variant: "info" },
+  handoff: { label: "Needs human", variant: "ember" },
+  closed: { label: "Closed", variant: "default" },
+};

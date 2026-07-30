@@ -14,14 +14,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { logout } from "@/lib/api/auth";
 import { useSession } from "@/lib/store/session";
-
-function initials(name: string | null, email: string): string {
-  if (name) {
-    const parts = name.trim().split(/\s+/);
-    return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
-  }
-  return email.slice(0, 2).toUpperCase();
-}
+import { initials } from "@/lib/utils";
 
 export function UserMenu() {
   const router = useRouter();
