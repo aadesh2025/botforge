@@ -32,7 +32,45 @@
 ### Provide starter n8n workflows (export JSON in `infra/n8n/`)
 - "Create support ticket" (webhook → HTTP/DB node → respond).
 - "Send email on handoff" (BotForge webhook → email node).
+- `template-starter-automation.json` — **`TEMPLATE — Starter Automation`**, the workflow the
+  provisioning script clones per client (Webhook → Set → Respond to Webhook). Deliberately
+  thin: its job is to give a new client *a working automation* on day one, which real logic
+  then replaces. `handled_by` is `{{ $workflow.name }}`, so each clone identifies itself
+  rather than reporting the template's name.
 - Document how to import them in `09-DEPLOYMENT.md`.
+
+### One-command client provisioning (`scripts/provision-client.mjs`)
+
+```
+node scripts/provision-client.mjs --name "Acme Co" --email owner@acme.com --plan starter
+```
+
+Stands a client up end to end: organization → agent (starter persona, Groq, tools enabled) →
+**published** so it's live before the client ever logs in → the n8n starter automation cloned,
+activated and bound as an agent tool → the client invited as `editor` (the client role: edit,
+test and connect their own channels, but never publish).
+
+- **Staff login, not an API key.** Org creation is gated on `User.is_staff`; no key scope
+  grants it. Hence `PROVISION_STAFF_EMAIL`/`PROVISION_STAFF_PASSWORD`.
+- **Idempotent and resumable.** Every step looks before it creates, so re-running after a
+  failure resumes rather than duplicating. Two guarantees worth naming: a *pending* invitation
+  suppresses a second email (`create_invitation` only rejects an already-**active** member, so
+  the script has to check), and an agent that already carries a system prompt is left strictly
+  alone — by then it may hold the client's own persona edits, and provisioning must not
+  overwrite their work or push their unreviewed draft live.
+- **Per-client webhook path.** Each clone gets `path = {slug}-starter-automation`. Cloning the
+  template verbatim would point every client's tool at one shared URL, so whichever workflow
+  n8n resolved first would answer everyone — a cross-client leak, not a mix-up.
+- **Tool binding goes through `POST /v1/tools/n8n/bind`**, which resolves the production
+  webhook URL from the workflow itself, so the URL is derived by the same code the runtime
+  uses instead of being reconstructed by the script.
+- **Location-agnostic.** It only talks to `BOTFORGE_API_BASE_URL` and `N8N_BASE_URL`, so the
+  identical command works over SSH against a VPS: `ssh you@vps "cd own_chatbot && node
+  scripts/provision-client.mjs --name ... --email ..."`.
+
+Note for production: `infra/docker-compose.prod.yml` sets `N8N_BASE_URL: http://n8n:5678` but
+**defines no `n8n` service**, so provisioning against a prod stack needs that service added
+first (internal-only, no published port).
 
 ## 2. Channels
 

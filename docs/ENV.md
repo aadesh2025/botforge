@@ -59,8 +59,29 @@ serves photos from token-bearing URLs we deliberately never persist (see ADR-036
 | Var | Purpose | Needs human |
 |---|---|---|
 | `N8N_BASE_URL` | n8n REST/webhook base (default `http://n8n:5678`) | no |
-| `N8N_API_KEY` | n8n public API auth | yes (from n8n UI) |
+| `N8N_HOST_PORT` | host port the bundled n8n binds (default `5678`); must agree with `N8N_BASE_URL`. **Compose-only** — read from the shell or `infra/.env`, not from the root `.env` (which is passed to containers via `env_file` and so never reaches `${...}` interpolation) | no |
+| `N8N_API_KEY` | n8n public API auth — needs the workflow read/list/create/update/activate scopes | yes (from n8n UI) |
 | `N8N_WEBHOOK_SIGNING_SECRET` | sign BotForge→n8n calls | generate |
+
+`N8N_HOST_PORT` exists because 5678 is often already taken — on the build machine by an
+unrelated n8n belonging to another project. BotForge must not create or activate workflows in
+someone else's instance, so point it at its own (`N8N_HOST_PORT=5679`,
+`N8N_BASE_URL=http://localhost:5679`). n8n 2.x also binds its editor session cookie to a
+`browser-id` header, so minting an API key over `/rest/*` requires sending one; the UI
+(Settings → API) is the simpler route.
+
+## Client provisioning (`scripts/provision-client.mjs`)
+
+| Var | Purpose | Needs human |
+|---|---|---|
+| `BOTFORGE_API_BASE_URL` | which BotForge to provision into (default `http://localhost:8000`) | no |
+| `PROVISION_STAFF_EMAIL` | a login with `is_staff=true` | yes |
+| `PROVISION_STAFF_PASSWORD` | that account's password | yes |
+
+The script signs in as a **staff user** rather than using a `bf_…` API key: creating an
+organization is gated on `User.is_staff` server-side and no key scope grants it. Point
+`BOTFORGE_API_BASE_URL`/`N8N_BASE_URL` at localhost today and at the VPS later — that is the
+only difference between provisioning on a laptop and provisioning in production.
 
 ## Email
 

@@ -54,3 +54,9 @@ seed: ## Seed demo data (Phase 1+)
 
 clean-devdata: ## Remove ephemeral @example.com test users/orgs + the live_demo flag (dev only)
 	cd $(API) && uv run python -m app.db.cleanup_devdata
+
+provision: ## Provision a client end-to-end: make provision NAME="Acme Co" EMAIL=owner@acme.com
+	node scripts/provision-client.mjs --name "$(NAME)" --email "$(EMAIL)" --plan "$(or $(PLAN),starter)"
+
+test-scripts: ## Unit-test the provisioning script's helpers
+	node --test scripts/provision-client.test.mjs

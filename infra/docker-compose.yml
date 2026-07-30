@@ -117,8 +117,16 @@ services:
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-botforge}
       GENERIC_TIMEZONE: UTC
+      # n8n resolves telemetry.n8n.io at boot and *exits* if DNS fails (observed:
+      # `getaddrinfo EAI_AGAIN telemetry.n8n.io` killed this container). Off means the
+      # container comes up on a flaky or offline network too.
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
     ports:
-      - "5678:5678"
+      # Host port is configurable because 5678 is often already taken — on the build machine
+      # by an unrelated n8n. Container port stays 5678, so N8N_BASE_URL is the only other
+      # thing to line up. Default keeps the canonical setup unchanged.
+      - "${N8N_HOST_PORT:-5678}:5678"
     volumes:
       - n8ndata:/home/node/.n8n
 

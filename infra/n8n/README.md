@@ -6,6 +6,23 @@ Importable workflows that BotForge agents can call as **n8n tools** (docs/07 §1
 |---|---|---|---|
 | `botforge-echo.json` | `/webhook/botforge-echo` | sync | Echoes the tool arguments back — smoke test for a bound tool. |
 | `create-support-ticket.json` | `/webhook/botforge-create-ticket` | sync | Generates a ticket id + status and returns it (a "Respond to Webhook" example). |
+| `template-starter-automation.json` | `/webhook/{client-slug}-starter-automation` | sync | **Cloned per client** by `scripts/provision-client.mjs`. Import it once; the script copies it per client, rewriting the webhook path to the client's slug so no two clients share a URL. |
+
+### The provisioning template
+
+`TEMPLATE — Starter Automation` must exist in n8n before `scripts/provision-client.mjs` can
+provision anyone — it clones that workflow by name. Import it once (below), leave it
+**inactive** (the clones are what get activated), and don't rename it.
+
+Its Set node writes `handled_by: {{ $workflow.name }}`, so each client's copy reports its own
+name. Real per-client logic (CRM, Sheets, Slack …) replaces the Set node afterwards; the
+template exists so a new client starts with a working webhook rather than an empty n8n.
+
+**Which n8n?** BotForge must own the instance it provisions into — cloning and activating
+workflows in an instance that belongs to another project risks that project's automations. If
+5678 is taken, run BotForge's own on another port:
+`cd infra && N8N_HOST_PORT=5679 docker compose up -d n8n`, and set
+`N8N_BASE_URL=http://localhost:5679`.
 
 ## How BotForge calls them
 

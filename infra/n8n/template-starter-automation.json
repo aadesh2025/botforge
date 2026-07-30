@@ -1,0 +1,67 @@
+{
+  "name": "TEMPLATE — Starter Automation",
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "template-starter-automation",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b1a1f5c2-0000-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "template-starter-automation"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a0000000-0000-4000-8000-000000000001",
+              "name": "received",
+              "value": "={{ $json.body.args }}",
+              "type": "object"
+            },
+            {
+              "id": "a0000000-0000-4000-8000-000000000002",
+              "name": "handled_by",
+              "value": "={{ $workflow.name }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1a1f5c2-0000-4000-8000-000000000002",
+      "name": "Echo Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "b1a1f5c2-0000-4000-8000-000000000003",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [440, 0]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Echo Input", "type": "main", "index": 0 }]]
+    },
+    "Echo Input": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  }
+}

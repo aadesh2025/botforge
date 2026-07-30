@@ -38,6 +38,44 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **One-command client provisioning (2026-07-30).** `scripts/provision-client.mjs` takes
+  `--name` / `--email` / `--plan` and stands a client up end to end: org → agent (starter
+  persona, Groq `llama-3.3-70b-versatile`, tools on) → **published** so it's live before the
+  client's first login → the n8n starter automation cloned + activated + bound as a tool →
+  client invited as `editor`. Zero npm dependencies (Node 18+ `fetch`), so there's nothing to
+  install before provisioning. Plus `infra/n8n/template-starter-automation.json`
+  (`TEMPLATE — Starter Automation`: Webhook → Set → Respond to Webhook) as the thing it clones.
+  Verified live: two back-to-back runs with the same `--email` produced **6 reuses and 0
+  creations** (one org, one agent, one invitation, one tool confirmed by SQL), and a real chat
+  turn made Groq call the tool — n8n executed and its response came back inside the
+  conversation (`{"received": {"customer": "Globex", "order": "5512"}, "handled_by": "Globex
+  Inc — Starter Automation"}`). 8 unit tests (`node --test`) over the naming/parsing helpers,
+  where a bug means a cross-client collision rather than a crash; `make provision` /
+  `make test-scripts` added.
+  Design notes worth keeping: it **logs in as staff** rather than using a `bf_…` key, because
+  org creation is gated on `User.is_staff` and no key scope grants it; it binds through
+  `POST /v1/tools/n8n/bind` so the webhook URL is derived by the same code the runtime uses;
+  and each clone gets its **own** webhook path (`{slug}-starter-automation`) — cloning the
+  template verbatim would point every client's tool at one shared URL, so whichever workflow
+  n8n resolved first would answer everyone, which is a cross-client leak rather than a mix-up.
+  Two idempotency subtleties came out of testing: `create_invitation` only rejects an
+  already-**active** member, so a blind re-run mints a second pending invite and emails the
+  client twice (the script checks the pending list); and re-patching an existing agent forked a
+  new draft every run via branch-on-edit (ADR-023) **and would have overwritten a client's own
+  persona edits with the starter defaults**, so an agent that already has a system prompt is
+  now left strictly alone — nor is its unreviewed draft published behind its owner's back.
+  **Infra:** the bundled dev `n8n` service now takes `N8N_HOST_PORT` (default 5678, so the
+  canonical setup is unchanged) and sets `N8N_DIAGNOSTICS_ENABLED=false` — n8n resolves
+  `telemetry.n8n.io` at boot and *exits* when DNS fails, which is why `botforge-n8n-1` had been
+  dead for two days on this machine. It now runs on **5679**, isolated from the unrelated n8n
+  on 5678 that belongs to another project; BotForge creating and activating workflows in
+  someone else's instance is not acceptable, so `.env` points at its own.
+  **Still needs a human:** the n8n API key (n8n → Settings → API, with workflow
+  read/list/create/update/activate scopes) and a staff account for
+  `PROVISION_STAFF_EMAIL`/`PROVISION_STAFF_PASSWORD`.
+  **Not done (deliberately, per the brief):** `docker-compose.prod.yml` still references
+  `N8N_BASE_URL: http://n8n:5678` while defining **no `n8n` service** — provisioning against a
+  prod stack needs that added first. Logged in the roadmap below.
 - **Email actually gets delivered (2026-07-30).** `app/core/email.py` had exactly one backend —
   `ConsoleEmailBackend`, an in-memory outbox — and `get_email_backend()`'s `"smtp"` branch logged
   `smtp_backend_not_implemented` and fell back to it. So **no email this app sent had ever reached
@@ -374,6 +412,11 @@ List any provider/channel/billing key that is stubbed and needs a real value. (S
   behind the same `subscribe`/`unsubscribe`/`publish` interface; cross-node delivery is tested.
 - ✅ ~~**Webhook retry sweep.**~~ **DONE (Phase 20).** `webhooks.sweep_pending` Celery beat job
   re-enqueues `pending` deliveries past `next_retry_at`; a `beat` service runs it.
+- **`docker-compose.prod.yml` has no `n8n` service.** It passes `N8N_BASE_URL: http://n8n:5678`
+  to api/worker, but nothing in that file defines an `n8n` host, so every n8n feature (tools,
+  automations, `scripts/provision-client.mjs` step 5) fails against a prod stack unless an
+  external instance is supplied. Fix: add the service, internal-only with no published port,
+  plus a volume for `/home/node/.n8n` and `N8N_DIAGNOSTICS_ENABLED=false` (see the dev service).
 - **The rate limiter has no timeout on its Redis probe.** Measured 2026-07-30 while verifying the
   email work: with Redis unreachable, a signup takes **~4.3s** before `ratelimit_redis_unavailable`
   fires and the in-memory fallback takes over — per request, on every rate-limited endpoint (auth,
