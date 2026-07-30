@@ -38,6 +38,35 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **n8n workflow discovery is scoped to the owning org (2026-07-30).** `list_n8n_workflows` had
+  **no tenant filtering whatsoever** — it returned every workflow in the shared n8n instance to
+  every org. Each client's Automations page listed every other client's automations, and
+  platform-internal workflows (`SHARED — Master Router`, the auto-provisioner) were bindable as a
+  client's agent tool. This is the one multi-tenancy hole that the org-scoped repository base
+  couldn't catch, because the data lives in n8n rather than in Postgres, so no query was ever
+  filtered by `organization_id`. Found from a **live screenshot of the Automations page**, not
+  from a test: no test had ever put two orgs' workflows in one n8n instance, so nothing failed.
+  New `tools/service.workflow_visible_to_org(tags, name, org_slug)` keyed on n8n **tags**: tagged
+  with an org's slug → visible only to that org; tagged `internal`/`shared-internal`/
+  `platform-internal` → hidden from every org unconditionally; untagged → visible to all.
+  The asymmetry is deliberate — the untagged default is **permissive** so the operator's existing,
+  not-yet-tagged client workflows didn't disappear the moment this shipped, while the internal
+  direction **fails closed**, because a client reaching an admin workflow is a security incident
+  rather than a UX gap. A `name.startswith("SHARED —")` check covers the internal workflows that
+  predate tagging; tagging them `internal` retires it. The same check runs in `bind_n8n_workflow`
+  when binding by `workflow_id` (typed `tools.n8n_forbidden`, 403), closing the hole where an org
+  could bind a workflow it was never shown just by knowing or guessing its n8n id.
+  **Not covered, by design:** binding by a pasted webhook URL — a caller already holding the secret
+  URL can reach it like any other endpoint. Treat client webhook URLs as secrets. See ADR-040 and
+  `docs/guides/N8N-SETUP.md §5`. 4 backend tests (tag extraction, the visibility matrix, a
+  two-org discovery list, and a cross-org bind rejected).
+  **Operator action required — the fix is inert until workflows are tagged.** Audited live against
+  both instances on 2026-07-30: on the AUROZEN n8n (`:5678`) **6 of 9** workflows are still
+  untagged and therefore visible to every org — `00001 — Load KB`, `00001 — Main Agent`,
+  `00002 — Load KB`, `00002 — Main Agent`, `Website Lead — Contact Form` and
+  `BotForge — Echo (sync)`; the three `SHARED — …` ones are already hidden by the name rule. On
+  BotForge's own n8n (`:5679`) all three are untagged (`Acme Co`/`Globex Inc` starter automations
+  and the `TEMPLATE`, which should be `internal` so no client can bind it).
 - **One-command client provisioning (2026-07-30).** `scripts/provision-client.mjs` takes
   `--name` / `--email` / `--plan` and stands a client up end to end: org → agent (starter
   persona, Groq `llama-3.3-70b-versatile`, tools on) → **published** so it's live before the
@@ -412,6 +441,16 @@ List any provider/channel/billing key that is stubbed and needs a real value. (S
   behind the same `subscribe`/`unsubscribe`/`publish` interface; cross-node delivery is tested.
 - ✅ ~~**Webhook retry sweep.**~~ **DONE (Phase 20).** `webhooks.sweep_pending` Celery beat job
   re-enqueues `pending` deliveries past `next_retry_at`; a `beat` service runs it.
+- **`provision-client.mjs` doesn't tag the workflows it clones.** The script predates ADR-040 by a
+  few hours, so every client it provisions gets an **untagged** workflow — visible to every org
+  under the permissive default until someone tags it by hand, which is precisely the state the
+  tagging rule exists to end. The org slug is already in scope at clone time (it's what builds the
+  webhook path), so the fix is to set the tag in the same `POST /api/v1/workflows` call, plus
+  `internal` on the template itself. Until then, provisioning quietly grows the tagging backlog.
+- **Consider deny-by-default for n8n visibility** (ADR-040 follow-up): once most workflows carry
+  tags, flip the untagged default from visible-to-all to visible-to-none, or replace tags with a
+  BotForge-side `workflow_id → org_id` mapping table that doesn't depend on the operator
+  remembering. Worth doing before ~20 clients share one n8n.
 - **`docker-compose.prod.yml` has no `n8n` service.** It passes `N8N_BASE_URL: http://n8n:5678`
   to api/worker, but nothing in that file defines an `n8n` host, so every n8n feature (tools,
   automations, `scripts/provision-client.mjs` step 5) fails against a prod stack unless an

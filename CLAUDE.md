@@ -154,7 +154,7 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
 ### 2026-07-30 — n8n discovery scoped per org, real email delivery, one-command provisioning
-1. **n8n multi-tenancy** (`fix(tools)`): `list_n8n_workflows` had **zero** tenant filtering — every
+1. **n8n multi-tenancy** (`6fead42`): `list_n8n_workflows` had **zero** tenant filtering — every
    org's Automations page listed every workflow in the shared n8n, platform-internal ones included
    ("SHARED — Master Router"), and could bind a tool to them. New
    `workflow_visible_to_org(tags, name, org_slug)`: tagged with an org's slug → only that org;
@@ -164,6 +164,8 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
    `bind_n8n_workflow` by `workflow_id` (typed `tools.n8n_forbidden` 403), closing the
    bind-by-guessed-id hole. Binding by pasted webhook URL is deliberately **not** covered — ADR-040.
    Caught from a live screenshot, not a test: no test had two orgs' workflows in one instance.
+   **The fix is inert until workflows are tagged** — audited live, 6 of 9 on the AUROZEN n8n
+   (`:5678`) and all 3 on BotForge's own (`:5679`) are still untagged. See `docs/PROGRESS.md`.
 2. **Email actually sends** (`898c68d`): `get_email_backend()`'s `"smtp"` branch logged
    `smtp_backend_not_implemented` and fell back to console, so no invite/verification/reset/magic-link
    had ever reached an inbox. `SmtpEmailBackend` over **aiosmtplib** + HTML templates; TLS mode from
