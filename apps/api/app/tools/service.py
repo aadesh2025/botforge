@@ -299,25 +299,40 @@ async def _any_agent_id(session: AsyncSession, ctx: OrgContext) -> uuid.UUID:
 
 
 # ── n8n binding ────────────────────────────────────────────────────────────────────
-# A workflow becomes visible to one org by tagging it (in n8n) with that org's slug.
-# Untagged workflows stay visible to every org — permissive default so existing,
-# not-yet-tagged client workflows don't vanish the moment this shipped — UNLESS a
-# workflow is marked internal, in which case it never appears to any org, tagged or
-# not. A client binding a tool to a platform-internal workflow (an admin provisioner,
-# an internal router) is a security incident, not a UX gap, so that direction fails closed.
-_INTERNAL_TAGS = {"internal", "shared-internal", "platform-internal"}
+# One shared n8n instance sits behind every org, so visibility is **deny-by-default**:
+# a workflow reaches an org only if it is tagged (in n8n) with that org's slug, or with
+# `shared-template` for a genuinely reusable starter every org may browse.
+#
+# This reverses the original permissive default (ADR-040), where an untagged workflow was
+# visible to everyone. Live testing showed what that meant in practice: a brand-new, empty
+# org opened Automations and saw every other client's automations, because "untagged" is the
+# state every workflow starts in and the one nobody remembers to leave. An operator who
+# forgets to tag now leaks nothing — the workflow simply doesn't appear until it's labelled,
+# which is a visible, fixable annoyance rather than a silent cross-tenant disclosure.
+#
+# Internal tags still hide unconditionally and take precedence over everything, including
+# `shared-template`: a client binding a tool to a platform-internal workflow (an admin
+# provisioner, an internal router) is a security incident, not a UX gap.
+INTERNAL_TAGS = {"internal", "shared-internal", "platform-internal"}
+
+# Opt-in, and only ever set deliberately by staff — an untagged workflow never lands here.
+SHARED_TEMPLATE_TAG = "shared-template"
 
 
 def workflow_visible_to_org(tags: set[str], name: str, org_slug: str) -> bool:
-    if tags & _INTERNAL_TAGS:
+    """Whether `org_slug` may see (and bind) this n8n workflow. Deny-by-default."""
+    if tags & INTERNAL_TAGS:
         return False
-    # Stopgap for the "SHARED — ..." internal workflows that predate tagging (e.g. the
-    # auto-provisioner, the master router). Tag them `internal` in n8n to retire this check.
+    # Extra safety net for the "SHARED — ..." internal workflows that predate tagging (the
+    # auto-provisioner, the master router). Redundant under deny-by-default — an untagged
+    # workflow is hidden anyway — but kept so that tagging one with a client slug by mistake
+    # still doesn't expose it. Tag them `internal` in n8n to retire this check.
     if name.strip().lower().startswith(("shared —", "shared -")):
         return False
-    if not tags:
+    if SHARED_TEMPLATE_TAG in tags:
         return True
-    return org_slug.strip().lower() in tags
+    slug = org_slug.strip().lower()
+    return bool(slug) and slug in tags
 
 
 async def list_n8n_workflows(session: AsyncSession, ctx: OrgContext) -> list[schemas.N8nWorkflowOut]:

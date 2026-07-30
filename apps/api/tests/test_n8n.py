@@ -83,12 +83,39 @@ def test_workflow_visible_to_org_scopes_by_tag() -> None:
     # tagged for a specific org — only that org sees it
     assert workflow_visible_to_org({"acme"}, "Booking", "acme") is True
     assert workflow_visible_to_org({"acme"}, "Booking", "widgetco") is False
-    # untagged — permissive default so existing, not-yet-tagged workflows don't vanish
-    assert workflow_visible_to_org(set(), "Website Lead — Contact Form", "widgetco") is True
     # explicitly internal — hidden from every org regardless of tag
     assert workflow_visible_to_org({"internal"}, "Anything", "acme") is False
     # legacy "SHARED —" naming convention is treated as internal even if untagged
     assert workflow_visible_to_org(set(), "SHARED — Master Router", "acme") is False
+
+
+def test_untagged_workflow_is_hidden_from_every_org() -> None:
+    """Deny-by-default: the old permissive rule showed a new, empty org every other
+    client's automations, because untagged is the state every workflow starts in."""
+    from app.tools.service import workflow_visible_to_org
+
+    assert workflow_visible_to_org(set(), "Website Lead — Contact Form", "widgetco") is False
+    assert workflow_visible_to_org(set(), "Website Lead — Contact Form", "acme") is False
+    # A tag that belongs to nobody doesn't leak either.
+    assert workflow_visible_to_org({"misc"}, "Somebody's Workflow", "acme") is False
+
+
+def test_shared_template_is_visible_to_every_org() -> None:
+    """The one deliberate escape hatch — opt-in, never a default."""
+    from app.tools.service import workflow_visible_to_org
+
+    assert workflow_visible_to_org({"shared-template"}, "Starter Automation", "acme") is True
+    assert workflow_visible_to_org({"shared-template"}, "Starter Automation", "widgetco") is True
+    # Internal wins over it, so mislabelling something both ways still fails closed.
+    assert workflow_visible_to_org({"shared-template", "internal"}, "Provisioner", "acme") is False
+
+
+def test_visibility_never_depends_on_an_empty_slug() -> None:
+    """An org with a blank slug must not match a workflow tagged with the empty string."""
+    from app.tools.service import workflow_visible_to_org
+
+    assert workflow_visible_to_org({""}, "Anything", "") is False
+    assert workflow_visible_to_org(set(), "Anything", "") is False
 
 
 async def test_list_n8n_workflows_hides_internal_and_other_orgs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -103,6 +130,7 @@ async def test_list_n8n_workflows_hides_internal_and_other_orgs(monkeypatch: pyt
                     {"id": "2", "name": "Acme — Booking", "active": True, "tags": [{"name": "acme"}]},
                     {"id": "3", "name": "WidgetCo — Booking", "active": True, "tags": [{"name": "widgetco"}]},
                     {"id": "4", "name": "Website Lead — Contact Form", "active": True, "tags": []},
+                    {"id": "5", "name": "Starter Automation", "active": True, "tags": [{"name": "shared-template"}]},
                 ]
             },
         )
@@ -118,7 +146,8 @@ async def test_list_n8n_workflows_hides_internal_and_other_orgs(monkeypatch: pyt
 
     result = await service.list_n8n_workflows(None, _Ctx())  # type: ignore[arg-type]
     names = {w.name for w in result}
-    assert names == {"Acme — Booking", "Website Lead — Contact Form"}
+    # The untagged "Website Lead" workflow is now hidden — that reversal is the point.
+    assert names == {"Acme — Booking", "Starter Automation"}
 
 
 async def test_bind_by_id_rejects_workflow_from_another_org(monkeypatch: pytest.MonkeyPatch) -> None:
