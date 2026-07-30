@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { ApiError } from "@/lib/api/client";
 import { me } from "@/lib/api/auth";
 import { listOrgs } from "@/lib/api/orgs";
 import { getAccessToken, getActiveOrgId, setActiveOrgId, clearAuth } from "@/lib/api/tokens";
@@ -27,10 +28,18 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         const active = loaded.find((o) => o.id === stored)?.id ?? loaded[0]?.id ?? null;
         if (active) setActiveOrgId(active);
         setSession(profile.user, loaded, active);
-      } catch {
+      } catch (err) {
         if (cancelled) return;
-        clearAuth();
-        router.replace("/login");
+        // Only a genuine auth failure may destroy the session. This bootstrap runs on every
+        // page load, and navigating while it's still in flight **aborts** its requests — the
+        // browser rejects them with a TypeError, not a 401. Treating that as "your token is
+        // bad" logged people out for the crime of clicking a link too quickly, moments after
+        // signing in. Anything that isn't a 401 (abort, offline, a 500) leaves the tokens
+        // alone; the next load re-runs this and succeeds.
+        if (err instanceof ApiError && err.status === 401) {
+          clearAuth();
+          router.replace("/login");
+        }
       }
     })();
     return () => {

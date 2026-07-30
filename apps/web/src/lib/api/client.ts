@@ -48,7 +48,9 @@ async function tryRefresh(): Promise<boolean> {
       try {
         const res = await fetch(`/api/auth/refresh`, { method: "POST" });
         if (!res.ok) {
-          clearAuth();
+          // Only give up the session when the refresh token is genuinely rejected. A 502 or a
+          // restarting API is transient — dropping the tokens there turns a blip into a logout.
+          if (res.status === 401) clearAuth();
           return false;
         }
         const data = await res.json();

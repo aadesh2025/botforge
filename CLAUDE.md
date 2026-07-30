@@ -153,6 +153,23 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-07-31 — logged out right after logging in (AuthGate treated an abort as a 401)
+- **A navigation during session bootstrap logged the user out.** `AuthGate` runs
+  `Promise.all([me(), listOrgs()])` on every page load under a bare `catch` that called
+  `clearAuth()` + `/login`. Clicking a link while those are in flight **aborts** them, and an
+  aborted `fetch` rejects with a `TypeError`, not a 401 — so "you navigated quickly" was read as
+  "your token is invalid" and `bf_access`/`bf_org` were deleted. Traced live: both requests
+  `net::ERR_ABORTED`, **zero 401s**, cookies gone. Now only `ApiError` status 401 ends a session.
+- **Same fix applied to two sibling paths:** `tryRefresh()` cleared auth on any non-ok refresh
+  (now 401 only), and the BFF refresh route dropped the httpOnly refresh cookie on any ≥400 —
+  including a 5xx from a restarting API. It now separates a rejected token (401/400 → clear)
+  from an unavailable upstream (→ 503, cookie kept), and no longer 500s when the API is down.
+- **Exposed, not caused, by `fbf8543`** — wiring the dashboard to five real requests widened the
+  in-flight window so an ordinary click landed inside it. PRD criterion 1 went 0/3 → 3/3 with no
+  change to the test. 5 unit tests pin abort/503 ≠ sign-out.
+- Suites: **320 pytest**, **116 vitest**, **54/55 Playwright** (the one failure is the known
+  hardcoded-rate-limit flake — passes in isolation; see the roadmap).
+
 ### 2026-07-30 — mock data purged from the dashboard, profile and versions tab
 - **Three screens rendered fixtures as real records.** `dashboard/page.tsx` imported
   `{ agents, recentConversations }` from `lib/mock/data` — a brand-new org saw four invented

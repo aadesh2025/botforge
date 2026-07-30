@@ -38,6 +38,26 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Logged out seconds after logging in — fixed (2026-07-31).** `AuthGate` bootstraps every page
+  load with `Promise.all([me(), listOrgs()])` under a bare `catch` that ran `clearAuth()` and
+  bounced to `/login`. Navigating *while that bootstrap is still in flight* **aborts** those
+  requests, and the browser rejects an aborted `fetch` with a `TypeError` — not a 401. So the
+  gate read "the user clicked a link quickly" as "this token is invalid", deleted `bf_access`
+  and `bf_org`, and threw them back to the sign-in page moments after they authenticated.
+  Traced live: on the navigation, `GET /v1/auth/me` and `GET /v1/orgs` both report
+  `net::ERR_ABORTED`, **no request 401s at all**, and the cookies are gone by the next paint.
+  The catch now clears the session **only** on `ApiError` with status 401; an abort, an offline
+  blip or a 500 leaves the tokens alone and the next load re-runs the bootstrap cleanly.
+  Two sibling paths that turned a hiccup into a logout got the same treatment: `tryRefresh()`
+  called `clearAuth()` on *any* non-ok refresh response (now 401 only), and the BFF
+  `/api/auth/refresh` route cleared the httpOnly refresh cookie on any status ≥ 400 — including
+  a 5xx from an API that was merely restarting. It now distinguishes a rejected token (401/400
+  → clear, as before) from an unavailable upstream (→ 503, cookie kept), and an unreachable API
+  no longer throws a 500 out of the route.
+  **Not caused by the dashboard rewiring, but exposed by it** (`fbf8543`): replacing the mock
+  fixtures with five real concurrent requests widened the in-flight window enough that a normal
+  click landed inside it. PRD criterion 1's E2E went from failing 3/3 to passing 3/3 with no
+  change to the test. 5 web unit tests pin the distinction — 401 signs out, abort and 503 do not.
 - **The dashboard, profile page and versions tab show real data (2026-07-30).** Closes the
   mock-data item flagged on 2026-07-28, plus two more instances found by sweeping for it. Three
   screens still imported **data** — not just types — from the Phase-4 mock layer (ADR-011), so

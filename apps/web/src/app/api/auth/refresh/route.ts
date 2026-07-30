@@ -8,10 +8,27 @@ export async function POST(request: NextRequest) {
   if (!refresh) {
     return NextResponse.json({ error: { code: "auth.no_session", message: "No session" } }, { status: 401 });
   }
-  const { status, data } = await forward("/v1/auth/refresh", { refresh_token: refresh });
+  let status: number;
+  let data: unknown;
+  try {
+    ({ status, data } = await forward("/v1/auth/refresh", { refresh_token: refresh }));
+  } catch {
+    // The API is unreachable (restarting, network blip). That says nothing about whether the
+    // refresh token is still good, so keep the cookie and let the client try again.
+    return NextResponse.json(
+      { error: { code: "auth.refresh_unavailable", message: "Auth service unavailable" } },
+      { status: 503 },
+    );
+  }
   if (status >= 400 || !data || typeof data !== "object") {
-    const res = NextResponse.json({ error: { code: "auth.refresh_failed", message: "Refresh failed" } }, { status: 401 });
-    clearRefreshCookie(res); // stale/rotated refresh — drop it
+    const rejected = status === 401 || status === 400;
+    const res = NextResponse.json(
+      { error: { code: "auth.refresh_failed", message: "Refresh failed" } },
+      // Only a rejection of the token itself is a real logout; a 5xx is the server's problem
+      // and must not cost the user their session.
+      { status: rejected ? 401 : 503 },
+    );
+    if (rejected) clearRefreshCookie(res); // stale/rotated refresh — drop it
     return res;
   }
   const { access_token, refresh_token } = data as { access_token: string; refresh_token: string };
