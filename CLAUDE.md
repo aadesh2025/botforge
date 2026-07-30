@@ -153,6 +153,26 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-07-30 — mock data purged from the dashboard, profile and versions tab
+- **Three screens rendered fixtures as real records.** `dashboard/page.tsx` imported
+  `{ agents, recentConversations }` from `lib/mock/data` — a brand-new org saw four invented
+  agents ("Support Concierge", "Sales Qualifier", …) and five conversations that never happened;
+  `settings/profile/page.tsx` imported `currentUser`, showing **"Aadesh Sree / aadesh@aurozen.ai"
+  to whoever was logged in** plus two fake devices; `versions-tab.tsx` imported `versions`,
+  giving every agent the same four-entry history with dead Publish/Roll back buttons. All now
+  read the API with a skeleton + a written empty state (zero-of-everything is the normal state of
+  a freshly provisioned client — exactly what the fixtures hid). `lib/mock/data.ts` deleted;
+  `builder.ts`'s `versions`/`makeDraft`/`knowledgeBases`/`tools` removed. See ADR-041.
+- **Recent conversations reads `/v1/conversations`, not `/v1/inbox/conversations`** — the inbox
+  is the *handoff queue*, so a bot resolving everything would look idle, and `viewer` lacks
+  `inbox:handle` and would have hit a 403 where a fixture used to render.
+- **Backend bug found on the way:** `GET /v1/auth/sessions` hardcoded `current=False`, so "This
+  device" could never show. Access tokens now carry a `sid` claim; tokens without it degrade to
+  the old behaviour, so rotation is unaffected. Profile name/email are **read-only** — there is
+  no `PATCH /v1/auth/me`, and the old Save button silently discarded the edit (roadmap).
+- **Flagged, not changed:** `providerCatalog` duplicates `GET /v1/credentials/providers` and can
+  drift; switching it changes which models are selectable, so it wants its own commit (ADR-041).
+
 ### 2026-07-30 — n8n discovery scoped per org, real email delivery, one-command provisioning
 1. **n8n multi-tenancy** (`6fead42`): `list_n8n_workflows` had **zero** tenant filtering — every
    org's Automations page listed every workflow in the shared n8n, platform-internal ones included

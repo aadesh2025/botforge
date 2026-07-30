@@ -18,6 +18,51 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-041: Dashboard/profile/versions read the API; what stays a static client list
+- **Date:** 2026-07-30
+- **Status:** accepted
+- **Context:** `dashboard/page.tsx`, `settings/profile/page.tsx` and `versions-tab.tsx` still
+  imported **data** (not just types) from `lib/mock/*`, left over from the Phase-4 mock layer
+  (ADR-011) that was supposed to be swapped out once the backends landed. A brand-new org saw
+  four invented agents, five invented conversations, someone else's name and email, and a
+  four-entry version history — all indistinguishable from real data.
+- **Decisions:**
+  - **Each panel fetches its own data**, matching `DashboardStats` (TanStack Query +
+    `enabled: Boolean(activeOrgId)`) rather than taking props from the page. That keeps
+    `dashboard/page.tsx` a server component and gives every panel its own loading/empty state.
+  - **"Recent conversations" reads `GET /v1/conversations`, not the inbox.** The inbox endpoint
+    is the *handoff queue* (`Conversation.id.in_(handoff_ids)`), so an org whose bot resolves
+    everything without escalating would show an empty panel while conversations exist; it also
+    requires `inbox:handle`, which `viewer` lacks, so a viewer would have seen a 403 where the
+    fixture used to render. `listConversations` needs only `READ`.
+  - **Only fields the API actually returns are rendered.** The agents panel dropped its
+    per-agent "7d chats" and resolution rate: `GET /v1/agents` carries no traffic figures, and
+    filling them would mean one analytics request per row. The aggregate numbers already sit in
+    the stat cards directly above.
+  - **The versions tab keys "Current" off `agent.current_version_id`**, not the highest version
+    number — after a rollback the live version is deliberately an older one.
+  - **Profile name/email are read-only.** There is no `PATCH /v1/auth/me`; the page previously
+    offered a Save button that discarded the edit. Rendering the real values read-only is honest;
+    building a profile-update endpoint is a separate piece of work, noted in the PROGRESS roadmap.
+  - **`current` on `GET /v1/auth/sessions` was hardcoded `False`** — the schema had the field and
+    the UI a "This device" badge, but the server never set it, because it only had the `User`. The
+    access token now carries a `sid` claim naming the session that minted it. Tokens issued before
+    the claim simply have no `sid` and every row reports `current: false`, i.e. today's behaviour,
+    so nothing breaks on rotation.
+  - **`providerCatalog` and `toneOptions` stay static client lists** (flagged, not changed).
+    `providerCatalog` *does* have a real backend counterpart — `GET /v1/credentials/providers`
+    returns providers plus their models — so the builder's Model tab could source it live and stop
+    drifting from what the server supports. That is a behavioural change to the Model tab (model
+    lists would vary by which keys are configured) and belongs in its own change, not smuggled into
+    a mock-removal. `toneOptions` is pure UI copy with no backend at all and should stay local.
+- **Consequences:** `lib/mock/data.ts` is deleted (nothing imported it once these three screens
+  were wired) and `lib/mock/builder.ts` keeps only its type vocabulary + the two config lists —
+  its `versions`, `makeDraft`, `knowledgeBases` and `tools` fixtures are gone, so they cannot be
+  re-imported by accident. `lib/mock/types.ts` stays: `display.ts` and several components still
+  import types from it. The remaining unused mock modules (`analytics`, `automations`, `inbox`,
+  `settings`) have no importers at all and are dead files — left in place rather than widening
+  this change, and noted in the roadmap.
+
 ### ADR-040: n8n workflow visibility scoped per org by tag, not shown unfiltered
 - **Date:** 2026-07-30
 - **Status:** accepted

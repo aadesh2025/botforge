@@ -38,6 +38,43 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **The dashboard, profile page and versions tab show real data (2026-07-30).** Closes the
+  mock-data item flagged on 2026-07-28, plus two more instances found by sweeping for it. Three
+  screens still imported **data** — not just types — from the Phase-4 mock layer (ADR-011), so
+  they rendered fixtures as though they were the tenant's own records: `dashboard/page.tsx`
+  imported `{ agents, recentConversations }`, giving a brand-new org four invented agents
+  (*Support Concierge*, *Sales Qualifier*, *Docs Assistant*, *Order Tracker*) and five
+  conversations that never happened, complete with plausible message counts and visitor handles;
+  `settings/profile/page.tsx` imported `currentUser` and rendered **"Aadesh Sree /
+  aadesh@aurozen.ai" to whoever was logged in**, above two invented devices in "Coimbatore, IN";
+  `versions-tab.tsx` imported `versions` and gave every agent the same four-entry history
+  ("Tightened refund policy wording") with Publish and Roll back buttons that did nothing. All
+  three now fetch per-org data with their own loading skeleton and a written empty state — zero
+  agents and zero conversations is the *normal* state of a freshly provisioned client, and
+  precisely what the fixtures were hiding.
+  **Not from the inbox:** "Recent conversations" reads `GET /v1/conversations`, because
+  `/v1/inbox/conversations` is the handoff queue — an org whose bot answers everything without
+  escalating would have shown an empty panel, and `viewer` (no `inbox:handle`) would have got a
+  403 where a fixture used to render. **Only real fields are shown:** the agents panel dropped
+  its per-agent "7d chats" and resolution rate rather than firing one analytics request per row
+  for numbers `GET /v1/agents` doesn't carry; the aggregates are already in the stat cards above.
+  The versions tab marks Current from `current_version_id`, not the highest version number,
+  because a rollback deliberately makes an older version live; Publish/Roll back now call the
+  real endpoints and are hidden without `agents:publish`.
+  **One real backend bug surfaced on the way:** `GET /v1/auth/sessions` returned `current=False`
+  **hardcoded**, so the "This device" badge could never appear and a user had no way to tell
+  their own session from the ones they might want to revoke — `list_sessions` only ever received
+  the `User`. Access tokens now carry a `sid` claim naming the session that minted them; a token
+  issued before the claim has no `sid` and every row reports `current: false`, exactly the old
+  behaviour, so rotation and existing sessions are unaffected.
+  **Profile name/email are read-only:** there is no `PATCH /v1/auth/me`, and the page's old Save
+  button silently discarded the edit. `lib/mock/data.ts` is deleted outright and `builder.ts`'s
+  `versions` / `makeDraft` / `knowledgeBases` / `tools` fixtures removed so nothing can
+  re-import them; `types.ts` and the `providerCatalog`/`toneOptions` config lists stay (ADR-041
+  explains why `providerCatalog` was flagged rather than switched to
+  `/v1/credentials/providers` in this change). 3 backend tests, 38 web unit tests, 4 Playwright
+  checks — including a brand-new org asserting both empty states and the absence of every
+  fixture name.
 - **Self-serve signup closed — organization creation is staff-only, full stop (2026-07-30).**
   Closes the gap flagged as "genuinely not built" when the invite-acceptance page shipped.
   `create_org` was already staff-gated, but with a deliberate exception: `not user.is_staff and
@@ -493,6 +530,22 @@ List any provider/channel/billing key that is stubbed and needs a real value. (S
   tagging rule exists to end. The org slug is already in scope at clone time (it's what builds the
   webhook path), so the fix is to set the tag in the same `POST /api/v1/workflows` call, plus
   `internal` on the template itself. Until then, provisioning quietly grows the tagging backlog.
+- **No `PATCH /v1/auth/me`, so the profile page can't be edited.** Name and email render
+  read-only (2026-07-30) because the endpoint doesn't exist — the page previously showed inputs
+  and a Save button that discarded the edit. Adding it is small (validate + update `User`,
+  re-verify on email change) but it needs a decision about whether changing an email re-triggers
+  verification and invalidates sessions, which is why it wasn't bolted on to a mock-removal.
+- **`providerCatalog` is a hardcoded client-side list that can drift from the server.**
+  `lib/mock/builder.ts` holds each provider's model list, while `GET /v1/credentials/providers`
+  already returns providers *and* their models, discovered dynamically where the API supports it.
+  The builder's Model tab should read the endpoint, so the dropdown reflects what the deployment
+  can actually run rather than what was true when the list was typed. Deliberately not changed
+  alongside the mock-data removal (ADR-041): it alters which models a user can pick, which is a
+  behavioural change deserving its own commit and test.
+- **Four mock modules are now dead files.** `lib/mock/{analytics,automations,inbox,settings}.ts`
+  have no importers anywhere in `apps/web/src` (verified 2026-07-30 while removing `data.ts`).
+  They're harmless but they're also exactly how this bug happened — a fixture sitting in the tree
+  long enough to look importable. Delete them once nothing is mid-flight against those screens.
 - **Consider deny-by-default for n8n visibility** (ADR-040 follow-up): once most workflows carry
   tags, flip the untagged default from visible-to-all to visible-to-none, or replace tags with a
   BotForge-side `workflow_id → org_id` mapping table that doesn't depend on the operator
