@@ -54,6 +54,12 @@ def test_extract_webhook_url() -> None:
     assert client.extract_webhook_url({"nodes": []}) is None
 
 
+def test_extract_tags_handles_dict_and_string_entries() -> None:
+    assert N8nClient.extract_tags({"tags": [{"name": "Acme"}, "Beta"]}) == {"acme", "beta"}
+    assert N8nClient.extract_tags({"tags": []}) == set()
+    assert N8nClient.extract_tags({}) == set()
+
+
 async def test_trigger_webhook_signs_request() -> None:
     captured: dict = {}
 
@@ -67,6 +73,80 @@ async def test_trigger_webhook_signs_request() -> None:
     status, data = await client.trigger_webhook("http://n8n/webhook/x", {"a": 1})
     assert status == 200 and data["result"] == "pong"
     assert verify_callback(captured["sig"], captured["ts"], captured["body"]) is True
+
+
+# ── Multi-tenant workflow visibility (client A must not see client B's automations,
+#    and no client should ever see a platform-internal workflow) ────────────────────
+def test_workflow_visible_to_org_scopes_by_tag() -> None:
+    from app.tools.service import workflow_visible_to_org
+
+    # tagged for a specific org — only that org sees it
+    assert workflow_visible_to_org({"acme"}, "Booking", "acme") is True
+    assert workflow_visible_to_org({"acme"}, "Booking", "widgetco") is False
+    # untagged — permissive default so existing, not-yet-tagged workflows don't vanish
+    assert workflow_visible_to_org(set(), "Website Lead — Contact Form", "widgetco") is True
+    # explicitly internal — hidden from every org regardless of tag
+    assert workflow_visible_to_org({"internal"}, "Anything", "acme") is False
+    # legacy "SHARED —" naming convention is treated as internal even if untagged
+    assert workflow_visible_to_org(set(), "SHARED — Master Router", "acme") is False
+
+
+async def test_list_n8n_workflows_hides_internal_and_other_orgs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tools import service
+
+    def handler(_r: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "1", "name": "SHARED — Master Router", "active": True, "tags": []},
+                    {"id": "2", "name": "Acme — Booking", "active": True, "tags": [{"name": "acme"}]},
+                    {"id": "3", "name": "WidgetCo — Booking", "active": True, "tags": [{"name": "widgetco"}]},
+                    {"id": "4", "name": "Website Lead — Contact Form", "active": True, "tags": []},
+                ]
+            },
+        )
+
+    monkeypatch.setattr(service, "get_client", lambda **_k: N8nClient("http://n8n", "k", transport=_mock(handler)))
+
+    class _Org:
+        slug = "acme"
+
+    class _Ctx:
+        role = "owner"
+        org = _Org()
+
+    result = await service.list_n8n_workflows(None, _Ctx())  # type: ignore[arg-type]
+    names = {w.name for w in result}
+    assert names == {"Acme — Booking", "Website Lead — Contact Form"}
+
+
+async def test_bind_by_id_rejects_workflow_from_another_org(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.errors import AppError
+    from app.tools import schemas, service
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/workflows/3"
+        return httpx.Response(
+            200, json={"id": "3", "name": "WidgetCo — Booking", "tags": [{"name": "widgetco"}], "nodes": []}
+        )
+
+    monkeypatch.setattr(service, "get_client", lambda **_k: N8nClient("http://n8n", "k", transport=_mock(handler)))
+
+    class _Org:
+        slug = "acme"
+
+    class _Ctx:
+        role = "owner"
+        org = _Org()
+
+    with pytest.raises(AppError) as exc_info:
+        await service.bind_n8n_workflow(
+            None,  # type: ignore[arg-type]
+            _Ctx(),  # type: ignore[arg-type]
+            schemas.BindN8nRequest(name="steal_booking", workflow_id="3"),
+        )
+    assert exc_info.value.code == "tools.n8n_forbidden"
 
 
 # ── n8n tool execution ──────────────────────────────────────────────────────────────

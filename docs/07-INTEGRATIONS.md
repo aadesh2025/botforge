@@ -18,6 +18,12 @@
   `run_id`; runtime resolves the pending tool call.
 - Discovery: `GET /v1/tools/n8n/workflows` proxies n8n's API to list workflows so the user
   can pick one in the UI, then `POST /v1/tools/n8n/bind`.
+- **Multi-tenant scoping:** one n8n instance is shared across every org, so discovery filters by
+  n8n **tag**: a workflow tagged with an org's slug is visible only to that org; a workflow
+  tagged `internal`/`shared-internal`/`platform-internal` is hidden from every org unconditionally
+  (platform-owned workflows must never be bindable by a client). Untagged workflows stay visible
+  to all orgs — a permissive default, not "properly scoped." See `docs/guides/N8N-SETUP.md §5`
+  and ADR-040.
 
 **n8n → BotForge (workflows use BotForge):**
 - n8n calls BotForge's REST API using an org **API key** (`bf_...`) — e.g., send a message

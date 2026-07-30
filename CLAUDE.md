@@ -153,6 +153,36 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-07-30 — n8n discovery scoped per org, real email delivery, one-command provisioning
+1. **n8n multi-tenancy** (`fix(tools)`): `list_n8n_workflows` had **zero** tenant filtering — every
+   org's Automations page listed every workflow in the shared n8n, platform-internal ones included
+   ("SHARED — Master Router"), and could bind a tool to them. New
+   `workflow_visible_to_org(tags, name, org_slug)`: tagged with an org's slug → only that org;
+   tagged `internal`/`shared-internal`/`platform-internal` → hidden from everyone (fails **closed**);
+   untagged → visible to all (permissive so existing untagged client workflows didn't vanish);
+   `"SHARED — …"` treated as internal even untagged. Enforced at discovery **and** in
+   `bind_n8n_workflow` by `workflow_id` (typed `tools.n8n_forbidden` 403), closing the
+   bind-by-guessed-id hole. Binding by pasted webhook URL is deliberately **not** covered — ADR-040.
+   Caught from a live screenshot, not a test: no test had two orgs' workflows in one instance.
+2. **Email actually sends** (`898c68d`): `get_email_backend()`'s `"smtp"` branch logged
+   `smtp_backend_not_implemented` and fell back to console, so no invite/verification/reset/magic-link
+   had ever reached an inbox. `SmtpEmailBackend` over **aiosmtplib** + HTML templates; TLS mode from
+   the port (465 implicit, else STARTTLS). Sending moved to an `email.send` Celery task — and measuring
+   found `.delay()` blocks the loop and kombu retries a dead broker 20× (**30-second hung signup**), so
+   the enqueue is threaded under a bounded 2s timeout and abandoned. Console mode stays **inline** (eager
+   Celery would hit `asyncio.run()` inside the running loop — the §12 ingestion trap) which is what
+   keeps the test outbox synchronous.
+3. **One-command provisioning** (`86e0d3b`): `scripts/provision-client.mjs` → org + published agent +
+   cloned/activated n8n automation bound as a tool + client invited as `editor`. Staff **login**, not a
+   `bf_` key (org creation is gated on `is_staff`). Per-client webhook path — cloning the template
+   verbatim would aim every client's tool at one shared URL. Two idempotency traps fixed: a pending
+   invite would be re-sent (`create_invitation` only rejects *active* members), and re-patching an
+   existing agent forked a draft every run **and would overwrite the client's own persona edits**.
+   Dev `n8n` gained `N8N_HOST_PORT` + `N8N_DIAGNOSTICS_ENABLED=false` (it exits when
+   `telemetry.n8n.io` won't resolve) and now runs on **5679**, isolated from the unrelated n8n on 5678.
+
+Suites: **319 pytest**, **73 vitest**, **46/46 Playwright**, 8 `node --test`.
+
 ### 2026-07-29 — Edit/publish split, live widget config, invite acceptance
 1. **RBAC split** (`59b8f6f`): new `AGENTS_PUBLISH` gates publish/rollback; `editor` is now the
    **client role** (edit, knowledge, own channel credentials, inbox, Playground — no publish).

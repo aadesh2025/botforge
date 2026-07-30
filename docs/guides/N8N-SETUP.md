@@ -59,14 +59,35 @@ No API key? Bind directly by webhook URL (Automations → Bind → paste the URL
 Then enable the agent's **Tools** and chat — when the model decides to call the tool, BotForge
 triggers the workflow and uses its response. (This full roundtrip was verified live in Phase 10.)
 
-## 5. n8n → BotForge (the other direction)
+## 5. Multi-tenant visibility — tag each client's workflows
+
+BotForge is one shared n8n instance behind every org, so **`Automations` scopes what each org
+can see by n8n tag**, not by anything n8n itself knows about tenants:
+
+- Tag a workflow with a client's **org slug** (Settings → org slug, or the org list) and only
+  that org sees it in Automations / can bind it.
+- Tag a workflow `internal` (or `shared-internal` / `platform-internal`) and it's hidden from
+  **every** org, regardless of who's logged in — use this for platform-owned workflows (an
+  admin provisioner, a master router) that no client should ever see or bind a tool to.
+- **Untagged workflows stay visible to every org** — a deliberate permissive default so
+  existing workflows don't disappear the moment you start tagging. This means an untagged
+  workflow is *not* private to the client it was built for until you tag it. Tag every
+  client-specific workflow as soon as you create it.
+- Binding by `workflow_id` re-checks the same rule server-side (an org can't bind a workflow it
+  was never shown just by knowing its id). Binding by pasting a raw webhook URL directly is
+  **not** covered — treat webhook URLs for client-specific workflows as secrets.
+
+Set tags in the n8n UI: open the workflow → the tag field near the title. See ADR-040 in
+`docs/DECISIONS.md` for the full reasoning.
+
+## 6. n8n → BotForge (the other direction)
 
 To have a workflow act on BotForge, create a BotForge **API key** (Settings → API keys, `bf_`-prefixed)
 and call the REST API from an HTTP Request node — e.g. create a conversation, post an inbox message,
 or read analytics. See the [API usage guide](API-USAGE.md). BotForge also emits **outbound webhooks**
 (`message.created`, `handoff.requested`, …) you can receive with an n8n Webhook node to trigger flows.
 
-## 6. What BotForge sends
+## 7. What BotForge sends
 
 Every outbound tool call is a signed POST to the workflow's webhook:
 

@@ -299,16 +299,40 @@ async def _any_agent_id(session: AsyncSession, ctx: OrgContext) -> uuid.UUID:
 
 
 # ── n8n binding ────────────────────────────────────────────────────────────────────
+# A workflow becomes visible to one org by tagging it (in n8n) with that org's slug.
+# Untagged workflows stay visible to every org — permissive default so existing,
+# not-yet-tagged client workflows don't vanish the moment this shipped — UNLESS a
+# workflow is marked internal, in which case it never appears to any org, tagged or
+# not. A client binding a tool to a platform-internal workflow (an admin provisioner,
+# an internal router) is a security incident, not a UX gap, so that direction fails closed.
+_INTERNAL_TAGS = {"internal", "shared-internal", "platform-internal"}
+
+
+def workflow_visible_to_org(tags: set[str], name: str, org_slug: str) -> bool:
+    if tags & _INTERNAL_TAGS:
+        return False
+    # Stopgap for the "SHARED — ..." internal workflows that predate tagging (e.g. the
+    # auto-provisioner, the master router). Tag them `internal` in n8n to retire this check.
+    if name.strip().lower().startswith(("shared —", "shared -")):
+        return False
+    if not tags:
+        return True
+    return org_slug.strip().lower() in tags
+
+
 async def list_n8n_workflows(session: AsyncSession, ctx: OrgContext) -> list[schemas.N8nWorkflowOut]:
     rbac.require_permission(ctx.role, rbac.READ)
     client = get_client()
     workflows = await client.list_workflows()
     out: list[schemas.N8nWorkflowOut] = []
     for wf in workflows:
+        name = str(wf.get("name", "workflow"))
+        if not workflow_visible_to_org(client.extract_tags(wf), name, ctx.org.slug):
+            continue
         out.append(
             schemas.N8nWorkflowOut(
                 id=str(wf.get("id")),
-                name=str(wf.get("name", "workflow")),
+                name=name,
                 active=bool(wf.get("active", False)),
                 webhook_url=client.extract_webhook_url(wf),
             )
@@ -325,7 +349,14 @@ async def bind_n8n_workflow(
     workflow_name = data.workflow_name
     if not webhook_url and data.workflow_id:
         workflow = await client.get_workflow(data.workflow_id)
-        workflow_name = workflow_name or str(workflow.get("name", ""))
+        name = str(workflow.get("name", ""))
+        # Same visibility rule as the list endpoint — closes the gap where an org could
+        # bind a workflow it was never shown just by knowing (or guessing) its n8n id.
+        if not workflow_visible_to_org(client.extract_tags(workflow), name, ctx.org.slug):
+            raise AppError(
+                "tools.n8n_forbidden", "This workflow is not available to your organization.", 403
+            )
+        workflow_name = workflow_name or name
         webhook_url = client.extract_webhook_url(workflow)
     if not webhook_url:
         raise AppError("tools.n8n_no_webhook", "Could not resolve a webhook URL for this workflow.", 400)

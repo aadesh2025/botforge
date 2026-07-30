@@ -18,6 +18,43 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-040: n8n workflow visibility scoped per org by tag, not shown unfiltered
+- **Date:** 2026-07-30
+- **Status:** accepted
+- **Context:** `GET /v1/tools/n8n/workflows` called `N8nClient.list_workflows()` and returned
+  *every* workflow in the single shared n8n instance to *every* org — no tenant filtering at
+  all. Once real client orgs exist alongside platform-internal workflows (e.g. an admin
+  "Auto Provisioner", a "Master Router"), any org's Automations page shows every other org's
+  automations and, worse, lets them bind a tool to an internal/admin workflow. Caught from a
+  live screenshot of the Automations page, not a test — no prior test asserted per-org scoping
+  because no prior test had more than one org's workflows in the same n8n instance.
+- **Decision:** `tools/service.workflow_visible_to_org(tags, name, org_slug)` — a workflow is
+  visible to an org if it's tagged (in n8n) with that org's slug. **Untagged workflows stay
+  visible to every org** (permissive default, so the client's existing untagged workflows don't
+  disappear the moment this shipped) **unless tagged `internal`/`shared-internal`/
+  `platform-internal`**, which hides them from every org unconditionally — that direction fails
+  closed because a client reaching an admin workflow is a security incident, not a UX gap. A
+  `name.startswith("SHARED —")` check is a stopgap for the specific internal workflows that
+  already exist untagged (Auto Provisioner, Master Router, Groq AI Caller); tagging them
+  `internal` in n8n retires that check. Applied at both `list_n8n_workflows` (discovery) and
+  `bind_n8n_workflow` when binding by `workflow_id` (closes the gap where an org could bind a
+  workflow it was never shown, just by knowing/guessing its n8n id).
+- **Alternatives considered:** (a) deny-by-default (only tagged workflows visible) — rejected
+  for now because it would immediately hide every one of the client's real, already-bound,
+  untagged workflows until each is manually tagged; revisit once tagging is the norm. (b) a
+  BotForge-side `workflow_id → org_id` mapping table instead of n8n tags — more robust (doesn't
+  depend on the operator remembering to tag) but needs a migration and a UI to manage the
+  mapping; deferred, n8n tags are zero-schema-change and the operator already names workflows
+  by client convention (`00001 —`, `00002 —`).
+- **Consequences:** binding by pasted webhook URL (the no-API-key fallback path) is **not**
+  covered by this check — if an org already has the exact secret URL, this rule can't stop them
+  from calling it, same as any other external endpoint they happen to know. Real separation
+  still requires the operator to tag each client's n8n workflows with that client's org slug;
+  until tagged, non-internal workflows remain visible to all orgs same as before. Follow-up:
+  consider flipping to deny-by-default once most workflows are tagged, and/or building the
+  mapping-table approach (b) — or a multi-tenant MCP server per automation type instead of
+  per-client n8n workflows — once past ~20 clients on shared n8n.
+
 ### ADR-019: Frontend↔backend integration — cookie tokens, hand-written client, SSE reader
 - **Date:** 2026-07-17
 - **Status:** accepted

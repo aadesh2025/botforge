@@ -110,6 +110,21 @@ class N8nClient:
                     return f"{self.base_url}/webhook/{path}"
         return None
 
+    @staticmethod
+    def extract_tags(workflow: dict[str, Any]) -> set[str]:
+        """Return a workflow's n8n tag names, lower-cased.
+
+        BotForge is a single shared n8n instance behind every org (docs/07 §1), so
+        `list_workflows()` returns every workflow regardless of which client it belongs to.
+        Tags are how a workflow is scoped to one org — see `tools/service.workflow_visible_to_org`.
+        """
+        tags: set[str] = set()
+        for t in workflow.get("tags") or []:
+            name = t.get("name") if isinstance(t, dict) else t
+            if name:
+                tags.add(str(name).strip().lower())
+        return tags
+
     async def trigger_webhook(self, url: str, payload: dict[str, Any]) -> tuple[int, Any]:
         """POST a signed payload to an n8n webhook URL. Returns (status_code, parsed body)."""
         body = json.dumps(payload).encode()
