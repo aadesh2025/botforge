@@ -49,6 +49,15 @@ async def health(
     return await service.health(session)
 
 
+@router.get("/automations", response_model=schemas.AutomationsOverviewOut)
+async def automations(
+    _staff: User = Depends(require_staff),
+    session: AsyncSession = Depends(get_session),
+) -> schemas.AutomationsOverviewOut:
+    """Every n8n workflow across every tenant, with its tag-derived owner and bindings."""
+    return await service.automations_overview(session)
+
+
 @router.get("/feature-flags", response_model=list[schemas.FeatureFlagOut])
 async def list_flags(
     _staff: User = Depends(require_staff),

@@ -8,7 +8,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import AppError
 from app.core.probes import check_database, check_redis
+from app.integrations.n8n_client import get_client as get_n8n_client
 from app.models import (
     Agent,
     AgentVersion,
@@ -17,10 +19,12 @@ from app.models import (
     Membership,
     Message,
     Organization,
+    Tool,
     UsageRecord,
     User,
 )
 from app.modules.admin import schemas
+from app.tools.service import INTERNAL_TAGS, SHARED_TEMPLATE_TAG
 
 
 async def list_orgs(session: AsyncSession, limit: int = 100) -> list[schemas.OrgAdminOut]:
@@ -187,6 +191,101 @@ async def health(session: AsyncSession) -> schemas.HealthOut:
         conversations=int(convos or 0),
         messages=int(msgs or 0),
     )
+
+
+async def automations_overview(session: AsyncSession) -> schemas.AutomationsOverviewOut:
+    """Every n8n workflow, resolved to the org its tags scope it to.
+
+    The one place staff can see all clients' automations without switching org. It is also
+    the working view for the tagging backlog: under deny-by-default an untagged workflow is
+    invisible to everyone, so `untagged` here means "nobody can use this yet", and
+    `unknown-org` means the tag doesn't match any organization slug — usually a typo.
+    """
+    slugs = {
+        slug: name
+        for slug, name in (
+            await session.execute(
+                select(Organization.slug, Organization.name).where(Organization.deleted_at.is_(None))
+            )
+        ).all()
+    }
+
+    client = get_n8n_client()
+    try:
+        raw = await client.list_workflows()
+    except AppError as exc:
+        # n8n being down or keyless is a normal operational state, not a 500 for the console.
+        return schemas.AutomationsOverviewOut(workflows=[], error=exc.message)
+
+    bindings = await _n8n_bindings(session)
+
+    out: list[schemas.AutomationOut] = []
+    for wf in raw:
+        wf_id = str(wf.get("id"))
+        name = str(wf.get("name", "workflow"))
+        tags = sorted(client.extract_tags(wf))
+        owner, kind, org_name = _resolve_owner(tags, name, slugs)
+        out.append(
+            schemas.AutomationOut(
+                id=wf_id,
+                name=name,
+                active=bool(wf.get("active", False)),
+                tags=tags,
+                owner=owner,
+                owner_kind=kind,
+                organization_name=org_name,
+                webhook_url=client.extract_webhook_url(wf),
+                bindings=bindings.get(wf_id, []),
+            )
+        )
+    # Unowned first: this list is a to-do, so what needs attention sorts to the top.
+    order = {"untagged": 0, "unknown-org": 1, "org": 2, "shared-template": 3, "internal": 4}
+    out.sort(key=lambda w: (order.get(w.owner_kind, 9), w.name.lower()))
+    return schemas.AutomationsOverviewOut(workflows=out)
+
+
+def _resolve_owner(
+    tags: list[str], name: str, slugs: dict[str, str]
+) -> tuple[str, str, str | None]:
+    """Mirror `tools.service.workflow_visible_to_org`'s precedence, but report rather than
+    filter — staff need to see the internal and unowned workflows a client never would."""
+    if set(tags) & INTERNAL_TAGS or name.strip().lower().startswith(("shared —", "shared -")):
+        return "internal", "internal", None
+    if SHARED_TEMPLATE_TAG in tags:
+        return "shared-template", "shared-template", None
+    for tag in tags:
+        if tag in slugs:
+            return tag, "org", slugs[tag]
+    if not tags:
+        return "untagged", "untagged", None
+    return tags[0], "unknown-org", None
+
+
+async def _n8n_bindings(session: AsyncSession) -> dict[str, list[schemas.AutomationBindingOut]]:
+    """Which agents bind each workflow, keyed by the n8n workflow id on the tool's config."""
+    stmt = (
+        select(Tool, Organization.slug, Organization.name, Agent.name)
+        .join(Organization, Organization.id == Tool.organization_id)
+        .outerjoin(Agent, Agent.id == Tool.agent_id)
+        .where(Tool.type == "n8n")
+    )
+    found: dict[str, list[schemas.AutomationBindingOut]] = {}
+    for tool, org_slug, org_name, agent_name in (await session.execute(stmt)).all():
+        config = tool.config or {}
+        wf_id = config.get("workflow_id")
+        if not wf_id:
+            continue
+        found.setdefault(str(wf_id), []).append(
+            schemas.AutomationBindingOut(
+                organization_slug=org_slug,
+                organization_name=org_name,
+                agent_name=agent_name,
+                tool_name=tool.name,
+                enabled=bool(tool.enabled),
+                mode=config.get("mode"),
+            )
+        )
+    return found
 
 
 async def list_flags(session: AsyncSession) -> list[schemas.FeatureFlagOut]:

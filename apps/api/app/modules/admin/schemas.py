@@ -60,6 +60,40 @@ class HealthOut(BaseModel):
     messages: int
 
 
+class AutomationBindingOut(BaseModel):
+    """One BotForge tool pointing at this workflow."""
+
+    organization_slug: str
+    organization_name: str
+    agent_name: str | None
+    tool_name: str
+    enabled: bool
+    mode: str | None
+
+
+class AutomationOut(BaseModel):
+    """One n8n workflow, resolved to its owning org via its tags."""
+
+    id: str
+    name: str
+    active: bool
+    tags: list[str]
+    # The org slug the tags resolve to, or the sentinels below.
+    owner: str
+    # "org" | "internal" | "shared-template" | "untagged" | "unknown-org"
+    owner_kind: str
+    organization_name: str | None = None
+    webhook_url: str | None = None
+    bindings: list[AutomationBindingOut] = []
+
+
+class AutomationsOverviewOut(BaseModel):
+    workflows: list[AutomationOut]
+    # Set when n8n can't be reached or has no API key — the page says so rather than
+    # rendering an empty table that looks like "no automations exist".
+    error: str | None = None
+
+
 class FeatureFlagOut(BaseModel):
     key: str
     enabled: bool

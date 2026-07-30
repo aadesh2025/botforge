@@ -61,7 +61,38 @@ export interface FeatureFlag {
   updated_at: string;
 }
 
+/** One BotForge tool pointing at a workflow. */
+export interface AutomationBinding {
+  organization_slug: string;
+  organization_name: string;
+  agent_name: string | null;
+  tool_name: string;
+  enabled: boolean;
+  mode: string | null;
+}
+
+export type AutomationOwnerKind = "org" | "internal" | "shared-template" | "untagged" | "unknown-org";
+
+export interface AdminAutomation {
+  id: string;
+  name: string;
+  active: boolean;
+  tags: string[];
+  owner: string;
+  owner_kind: AutomationOwnerKind;
+  organization_name: string | null;
+  webhook_url: string | null;
+  bindings: AutomationBinding[];
+}
+
+export interface AutomationsOverview {
+  workflows: AdminAutomation[];
+  /** Set when n8n is unreachable or keyless — distinct from "no workflows exist". */
+  error: string | null;
+}
+
 export const listAdminOrgs = () => api<AdminOrg[]>("/v1/admin/orgs");
+export const getAutomationsOverview = () => api<AutomationsOverview>("/v1/admin/automations");
 export const listAdminUsers = () => api<AdminUser[]>("/v1/admin/users");
 export const getPlatformUsage = () => api<PlatformUsage>("/v1/admin/usage");
 export const getAdminHealth = () => api<AdminHealth>("/v1/admin/health");

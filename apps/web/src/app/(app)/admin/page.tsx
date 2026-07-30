@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, Bot, Building2, CircleDollarSign, Database, MessagesSquare, Server, Users, Zap } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { AutomationsTable } from "@/components/admin/automations-table";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -67,6 +68,8 @@ export default function AdminPage() {
         <TopOrgs rows={usage?.top_orgs ?? []} />
         <FeatureFlags />
       </div>
+
+      <AutomationsTable />
 
       <OrgsTable orgs={orgs ?? []} />
       <UsersTable users={users ?? []} />
