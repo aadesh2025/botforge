@@ -39,6 +39,11 @@ export function updateOrg(
   return api<ApiOrg>(`/v1/orgs/${orgId}`, { method: "PATCH", body });
 }
 
+/** Soft-delete an organization. Owner only (`org:manage`); the server returns 204. */
+export function deleteOrg(orgId: string) {
+  return api<void>(`/v1/orgs/${orgId}`, { method: "DELETE" });
+}
+
 /** Accept an invitation. Requires an authenticated user whose email matches the invite. */
 export function acceptInvitation(token: string) {
   return api<ApiOrg>(`/v1/orgs/invitations/${encodeURIComponent(token)}/accept`, { method: "POST" });

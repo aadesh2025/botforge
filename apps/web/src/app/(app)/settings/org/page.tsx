@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2, UserPlus } from "lucide-react";
 import { Section } from "@/components/settings/section";
+import { DeleteOrg } from "@/components/settings/delete-org";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -100,6 +101,9 @@ export default function OrgSettingsPage() {
         </div>
         <p className="mt-3 text-xs text-faint">Your role in this workspace: <span className="text-text">{org?.role}</span></p>
       </Section>
+
+      {/* Owner-only; renders nothing for everyone else. */}
+      <DeleteOrg />
 
       <Section
         title="Members"

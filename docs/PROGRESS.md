@@ -38,6 +38,24 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Delete an organization from Settings (2026-07-30).** `DELETE /v1/orgs/{id}` (soft-delete via
+  `deleted_at`, `ORG_MANAGE`) had existed since Phase 3 with **nothing in the UI calling it** — the
+  same shape of gap as the invitation-accept page. New `components/settings/delete-org.tsx` renders
+  a Danger zone directly under "Organization profile" on `/settings/org`, behind a type-the-org-name
+  confirmation. Owner-only: `ORG_MANAGE` is owner-only in the matrix, so an admin — who can invite
+  and remove members — deliberately cannot delete the workspace; the component returns `null` for
+  everyone else and the server 403s regardless.
+  **The interesting part is the aftermath, not the call.** The org being deleted is the *active*
+  one, and its id lives in the `bf_org` cookie that every request sends as `X-Org-Id`. Leaving it
+  there points the whole session at a deleted org, so the failure surfaces on the next page rather
+  than at the click. On success the component re-reads `listOrgs()` (server truth, not a local
+  filter), moves the cookie **and** the Zustand store to the first remaining org, and clears the
+  TanStack cache, which is entirely scoped to the org that just went away. Deleting your *last* org
+  sets no active org at all and lands on `AuthGate`'s create-first-org prompt — which works because
+  the staff-only creation gate always allows a first org.
+  6 web unit tests + 2 Playwright flows. The E2E for the multi-org case gets its second org **by
+  invitation**, since creating a second one is staff-only (`orgs.create_forbidden`) — being invited
+  into several client workspaces is how an operator really ends up with more than one.
 - **n8n workflow discovery is scoped to the owning org (2026-07-30).** `list_n8n_workflows` had
   **no tenant filtering whatsoever** — it returned every workflow in the shared n8n instance to
   every org. Each client's Automations page listed every other client's automations, and
