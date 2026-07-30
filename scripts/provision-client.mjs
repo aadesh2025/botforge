@@ -337,7 +337,69 @@ async function publishAgent(org, agent, versionNumber, alreadyConfigured) {
   return published;
 }
 
-async function ensureWorkflow(clientName) {
+/** Tag a workflow with the owning org's slug, which is what makes it visible to that org.
+ *
+ * Visibility is deny-by-default (ADR-040): an untagged workflow is hidden from every org,
+ * including the client it was just built for, and `POST /v1/tools/n8n/bind` refuses it with
+ * `tools.n8n_forbidden`. So this has to succeed *before* the binding step, and a failure is
+ * fatal rather than a warning — continuing would hand the client an automation they cannot
+ * see and a provisioning run that dies later with a much less obvious error.
+ *
+ * Tags are their own n8n resource: find-or-create by name, then attach. Existing tags are
+ * preserved, so re-running never strips a tag someone added by hand.
+ */
+async function tagWorkflowForOrg(workflow, orgSlug) {
+  const wanted = String(orgSlug).trim().toLowerCase();
+  if (!wanted) throw new ProvisionError("Cannot tag the workflow: the org has no slug.");
+
+  const current = (workflow.tags ?? []).map((t) => (typeof t === "string" ? t : t?.name));
+  if (current.some((n) => String(n).trim().toLowerCase() === wanted)) {
+    reused(`n8n tag "${wanted}" already on workflow ${workflow.id}`);
+    return;
+  }
+
+  let tags;
+  try {
+    tags = await n8n("GET", "/api/v1/tags?limit=250");
+  } catch (cause) {
+    throw tagScopeError(cause);
+  }
+  let tag = (tags.data ?? []).find((t) => String(t.name).trim().toLowerCase() === wanted);
+  if (!tag) {
+    try {
+      tag = await n8n("POST", "/api/v1/tags", { name: wanted });
+    } catch (cause) {
+      throw tagScopeError(cause);
+    }
+  }
+
+  // Keep whatever was already there; PUT replaces the whole set.
+  const keep = (workflow.tags ?? [])
+    .map((t) => (typeof t === "string" ? null : t?.id))
+    .filter(Boolean);
+  const ids = [...new Set([...keep, tag.id])].map((id) => ({ id }));
+  try {
+    await n8n("PUT", `/api/v1/workflows/${workflow.id}/tags`, ids);
+  } catch (cause) {
+    throw tagScopeError(cause);
+  }
+  created(`n8n tag "${wanted}" on workflow ${workflow.id}`);
+}
+
+function tagScopeError(cause) {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  if (!/403|Forbidden/i.test(detail)) return cause;
+  return new ProvisionError(
+    `n8n refused a tag operation (403). The API key can read and write workflows but not ` +
+      `tags.\n` +
+      `  Mint a new key in n8n -> Settings -> API that ALSO includes the tag ` +
+      `read/create scopes and the workflow "update tags" scope, then set N8N_API_KEY.\n` +
+      `  This is not optional: workflow visibility is deny-by-default, so an untagged ` +
+      `workflow is invisible to the very client it was provisioned for.\n  ${detail}`
+  );
+}
+
+async function ensureWorkflow(clientName, orgSlug) {
   step(5, "n8n starter automation");
   const workflowName = `${clientName} — Starter Automation`;
   const list = await n8n("GET", "/api/v1/workflows?limit=250");
@@ -348,6 +410,8 @@ async function ensureWorkflow(clientName) {
       await n8n("POST", `/api/v1/workflows/${existing.id}/activate`);
       log("  activated it (was inactive)");
     }
+    // Re-tag on re-run: a workflow created before tagging existed is otherwise invisible.
+    await tagWorkflowForOrg(existing, orgSlug);
     return existing;
   }
 
@@ -382,6 +446,8 @@ async function ensureWorkflow(clientName) {
   created(`n8n workflow ${workflow.id} (webhook path "${path}")`);
   await n8n("POST", `/api/v1/workflows/${workflow.id}/activate`);
   log("  activated");
+  // Scope it to the owning org before anything tries to bind it.
+  await tagWorkflowForOrg(workflow, orgSlug);
   return workflow;
 }
 
@@ -466,7 +532,8 @@ async function main() {
     step(5, "n8n starter automation — skipped (--skip-n8n)");
     step(6, "Tool binding — skipped (--skip-n8n)");
   } else {
-    workflow = await ensureWorkflow(name);
+    // The org's real slug, not slugify(name) — the API suffixes it on collision.
+    workflow = await ensureWorkflow(name, org.slug);
     tool = await ensureTool(org, agent, workflow);
   }
 
@@ -499,7 +566,7 @@ async function main() {
 }
 
 // Pure helpers are exported so they can be unit-tested without provisioning anything.
-export { loadEnvFile, parseArgs, slugify, starterPersona, starterSystemPrompt };
+export { loadEnvFile, parseArgs, slugify, starterPersona, starterSystemPrompt, tagScopeError };
 
 // Only provision when run as a command, not when imported by a test.
 const invokedDirectly =

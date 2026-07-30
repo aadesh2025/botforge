@@ -12,7 +12,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { loadEnvFile, parseArgs, slugify, starterPersona } from "./provision-client.mjs";
+import {
+  loadEnvFile,
+  parseArgs,
+  slugify,
+  starterPersona,
+  tagScopeError,
+} from "./provision-client.mjs";
 
 test("slugify makes a webhook-safe path", () => {
   assert.equal(slugify("Acme Co"), "acme-co");
@@ -84,4 +90,20 @@ test("starterPersona names the client", () => {
   assert.equal(persona.displayName, "Acme Co Assistant");
   assert.match(persona.role, /Acme Co/);
   assert.deepEqual(persona.guardrails, []);
+});
+
+
+test("tagScopeError turns a 403 into an actionable message about API-key scopes", () => {
+  // The 403 comes from n8n's tag endpoints, which are a separate permission from
+  // workflows — the failure mode is otherwise very hard to diagnose.
+  const err = tagScopeError(new Error('GET /api/v1/tags -> 403 Forbidden'));
+  assert.match(err.message, /tag read\/create scopes/);
+  assert.match(err.message, /deny-by-default/);
+  assert.match(err.message, /invisible/);
+});
+
+test("tagScopeError passes non-permission failures through untouched", () => {
+  // A 404 or a network blip must not be mislabelled as a scopes problem.
+  const original = new Error("PUT /api/v1/workflows/x/tags -> 404 Not Found");
+  assert.equal(tagScopeError(original), original);
 });
