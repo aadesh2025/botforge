@@ -51,6 +51,24 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
 
 
 @pytest.fixture(autouse=True)
+def _allow_self_serve_orgs() -> AsyncIterator[None]:
+    """Let tests bootstrap a tenant through the public API.
+
+    Production is staff-only with no first-org exception (`create_org`), but nearly every test
+    file starts by signing up a throwaway user and POSTing /v1/orgs to get an isolated org.
+    Making each of those users staff would be both a large edit and a lie about what the test
+    is exercising. `tests/test_org_creation_gate.py` turns this back off and asserts the real
+    production rule, so the gate is still covered.
+    """
+    from app.core.config import settings
+
+    previous = settings.allow_self_serve_orgs
+    settings.allow_self_serve_orgs = True
+    yield
+    settings.allow_self_serve_orgs = previous
+
+
+@pytest.fixture(autouse=True)
 def _clear_email_outbox() -> AsyncIterator[None]:
     get_email_backend().outbox.clear()
     yield

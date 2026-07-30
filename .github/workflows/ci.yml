@@ -150,6 +150,10 @@ jobs:
       LLM_FORCE_FAKE: "true"
       # The suite creates many tenants; lift the auth throttle so it isn't rate-limited.
       AUTH_RATE_LIMIT: "100000"
+      # Creating an org is staff-only in production. The suite bootstraps a tenant per spec
+      # through the public API, so it needs the test-only escape. The production rule itself
+      # is pinned by tests/test_org_creation_gate.py, which turns this back off.
+      ALLOW_SELF_SERVE_ORGS: "true"
       ENV: dev
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
       E2E_API_URL: http://localhost:8000

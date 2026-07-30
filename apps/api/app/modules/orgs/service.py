@@ -88,39 +88,23 @@ async def _active_membership(
 
 
 # ── Org CRUD ──────────────────────────────────────────────────────────────────
-async def _active_org_count(session: AsyncSession, user: User) -> int:
-    """Organizations this user is currently a member of (same filter as `list_orgs`).
-
-    A soft-deleted org doesn't count — otherwise deleting your only org would lock you out
-    of creating a replacement.
-    """
-    stmt = (
-        select(func.count())
-        .select_from(Membership)
-        .join(Organization, Organization.id == Membership.organization_id)
-        .where(
-            Membership.user_id == user.id,
-            Membership.status == "active",
-            Organization.deleted_at.is_(None),
-        )
-    )
-    return int((await session.execute(stmt)).scalar_one())
-
-
 async def create_org(session: AsyncSession, user: User, name: str) -> schemas.OrgOut:
     """Create an organization.
 
-    BotForge is run as one organization per client, provisioned for them — not as a
-    self-serve product where anyone spins up as many as they like. So creating an
-    *additional* org is staff-only. The first one is always allowed: signup's
-    create-first-org step comes through here, and a brand-new user obviously isn't staff.
-    Enforced server-side because hiding the button doesn't stop a direct API call.
+    BotForge is run as one organization per client, provisioned for them — not a self-serve
+    product where anyone spins one up. **Staff only, with no first-org exception**: that
+    exception previously made the whole product self-serve, since a stranger could sign up on
+    the public form and be handed a free workspace by the create-first-org screen. Enforced
+    server-side because hiding the button doesn't stop a direct API call.
+
+    Invitations are unaffected: `accept_invitation` adds a `Membership` to an org that already
+    exists and never comes through here, so an invited client signs up and joins as before.
     """
-    if not user.is_staff and await _active_org_count(session, user) > 0:
+    if not user.is_staff and not settings.allow_self_serve_orgs:
         raise AppError(
             "orgs.create_forbidden",
-            "Your account already belongs to an organization. Ask your BotForge contact to "
-            "set up another one.",
+            "Organization creation is staff-only. Ask your BotForge contact to set one up "
+            "for you.",
             403,
         )
     org = Organization(name=name, slug=await _unique_slug(session, name), created_by=user.id)

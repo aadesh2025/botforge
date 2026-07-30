@@ -38,6 +38,34 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Self-serve signup closed — organization creation is staff-only, full stop (2026-07-30).**
+  Closes the gap flagged as "genuinely not built" when the invite-acceptance page shipped.
+  `create_org` was already staff-gated, but with a deliberate exception: `not user.is_staff and
+  await _active_org_count(...) > 0` blocked an *additional* org while always allowing the first.
+  That exception existed to make `CreateFirstOrg` work after signup — and it made the whole
+  product self-serve. Anyone clicking "Create one" on `/login`, filling in the public `/signup`
+  form, and landing back with zero orgs got a "Create your organization" screen that **succeeded
+  unconditionally**: a stranger, a free workspace, no invite and no approval. The gate is now a
+  flat `if not user.is_staff` with no exception, and `_active_org_count` is gone.
+  **Invitations are untouched and remain the one way in for a new person** — `accept_invitation`
+  adds a `Membership` to an org that already exists and never reaches `create_org`, so an invited
+  client signs up and joins exactly as before (asserted end-to-end, both backend and Playwright).
+  Frontend: `AuthGate`'s zero-org branch renders **`NoWorkspace`** instead of `CreateFirstOrg` — a
+  dead end with no form, naming the user's own email so they know which address the invite must go
+  to, since offering a button that now always 403s would be worse than offering nothing. The
+  "No account? Create one" line is gone from `/login` (replaced with "Ask your BotForge contact
+  for an invitation"); `/signup` stays in the codebase because the invite-accept page needs
+  account creation, and a stray direct visit now simply ends at the dead end.
+  **A test-only escape was unavoidable:** 29 backend test files and 22 of 23 E2E specs bootstrap
+  their tenant by POSTing `/v1/orgs` as a fresh non-staff user, so a flat gate breaks both suites
+  wholesale. New `ALLOW_SELF_SERVE_ORGS` (default **false**, alongside `LLM_FORCE_FAKE` as a
+  never-in-production switch) is enabled by an autouse conftest fixture and by the CI e2e job.
+  `tests/test_org_creation_gate.py` turns it **back off** and is the file that pins the real
+  production rule, so the gate is genuinely covered rather than configured away.
+  4 backend tests (rewritten — the old ones asserted the first-org exception), 3 Playwright checks.
+  **Consequence worth knowing:** a client who deletes their only organization can no longer create
+  a replacement — the workspace must be re-provisioned by staff. The delete-org button is a
+  one-way door for a non-staff owner, and there's a test pinning exactly that.
 - **Delete an organization from Settings (2026-07-30).** `DELETE /v1/orgs/{id}` (soft-delete via
   `deleted_at`, `ORG_MANAGE`) had existed since Phase 3 with **nothing in the UI calling it** — the
   same shape of gap as the invitation-accept page. New `components/settings/delete-org.tsx` renders

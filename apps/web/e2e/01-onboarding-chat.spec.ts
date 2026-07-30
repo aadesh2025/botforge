@@ -1,25 +1,34 @@
 import { test, expect } from "@playwright/test";
-import { uniqueEmail } from "./helpers";
+import { API, createAccount, uniqueEmail } from "./helpers";
 
-// PRD acceptance criterion 1: a new user can sign up, create an org, create an agent,
-// pick Groq, and chat with it — driven entirely through the browser UI.
-test("criterion 1: signup → create org → create agent → chat", async ({ page }) => {
+// PRD acceptance criterion 1: a new user gets from nothing to chatting with their own agent,
+// driven entirely through the browser UI.
+//
+// The onboarding leg changed when self-serve signup was closed: organizations are staff-
+// provisioned, so a brand-new client no longer creates one. They arrive on an invitation
+// instead. The rest of the criterion — create an agent, Groq by default, chat with it — is
+// unchanged, and the invite path is now the only way a new person legitimately gets in.
+test("criterion 1: invited signup → create agent → chat", async ({ page, request }) => {
   const email = uniqueEmail("onboard");
 
-  // Sign up.
-  await page.goto("/signup");
-  await page.getByLabel("Full name").fill("E2E Onboarder");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("e2e-Password-123");
-  await page.getByRole("button", { name: /create account/i }).click();
+  // The workspace is provisioned first, the way staff does it for a client.
+  const host = await createAccount(request, "E2E Workspace");
+  const invite = await request.post(`${API}/v1/orgs/${host.orgId}/invitations`, {
+    headers: { Authorization: `Bearer ${host.access}`, "X-Org-Id": host.orgId },
+    data: { email, role: "editor" },
+  });
+  expect(invite.ok(), `invite failed: ${invite.status()} ${await invite.text()}`).toBeTruthy();
+  const token = (await invite.json()).accept_token as string;
 
-  // First-run: create the organization.
-  await expect(page.getByRole("heading", { name: /create your organization/i })).toBeVisible();
-  await page.getByLabel(/organization name/i).fill("E2E Workspace");
-  await page.getByRole("button", { name: /create organization/i }).click();
+  // Brand-new person: no account yet, signs up from the invitation link itself.
+  await page.goto(`/invitations/accept?token=${token}`);
+  await page.getByLabel(/your name/i).fill("E2E Onboarder");
+  await page.getByLabel(/email/i).fill(email);
+  await page.getByLabel(/password/i).fill("e2e-Password-123");
+  await page.getByRole("button", { name: /create account & join/i }).click();
 
-  // Land on the dashboard.
-  await expect(page).toHaveURL(/\/dashboard/);
+  // Land on the dashboard, inside the org they were invited to.
+  await page.waitForURL("**/dashboard", { timeout: 20_000 });
 
   // Create an agent.
   await page.goto("/agents");

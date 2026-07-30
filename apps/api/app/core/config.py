@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     github_client_id: str | None = None
     github_client_secret: str | None = None
 
+    # --- Test-only switches (never enable in production) ---
+    # Lets a non-staff user create an organization. BotForge is provisioned per client, so
+    # production must leave this off — with it on, anyone who can reach /signup can hand
+    # themselves a workspace. It exists because the test suites bootstrap a tenant per test
+    # through the public API, the same reason `llm_force_fake` exists.
+    allow_self_serve_orgs: bool = False
+
     # --- Email ---
     # `console` logs to an in-memory outbox (dev/test). `smtp` delivers for real through any
     # SMTP relay — Resend/Postmark/SendGrid/SES/Mailgun all speak it, so switching provider is

@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -61,11 +60,11 @@ function LoginForm() {
         </Button>
       </form>
 
+      {/* No "create an account" link on purpose: workspaces are provisioned per client, and
+          accounts are created by following an invitation. Advertising self-serve signup would
+          send people to a form that ends in the "No workspace yet" dead end. */}
       <p className="mt-5 text-center text-sm text-muted">
-        No account?{" "}
-        <Link href="/signup" className="font-medium text-ember-soft hover:text-ember">
-          Create one
-        </Link>
+        Need access? Ask your BotForge contact for an invitation.
       </p>
     </div>
   );
