@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -10,6 +11,7 @@ from httpx import AsyncClient
 
 from app.core.config import settings
 from app.core.email import get_email_backend
+from app.core.security import create_access_token
 from app.modules.auth import oauth
 from app.modules.auth.oauth import OAuthUser
 
@@ -158,6 +160,44 @@ async def test_sessions_list_and_revoke(client: AsyncClient) -> None:
 
     revoke = await client.delete(f"/v1/auth/sessions/{sessions[0]['id']}", headers=_auth(access))
     assert revoke.status_code == 204
+
+
+async def test_sessions_flag_the_callers_own_device(client: AsyncClient) -> None:
+    """`current` marks the session behind the presented access token, and only that one.
+
+    It used to be hardcoded `False`, so the profile page could never say "This device".
+    """
+    first = await _signup(client)
+    # A second sign-in for the same account opens a second session.
+    second = await client.post(
+        "/v1/auth/login", json={"email": "a@example.com", "password": "password123"}
+    )
+    assert second.status_code == 200, second.text
+
+    listed = await client.get("/v1/auth/sessions", headers=_auth(second.json()["access_token"]))
+    assert listed.status_code == 200
+    sessions = listed.json()
+    assert len(sessions) >= 2
+    assert [s["current"] for s in sessions].count(True) == 1
+
+    # Listing with the *first* token flags a different row — the flag follows the token,
+    # rather than always naming the newest session.
+    other = await client.get("/v1/auth/sessions", headers=_auth(first["access_token"]))
+    first_current = {s["id"] for s in other.json() if s["current"]}
+    second_current = {s["id"] for s in sessions if s["current"]}
+    assert len(first_current) == 1
+    assert first_current != second_current
+
+
+async def test_sessions_current_is_false_for_a_token_without_sid(client: AsyncClient) -> None:
+    """Access tokens minted before the `sid` claim existed stay valid; nothing is flagged."""
+    data = await _signup(client)
+    legacy = create_access_token(uuid.UUID(data["user"]["id"]))  # no session_id
+
+    listed = await client.get("/v1/auth/sessions", headers=_auth(legacy))
+    assert listed.status_code == 200
+    assert listed.json()  # the session rows are still returned
+    assert all(s["current"] is False for s in listed.json())
 
 
 # ── OAuth ─────────────────────────────────────────────────────────────────────

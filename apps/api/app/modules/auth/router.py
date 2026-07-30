@@ -11,7 +11,7 @@ from app.core.ratelimit import rate_limit
 from app.db.session import get_session
 from app.models import User
 from app.modules.auth import oauth, schemas, service
-from app.modules.auth.deps import get_current_user
+from app.modules.auth.deps import get_current_session_id, get_current_user
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
@@ -140,9 +140,11 @@ async def oauth_callback(
 
 @router.get("/sessions", response_model=list[schemas.SessionOut])
 async def list_sessions(
-    session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    current_session_id: uuid.UUID | None = Depends(get_current_session_id),
 ) -> list[schemas.SessionOut]:
-    return await service.list_sessions(session, user)
+    return await service.list_sessions(session, user, current_session_id)
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

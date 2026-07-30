@@ -38,7 +38,7 @@ def needs_rehash(password_hash: str) -> bool:
     return _ph.check_needs_rehash(password_hash)
 
 
-def create_access_token(user_id: uuid.UUID) -> str:
+def create_access_token(user_id: uuid.UUID, session_id: uuid.UUID | None = None) -> str:
     now = dt.datetime.now(tz=dt.UTC)
     claims: dict[str, Any] = {
         "sub": str(user_id),
@@ -47,6 +47,11 @@ def create_access_token(user_id: uuid.UUID) -> str:
         "exp": int((now + ACCESS_TTL).timestamp()),
         "jti": uuid.uuid4().hex,
     }
+    # Which refresh session minted this token, so "Active sessions" can mark the caller's
+    # own device. Optional: tokens issued before this claim existed simply have no `sid`,
+    # and every session then reports `current: false` — the previous behaviour.
+    if session_id is not None:
+        claims["sid"] = str(session_id)
     return cast(str, jwt.encode(claims, settings.secret_key, algorithm=ALGORITHM))
 
 

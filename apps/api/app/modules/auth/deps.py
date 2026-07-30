@@ -33,3 +33,22 @@ async def get_current_user(
     if user is None or not user.is_active or user.deleted_at is not None:
         raise AppError("auth.invalid_token", "Invalid or expired token", 401)
     return user
+
+
+async def get_current_session_id(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> uuid.UUID | None:
+    """The refresh session behind this access token, from its `sid` claim.
+
+    Never raises: authentication is `get_current_user`'s job, and a token predating the
+    claim is valid but simply unattributable to a session.
+    """
+    if creds is None:
+        return None
+    claims = decode_access_token(creds.credentials)
+    if claims is None:
+        return None
+    try:
+        return uuid.UUID(claims["sid"])
+    except (KeyError, ValueError, TypeError):
+        return None

@@ -63,17 +63,19 @@ async def _issue_tokens(
     session: AsyncSession, user: User, user_agent: str | None, ip: str | None
 ) -> schemas.TokenPair:
     refresh = generate_opaque_token()
-    session.add(
-        Session(
-            user_id=user.id,
-            refresh_token_hash=hash_token(refresh),
-            user_agent=user_agent,
-            ip=ip,
-            expires_at=_now() + REFRESH_TTL,
-        )
+    row = Session(
+        user_id=user.id,
+        refresh_token_hash=hash_token(refresh),
+        user_agent=user_agent,
+        ip=ip,
+        expires_at=_now() + REFRESH_TTL,
     )
+    session.add(row)
     await session.flush()
-    return schemas.TokenPair(access_token=create_access_token(user.id), refresh_token=refresh)
+    # The access token carries its session id so `list_sessions` can flag this device.
+    return schemas.TokenPair(
+        access_token=create_access_token(user.id, row.id), refresh_token=refresh
+    )
 
 
 async def _send_email(to: str, template: tuple[str, str, str]) -> None:
@@ -285,7 +287,9 @@ async def magic_link_verify(
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
-async def list_sessions(session: AsyncSession, user: User) -> list[schemas.SessionOut]:
+async def list_sessions(
+    session: AsyncSession, user: User, current_session_id: uuid.UUID | None = None
+) -> list[schemas.SessionOut]:
     stmt = (
         select(Session)
         .where(Session.user_id == user.id, Session.revoked_at.is_(None))
@@ -299,7 +303,9 @@ async def list_sessions(session: AsyncSession, user: User) -> list[schemas.Sessi
             ip=s.ip,
             created_at=s.created_at,
             expires_at=s.expires_at,
-            current=False,
+            # From the caller's own access token (`sid`). None for tokens minted before
+            # that claim existed, in which case no row is flagged.
+            current=current_session_id is not None and s.id == current_session_id,
         )
         for s in rows
     ]
