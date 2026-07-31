@@ -81,7 +81,10 @@ async def seed() -> None:
             agent_id=agent.id,
             version=1,
             is_published=True,
-            system_prompt="You are a helpful support concierge. Answer only from the knowledge base.",
+            system_prompt=(
+                "You are a helpful support concierge. Answer only from the knowledge base, in your "
+                "own words — never mention the documents or write source markers like [1]."
+            ),
             persona={"character": "friendly concierge", "role": "support", "tone": "Friendly", "guardrails": []},
             welcome_message="Hi! How can I help you today?",
             fallback_message="I'm not sure — want me to connect you with a teammate?",

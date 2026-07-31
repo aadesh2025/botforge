@@ -81,3 +81,30 @@ def test_build_context_block_budget() -> None:
 
 def test_build_context_block_empty() -> None:
     assert build_context_block([], char_budget=1000) == ("", [])
+
+
+def test_build_context_block_forbids_visible_citation_markers() -> None:
+    """The header must not ask for inline [n] markers.
+
+    It used to say "cite sources as [n] when relevant", and the model obliged — customers got
+    "According to the documents [1] and [2], …". The numbering stays in the block (it is how the
+    chunks are delimited) and the structured citation list the caller returns is untouched; what
+    changed is that the model is told not to surface any of it in its own words.
+    """
+    cite = Citation(
+        chunk_id=uuid.uuid4(),
+        document_id=uuid.uuid4(),
+        knowledge_base_id=uuid.uuid4(),
+        ordinal=0,
+        content="We offer AI automation and chatbot development.",
+        score=0.9,
+        metadata={"filename": "services.md"},
+    )
+    block, used = build_context_block([cite], char_budget=2000)
+
+    header = block.split("\n\n")[0].lower()  # the header is the first paragraph
+    assert "cite sources as [n]" not in header
+    assert "never" in header and "according to the documents" in header
+    # The retrieved data itself — and the citations handed back to the frontend — are unchanged.
+    assert used == [cite]
+    assert "AI automation and chatbot development" in block
