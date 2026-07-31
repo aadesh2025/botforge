@@ -16,6 +16,18 @@ from app.modules.orgs.deps import OrgContext, current_org
 
 router = APIRouter(prefix="/v1/agents", tags=["agents"])
 
+# Separate router: the catalog is not scoped to an agent, so it can't hang off /v1/agents/{id}.
+templates_router = APIRouter(prefix="/v1/agent-templates", tags=["agents"])
+
+
+@templates_router.get("", response_model=list[schemas.AgentTemplateOut])
+async def list_agent_templates(
+    ctx: OrgContext = Depends(current_org),
+) -> list[schemas.AgentTemplateOut]:
+    """Creation-time role templates. Static catalog data — the org context is only here so the
+    endpoint isn't public; the response is identical for every org."""
+    return service.list_templates()
+
 
 class WidgetLogoResponse(BaseModel):
     logo_url: str

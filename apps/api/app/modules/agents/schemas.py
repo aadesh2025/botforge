@@ -17,6 +17,23 @@ from pydantic import BaseModel, ConfigDict, Field
 class CreateAgentRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
+    # Optional on purpose: omitting it keeps the original blank-agent behaviour, so nobody is
+    # forced through the template picker. An unknown id is a 400, not a silent fallback.
+    template_id: str | None = Field(default=None, max_length=64)
+
+
+class AgentTemplateOut(BaseModel):
+    """A creation-time starting point. Static catalog data — not per-org, never persisted."""
+
+    id: str
+    label: str
+    icon: str
+    description: str
+    system_prompt: str
+    welcome_message: str
+    suggested_prompts: list[str]
+    tone: str
+    suggested_next_step: str | None
 
 
 class UpdateAgentRequest(BaseModel):

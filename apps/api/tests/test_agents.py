@@ -191,3 +191,99 @@ async def test_playground_non_stream(client: AsyncClient, monkeypatch: pytest.Mo
     )
     assert resp.status_code == 200
     assert resp.json()["content"] == "echo: hi"
+
+
+# ── Creation-time role templates ──────────────────────────────────────────────
+async def test_list_agent_templates(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    resp = await client.get("/v1/agent-templates", headers=headers)
+    assert resp.status_code == 200
+    templates = resp.json()
+    assert {t["id"] for t in templates} == {
+        "customer_support",
+        "lead_qualification",
+        "appointment_scheduler",
+        "info_collector",
+    }
+    for t in templates:
+        assert t["label"] and t["icon"] and t["description"]
+        assert t["system_prompt"] and t["welcome_message"] and t["tone"]
+        assert isinstance(t["suggested_prompts"], list)
+
+
+async def test_agent_templates_require_auth(client: AsyncClient) -> None:
+    assert (await client.get("/v1/agent-templates")).status_code == 401
+
+
+async def test_create_agent_from_template_seeds_draft(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    catalog = {t["id"]: t for t in (await client.get("/v1/agent-templates", headers=headers)).json()}
+
+    for template_id, template in catalog.items():
+        created = await client.post(
+            "/v1/agents",
+            json={"name": f"Bot {template_id}", "template_id": template_id},
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+        versions = await client.get(f"/v1/agents/{created.json()['id']}/versions", headers=headers)
+        draft = versions.json()[0]
+
+        assert draft["version"] == 1 and draft["is_published"] is False
+        assert draft["system_prompt"] == template["system_prompt"]
+        assert draft["welcome_message"] == template["welcome_message"]
+        assert draft["suggested_prompts"] == template["suggested_prompts"]
+        # The template id is recorded so the builder can show its next-step hint.
+        assert draft["persona"] == {"tone": template["tone"], "template_id": template_id}
+        # model_overrides are merged over the defaults, never replacing them wholesale.
+        assert draft["model_config"]["provider"] == "groq"
+        assert draft["model_config"]["max_tokens"] == 1024
+
+
+async def test_scheduler_template_lowers_temperature(client: AsyncClient) -> None:
+    """A template may override model settings; the rest of DEFAULT_MODEL_CONFIG survives."""
+    headers, _ = await _headers(client)
+    created = await client.post(
+        "/v1/agents",
+        json={"name": "Scheduler", "template_id": "appointment_scheduler"},
+        headers=headers,
+    )
+    versions = await client.get(f"/v1/agents/{created.json()['id']}/versions", headers=headers)
+    assert versions.json()[0]["model_config"]["temperature"] == 0.2
+
+
+async def test_create_agent_without_template_is_unchanged(client: AsyncClient) -> None:
+    """The blank path must keep working — nobody is forced through the picker."""
+    from app.modules.agents.service import DEFAULT_MODEL_CONFIG, DEFAULT_SYSTEM_PROMPT
+
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    draft = (await client.get(f"/v1/agents/{agent['id']}/versions", headers=headers)).json()[0]
+
+    assert draft["system_prompt"] == DEFAULT_SYSTEM_PROMPT
+    assert draft["welcome_message"] == "Hi! How can I help you today?"
+    assert draft["suggested_prompts"] == []
+    assert draft["persona"] == {}
+    assert draft["model_config"] == DEFAULT_MODEL_CONFIG
+
+
+async def test_create_agent_with_unknown_template_is_rejected(client: AsyncClient) -> None:
+    """A typo must not silently produce a blank agent, and must not create one either."""
+    headers, _ = await _headers(client)
+    resp = await client.post(
+        "/v1/agents", json={"name": "Nope", "template_id": "not_a_template"}, headers=headers
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "agents.unknown_template"
+    assert (await client.get("/v1/agents", headers=headers)).json() == []
+
+
+async def test_template_prompts_never_ask_for_citation_markers(client: AsyncClient) -> None:
+    """Part 1's rule has to hold for the seeded prompts too, not just the RAG header."""
+    headers, _ = await _headers(client)
+    for t in (await client.get("/v1/agent-templates", headers=headers)).json():
+        prompt = t["system_prompt"].lower()
+        assert "cite" not in prompt, f"{t['id']} asks the model to cite sources"
+        # The phrase appears only inside the explicit prohibition.
+        assert "never narrate your sources" in prompt
+        assert "according to the documents" in prompt.split("never narrate your sources")[1]

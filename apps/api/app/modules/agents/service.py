@@ -18,6 +18,7 @@ from app.core import rbac
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.db.templates import AGENT_TEMPLATES, get_template
 from app.llm.base import ChatProvider
 from app.llm.registry import get_chat_provider, get_chat_provider_chain
 from app.llm.types import ChatRequest, Message
@@ -48,14 +49,23 @@ DEFAULT_FEATURES = {"tools_enabled": False, "memory_enabled": True, "handoff_ena
 
 # Seeded default so a new agent behaves like a grounded support bot out of the box: answer only
 # from the knowledge base, admit when it doesn't know instead of inventing, stay in support tone.
+# The accuracy rules are deliberately unchanged; only the *voice* is — a grounded answer that
+# narrates its own sourcing ("according to the documents…") reads like a citation list, not a
+# person, and that is what customers actually see. See also `app/rag/context.py`'s header.
 DEFAULT_SYSTEM_PROMPT = (
-    "You are a customer-support assistant. Answer the user's question using ONLY the information "
-    "in the knowledge base context provided to you in this conversation.\n\n"
+    "You are a customer-support assistant talking to a customer in a live chat. Answer using ONLY "
+    "the information in the knowledge base context provided to you in this conversation.\n\n"
     "Rules:\n"
     "- If the answer is not in the provided context, say you don't have that information and offer "
     "to connect the user with a human. Do NOT guess, and do NOT use outside/general knowledge.\n"
     "- Never invent facts, prices, features, policies, or links that aren't in the context.\n"
-    "- Be concise, accurate, friendly, and professional — like a helpful support agent.\n"
+    "- Write the way a real support teammate talks: warm, direct, and in your own words. Never "
+    "narrate where the answer came from — no '[1]', no 'according to the documents', no 'based on "
+    "the provided context'. Just answer.\n"
+    "- Keep it short. A sentence or two is usually enough; use a short list only when the answer "
+    "genuinely has several parts.\n"
+    "- Match the customer's energy — if they just say hi, say hi back and ask how you can help "
+    "instead of listing everything you know.\n"
     "- If the user asks something unrelated to the knowledge base, politely steer them back to "
     "what you can help with."
 )
@@ -149,8 +159,58 @@ def _version_out(v: AgentVersion) -> schemas.VersionOut:
 
 
 # ── Agent CRUD ────────────────────────────────────────────────────────────────
+def list_templates() -> list[schemas.AgentTemplateOut]:
+    """The creation-time template catalog. Static and identical for every org, so no RBAC
+    beyond the normal org auth the route already requires."""
+    return [
+        schemas.AgentTemplateOut(
+            id=t.id,
+            label=t.label,
+            icon=t.icon,
+            description=t.description,
+            system_prompt=t.system_prompt,
+            welcome_message=t.welcome_message,
+            suggested_prompts=list(t.suggested_prompts),
+            tone=t.tone,
+            suggested_next_step=t.suggested_next_step,
+        )
+        for t in AGENT_TEMPLATES
+    ]
+
+
+def _seed_from_template(template_id: str | None) -> dict[str, Any]:
+    """The first draft's field values: template-seeded when asked for, blank defaults otherwise.
+
+    The template is copied, never referenced — only its id is recorded (so the builder can show
+    the matching next-step hint). Editing `templates.py` later must not mutate a live agent.
+    """
+    blank: dict[str, Any] = {
+        "system_prompt": DEFAULT_SYSTEM_PROMPT,
+        "welcome_message": "Hi! How can I help you today?",
+        "fallback_message": "I'm not sure about that — want me to connect you with a teammate?",
+        "suggested_prompts": [],
+        "persona": {},
+        "model_config_json": dict(DEFAULT_MODEL_CONFIG),
+    }
+    if template_id is None:
+        return blank
+
+    template = get_template(template_id)
+    if template is None:
+        raise AppError("agents.unknown_template", f"Unknown agent template '{template_id}'.", 400)
+    return {
+        **blank,
+        "system_prompt": template.system_prompt,
+        "welcome_message": template.welcome_message,
+        "suggested_prompts": list(template.suggested_prompts),
+        "persona": {"tone": template.tone, "template_id": template.id},
+        "model_config_json": {**DEFAULT_MODEL_CONFIG, **template.model_overrides},
+    }
+
+
 async def create_agent(session: AsyncSession, ctx: OrgContext, data: schemas.CreateAgentRequest) -> schemas.AgentOut:
     rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
+    seed = _seed_from_template(data.template_id)  # validates before anything is written
     agent = Agent(
         organization_id=ctx.org.id,
         name=data.name,
@@ -167,15 +227,10 @@ async def create_agent(session: AsyncSession, ctx: OrgContext, data: schemas.Cre
             agent_id=agent.id,
             version=1,
             is_published=False,
-            system_prompt=DEFAULT_SYSTEM_PROMPT,
-            welcome_message="Hi! How can I help you today?",
-            fallback_message="I'm not sure about that — want me to connect you with a teammate?",
-            suggested_prompts=[],
-            persona={},
-            model_config_json=dict(DEFAULT_MODEL_CONFIG),
             rag_config=dict(DEFAULT_RAG_CONFIG),
             features=dict(DEFAULT_FEATURES),
             created_by=ctx.user.id,
+            **seed,
         )
     )
     await session.flush()
