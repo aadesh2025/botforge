@@ -153,6 +153,39 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-02 — replies stopped reading like a citation list; agents now start from a role
+- **The research-paper voice was one clause** (`b25c1c6`): `build_context_block()`'s header told the
+  model to "cite sources as [n] when relevant", so customers got "According to the documents [1]
+  and [2]…". The numbering is *our* bookkeeping — the caller returns the same citations as
+  structured data for the widget to render — so the header now forbids visible markers outright.
+  System prompt held constant: old header **3/3** replies with `[n]`, new **0/3**, and a live call
+  still returned `citations: 1`. The structured citation payload is untouched.
+- **Role templates at creation time** (`a557418` backend, `a22d1ff` frontend): four prebuilt roles
+  seeding the first draft's prompt/welcome/suggested prompts/tone/model, plus "Start from scratch"
+  which is unchanged. Catalog is static data in `app/db/templates.py` (a fifth role is one entry —
+  no schema change, no migration), served by `GET /v1/agent-templates`, applied via optional
+  `template_id` on `POST /v1/agents`. Where a role needs a KB/CRM/calendar the builder shows a
+  **suggestion banner, never an auto-attached tool** — a silent integration with no credentials
+  behind it makes agents that look configured and fail at runtime.
+- **⚠️ The tone fix caused a real accuracy regression; read this before touching a prompt**
+  (`e088101`). Live, the agent invented "Mon–Fri, 9am–5pm" and a 30-day refund window against a KB
+  saying Mon–Sat 10am–7pm IST / 14 days, `citations: 0` — retrieval had **legitimately missed**
+  (0.0318 vs the 0.35 threshold) so **no context block was appended at all**. A/B on that exact
+  state: **old prompt 0/3 fabricated, rewritten prompt 3/3.** Told only "never mention the
+  documents", the model reads it as "don't hedge"; the rewrite's trailing "Just answer." made it
+  explicit. The same A/B then caught a second instance in the `customer_support` template, whose
+  "resolve it in as few messages" body overpowered the softer shared `_GROUNDING`. Fixed in both:
+  drop "Just answer.", state the no-context case outright, scope never-narrate-your-sources to
+  *phrasing*. Now **0/3** fabricated across the default prompt and all four templates, and still
+  answering correctly from a real `build_context_block()` with **0/3** markers. **Never soften
+  these lines without re-running the no-context A/B** — a unit test cannot see this.
+- **App-wide dialog bug found on the way** (`203984a`): `animate-fade-up` ends on
+  `transform: translateY(0)` with fill-mode `both`, permanently overriding `DialogContent`'s
+  `-translate-*` centering — **every** dialog was anchored *at* the viewport centre, not centred on
+  it. Small ones still fit, so it hid for months; the taller role picker got clipped and its
+  "Start from scratch" option was unclickable. Now `inset-0 m-auto h-fit` + a scroll cap.
+- Suites: **340 pytest**, ruff + mypy clean, **124 vitest**, tsc + eslint clean, **60/60 Playwright**.
+
 ### 2026-07-31 — Playground answered "echo: …"; a missing key did the same to real customers
 - **Root cause was environmental, not code.** The dev web server was pointed at `:8010` — the
   keyless **E2E** API, which runs `LLM_FORCE_FAKE=true`. `get_chat_provider()` checks that flag

@@ -38,6 +38,61 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Replies stopped sounding like a research paper, and agents now start from a role
+  (2026-08-02).** Two independent pieces of work.
+
+  **1. The citation-list voice (`b25c1c6`).** Customers were getting "According to the documents
+  [1] and [2], Aurozen AI provides two main services…". The literal cause was one clause in
+  `build_context_block()`'s header telling the model to "cite sources as [n] when relevant" — the
+  numbering exists for *our* bookkeeping, since the caller returns the same citations as
+  structured data for the widget to render as a sources list, so the model never needed to repeat
+  them inline. The header now forbids visible markers outright and asks for a normal human answer.
+  Proved causal with the system prompt held constant: the old header emitted `[n]` in **3 of 3**
+  sampled replies, the new one in **0 of 3**, and a live Playground call still returned
+  `citations: 1` alongside a marker-free answer — the structured citation data is untouched.
+  `db/seed.py`'s demo persona was softened the same way.
+
+  **2. Prebuilt role templates at creation time (`a557418`, `a22d1ff`).** "New agent" was a bare
+  name field. It now opens on a role picker — Customer Support, Lead Qualification, Appointment
+  Scheduler, Info Collector — plus "Start from scratch", which keeps the old blank behaviour
+  exactly. Each template seeds the first draft's system prompt, welcome message, suggested
+  prompts, tone and model settings (the scheduler runs at temperature 0.2: dates and confirmations
+  are where creative phrasing becomes a wrong booking), and the operator lands directly in the
+  Persona tab with everything filled in and editable. Catalog lives in `app/db/templates.py` as
+  static data — adding a fifth role is one `AgentTemplate(...)` entry, no schema change, no
+  migration — served by `GET /v1/agent-templates` and applied via an optional `template_id` on
+  `POST /v1/agents`. **Nothing is auto-attached:** where a role needs a knowledge base, a CRM
+  automation or a calendar, the builder shows a dismissible "Suggested next step" banner instead,
+  because silently wiring an integration with no credentials behind it produces agents that look
+  configured and fail at runtime.
+
+  **The regression the tone fix caused, and how it was caught (`e088101`).** Softening the default
+  prompt's voice cost its accuracy. On a live Playground question about support hours the agent
+  invented "Monday to Friday, 9am to 5pm" and a 30-day refund window against a KB saying Monday to
+  Saturday, 10am–7pm IST and 14 days — with `citations: 0`, because retrieval had legitimately
+  missed (score **0.0318** vs the 0.35 threshold) and no context block was appended at all. A
+  controlled A/B on that exact no-context state: **old prompt 0/3 fabricated, new prompt 3/3.**
+  Cause: told only "never mention the documents", the model reads that as "don't hedge" and
+  answers from general knowledge — and the rewrite had ended that rule with "Just answer.". The
+  same A/B then caught a second instance the first pass had missed, in the `customer_support`
+  template, whose "resolve it in as few messages as possible" body overpowered the softer shared
+  `_GROUNDING` text. Fixed in both by dropping "Just answer.", stating the no-context case
+  outright, and scoping the never-narrate-your-sources rule to *phrasing* so it can't read as
+  licence to answer anyway. Re-verified: the default prompt and **all four templates** now
+  fabricate **0/3** with no context, and still answer correctly from a real `build_context_block()`
+  with **0/3** source markers. A test pins those clauses, since the behaviour itself needs a live
+  model to observe.
+
+  **An app-wide dialog bug found on the way (`203984a`).** "Start from scratch" was unclickable —
+  permanently outside the viewport. `animate-fade-up` ends on `transform: translateY(0)` with
+  fill-mode `both`, so once the open animation finished it permanently overrode `DialogContent`'s
+  `-translate-x-1/2 -translate-y-1/2`, anchoring **every dialog in the app** *at* the viewport
+  centre rather than centred on it. Small dialogs still landed on screen, which is why it went
+  unnoticed; this taller one was clipped off the right and bottom. Now centred with
+  `inset-0 m-auto h-fit` (no transform to clobber) plus a scroll cap.
+
+  Suites: **340 pytest**, ruff + mypy clean, **124 vitest**, tsc + eslint clean, **60/60 Playwright**.
+
 - **"echo: <your message>" instead of an AI reply — diagnosed and hardened (2026-07-31).**
   Reported against the Playground for the "aurozen ai" agent. **Root cause: environmental, not a
   product defect.** The web dev server had been started with
