@@ -103,6 +103,47 @@ Format each entry as below. Newest at the top.
   workflow "update tags". A workflow-only key returns 403 on every tag call. Both the one-off
   script and the provisioner preflight this and say so, rather than half-tagging an inventory.
 
+### ADR-044: A comment-only `.env` value is *unset*, and a provider failure always says something
+- **Date:** 2026-08-02
+- **Status:** accepted
+- **Context:** the live "aurozen ai" agent answered every visitor with **empty content and HTTP
+  200** for an unknown period. The request log gave it away:
+  `generativelanguage.googleapis.com/...?key=%23+%5BHUMAN%5D+Google+Gemini+free+tier` — the
+  literal string `# [HUMAN] Google Gemini free tier` was being sent to Google as an API key.
+  `.env.example` documents unset variables as `KEY=<spaces># [HUMAN] note`, and python-dotenv's
+  comment stripping is `re.sub(r"\s+#.*", "", value)`, which needs whitespace *before* the `#`.
+  On a blank line the spaces after `=` are already consumed as the separator, so the `#` lands at
+  position 0, the rule can't match, and the comment becomes the value. Measured, not assumed:
+  `KEY=dev  # note` parses to `dev` correctly — **only the blank-value shape is broken**, which is
+  precisely why this survived so long. The value was non-empty, so `resolve_credential`'s
+  blank-is-unset guard (ADR-020) passed it straight through. `SENTRY_DSN` failed identically
+  (`sentry_init_failed: Unsupported scheme ''`), and ~20 further `[HUMAN]` placeholders were one
+  edit away from the same fate.
+- **Decision:** two independent fixes, because either alone leaves a hole.
+  1. `Settings` gains a `model_validator(mode="before")` that **drops** any raw value which is
+     comment-only (starts with `#` after optional whitespace), letting the field's own default
+     apply. This makes the *existing* `.env` on every machine correct with no hand-editing.
+  2. A provider failure with no content produced now emits the agent's `fallback_message` as a
+     real token, so a visitor gets a sentence rather than silence. `result.error` is still set,
+     so the log and the persisted message keep the true cause.
+- **Alternatives considered:**
+  - *Strip everything after the first `#` in every value* (the obvious fix): **rejected, it is
+    destructive.** Probed against the real loader: `SECRET_KEY=abc#def` → `abc`, and
+    `http://x/y#frag` → `http://x/y`. Values legitimately contain `#` — signing keys, DB
+    passwords, URL fragments — so this trades a loud bug for a silent one.
+  - *Only fix `.env.example`*: rejected — every existing `.env` on every machine stays broken,
+    and it was a real `.env` that caused the outage.
+  - *Only fix the code*: rejected — `.env` is also handed to containers via compose's `env_file`,
+    which parses it with its own rules that no Python validator can reach.
+  - *Surface the provider error to the visitor*: rejected — that text can carry key fragments and
+    account details.
+- **Consequences:** the one false positive is a real secret that *starts* with `#`; it degrades to
+  "not configured", which is loud and well-trodden, rather than to garbage-that-looks-configured.
+  `.env.example` was reformatted so every comment sits on its own line above its variable, and a
+  test asserts the file never reacquires the broken shape. A `malformed_key` startup warning now
+  catches a key containing whitespace or `#` — after this fix that can only mean genuine bad
+  input, not a parsing artifact.
+
 ### ADR-043: Cross-org automations overview in the admin console
 - **Date:** 2026-07-31
 - **Status:** accepted

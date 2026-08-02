@@ -5,8 +5,21 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _is_comment_only(value: str) -> bool:
+    """True when a raw env value is nothing but an unfilled placeholder comment.
+
+    `.env.example` documents unset variables as `KEY=<spaces># [HUMAN] note`. python-dotenv
+    strips a trailing comment only when the value has *something* before it — its rule is
+    `re.sub(r"\\s+#.*", "", value)`, which needs whitespace ahead of the `#`. On a blank line
+    the spaces after `=` are already eaten as the separator, so the `#` lands at position 0,
+    the rule can't match, and the comment text becomes the value. `KEY=dev  # note` is
+    unaffected (it parses to `dev`), which is why this went unnoticed for so long.
+    """
+    return value.lstrip().startswith("#")
 
 
 class Settings(BaseSettings):
@@ -109,6 +122,29 @@ class Settings(BaseSettings):
 
     # --- Observability ---
     sentry_dsn: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_placeholder_comments(cls, data: object) -> object:
+        """An unfilled `.env` placeholder must read as *unset*, never as its own comment text.
+
+        Root cause of a live outage (ADR-044): `GEMINI_API_KEY=<blank># [HUMAN] Google Gemini
+        free tier` resolved to the literal string `# [HUMAN] Google Gemini free tier`, which is
+        non-empty — so it sailed past every "is a key configured?" guard and was sent to Google
+        as a real API key. Gemini rejected it, and the published agent answered every visitor
+        with empty content and HTTP 200 for an unknown period. `SENTRY_DSN` failed the same way
+        (`sentry_init_failed: Unsupported scheme ''`).
+
+        Only a *comment-only* value is dropped, and dropping it lets the field's own default
+        apply. Deliberately NOT "strip everything after the first `#`": values legitimately
+        contain that character — `SECRET_KEY=abc#def`, a DB password, a URL fragment — and a
+        blanket strip would silently truncate them, trading this bug for a worse one. The one
+        false positive is a real secret that *starts* with `#`; it degrades to "not configured",
+        which is loud and well-trodden, rather than to garbage-that-looks-configured.
+        """
+        if not isinstance(data, dict):
+            return data
+        return {k: v for k, v in data.items() if not (isinstance(v, str) and _is_comment_only(v))}
 
     @field_validator("smtp_port", mode="before")
     @classmethod

@@ -4,6 +4,26 @@ Every variable BotForge reads. Mirror these as placeholders in `.env.example`. "
 = only the human can create it; if unset, the code must stub the feature, log a loud warning,
 and keep building (`CLAUDE.md §7`).
 
+## Writing `.env` — one formatting rule
+
+**A comment must never share a line with a blank value.**
+
+```dotenv
+# [HUMAN] Google Gemini free tier      ← correct: comment on its own line
+GEMINI_API_KEY=
+
+GEMINI_API_KEY=      # [HUMAN] ...     ← WRONG: the comment becomes the value
+```
+
+`KEY=value  # note` is fine and parses to `value` — the loader strips a comment only when
+something precedes it. On a blank line the spaces after `=` are eaten as the separator, so the
+`#` starts the value and the whole comment is read as the secret. That sent a placeholder to
+Google as a real API key and took a live agent down silently (ADR-044).
+
+`Settings` now drops comment-only values defensively, so an existing `.env` in the old shape
+still behaves. Do not rely on it: `.env` is also passed to containers via compose's `env_file`,
+which parses the file with its own rules that the Python fix cannot reach.
+
 ## Core
 | Var | Purpose | Required | Default | Needs human |
 |---|---|---|---|---|

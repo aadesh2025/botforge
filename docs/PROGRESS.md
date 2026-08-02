@@ -38,6 +38,50 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **A `.env` placeholder comment was being used as an API key — silent live outage (2026-08-02).**
+  The live "aurozen ai" agent had been answering every visitor with **empty content and HTTP 200**
+  for an unknown period. The request log named the culprit:
+  `generativelanguage.googleapis.com/...?key=%23+%5BHUMAN%5D+Google+Gemini+free+tier` — the string
+  `# [HUMAN] Google Gemini free tier` was going to Google as the API key.
+
+  **Why.** `.env.example` writes unset variables as `KEY=<spaces># [HUMAN] note`. python-dotenv
+  strips a trailing comment with `re.sub(r"\s+#.*", "", value)`, which needs whitespace *before*
+  the `#` — but on a blank line the spaces after `=` are already eaten as the separator, so the `#`
+  sits at position 0 and the comment becomes the value. Probed against the real loader before
+  fixing anything: `KEY=dev  # note` → `dev` (correct), `KEY=<blank># note` → `# note` (broken).
+  **Only the blank-value shape fails,** which is exactly why nobody caught it. Being non-empty, the
+  value then passed `resolve_credential`'s blank-is-unset guard (ADR-020) untouched. `SENTRY_DSN`
+  was failing the same way (`sentry_init_failed: Unsupported scheme ''`), and ~20 more `[HUMAN]`
+  placeholders were one edit from it.
+
+  **Fixed in two places, because either alone leaves a hole** (ADR-044). `Settings` gained a
+  `model_validator(mode="before")` that drops comment-only values so the field default applies —
+  which makes every existing `.env` correct **with no hand-editing**. And `.env.example` was
+  reformatted so each comment sits on its own line above its variable, because `.env` is also fed
+  to containers through compose's `env_file`, whose parser no Python validator can reach. A test
+  asserts the file never reacquires the shape.
+
+  **Explicitly not done: strip everything after the first `#`.** The obvious fix, and destructive —
+  measured against the real loader, it turns `SECRET_KEY=abc#def` into `abc` and
+  `http://x/y#frag` into `http://x/y`. Signing keys, DB passwords and URL fragments legitimately
+  contain `#`, so that trades a loud bug for a quiet one. The narrow rule's only false positive is
+  a secret that *starts* with `#`, which degrades to "not configured" — loud, and well-trodden.
+
+  **Plus the reason it stayed invisible.** A `ProviderError` left `result.content` empty and
+  `public_chat_once` only accumulates `token` events, so the error event was dropped and the widget
+  returned a 200 with nothing in it — an empty string reads as a quiet bot, not an outage.
+  `run_turn` now takes an optional `fallback_message` and emits it as a real token when the
+  provider fails with no content, wired into `InboundTurn` (widget + every channel) and
+  deliberately **not** into the Playground, where an operator wants the raw error. `result.error`
+  is still set, so logs and the persisted message keep the true cause, and the provider's message
+  never becomes visitor-facing text (it can carry key fragments). A `malformed_key` startup warning
+  now catches a key containing whitespace or `#` — after this fix that can only be genuine bad
+  input. Verified live: the `sentry_init_failed` warning is gone, the agent still answers normally,
+  and forcing the old gemini config now yields the agent's fallback line plus an error-level
+  `chat_provider_unavailable` instead of silence.
+
+  Suites: **349 pytest**, ruff + mypy clean.
+
 - **Replies stopped sounding like a research paper, and agents now start from a role
   (2026-08-02).** Two independent pieces of work.
 

@@ -153,6 +153,31 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-02 — a `.env` placeholder comment was being sent as an API key (silent live outage)
+- **The live agent served empty replies with HTTP 200 to every visitor**, for an unknown period.
+  Log: `...?key=%23+%5BHUMAN%5D+Google+Gemini+free+tier` — the placeholder comment *was* the key.
+  `.env.example` writes unset vars as `KEY=<spaces># [HUMAN] note`; python-dotenv strips a trailing
+  comment via `re.sub(r"\s+#.*", "", value)`, which needs whitespace **before** the `#`, but on a
+  blank line the spaces after `=` are eaten as the separator, so `#` lands at position 0 and the
+  comment becomes the value. **Probed before fixing: `KEY=dev # note` → `dev` (fine); only the
+  blank-value shape breaks.** Non-empty, so it sailed past the blank-is-unset guard (ADR-020).
+  `SENTRY_DSN` was failing identically; ~20 more `[HUMAN]` placeholders were one edit away.
+- **Two fixes, ADR-044.** `Settings` gained a `model_validator(mode="before")` dropping
+  comment-only values → **every existing `.env` is correct with no hand-editing**. `.env.example`
+  reformatted (comment on its own line above each var) because `.env` also goes to containers via
+  compose `env_file`, which no Python validator reaches. A test pins the file shape.
+- **⚠️ Do NOT "just strip everything after the first `#`".** Measured against the real loader that
+  turns `SECRET_KEY=abc#def` → `abc` and `http://x/y#frag` → `http://x/y`. Keys, DB passwords and
+  URL fragments contain `#`. The narrow rule's only false positive is a secret *starting* with `#`,
+  which degrades to "not configured" — loud, not silent.
+- **Why it stayed invisible:** a `ProviderError` left `content` empty and `public_chat_once` only
+  accumulates `token` events, so the error was dropped and the widget returned an empty 200.
+  `run_turn` now takes `fallback_message` and emits it as a real token on provider failure — wired
+  into `InboundTurn` (widget + channels), deliberately **not** the Playground (operators want the
+  raw error). `result.error` still set; the provider message never reaches the visitor. New
+  `malformed_key` startup warning for a key with whitespace or `#`.
+- Suites: **349 pytest**, ruff + mypy clean.
+
 ### 2026-08-02 — replies stopped reading like a citation list; agents now start from a role
 - **The research-paper voice was one clause** (`b25c1c6`): `build_context_block()`'s header told the
   model to "cite sources as [n] when relevant", so customers got "According to the documents [1]

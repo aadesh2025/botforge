@@ -24,6 +24,11 @@ from app.models import Agent, AgentVersion, Conversation, Message
 from app.rag.agent_retrieval import retrieve_for_version
 
 _DEFAULT_REFUSAL = "I'm not able to help with that topic. Is there something else I can do for you?"
+# Said to a visitor when the provider itself fails and the agent has no fallback line of its
+# own. Never surfaces the provider error: that text can carry key fragments and account details.
+_DEFAULT_PROVIDER_FAILURE = (
+    "Sorry — I'm having trouble responding right now. Please try again in a moment."
+)
 
 
 class InboundTurn:
@@ -135,6 +140,7 @@ class InboundTurn:
         async for ev in run_turn(
             provider, req, [c.model_dump(mode="json") for c in citations], self.result,
             executor=executor, max_iters=settings.tool_max_iterations,
+            fallback_message=self.version.fallback_message or _DEFAULT_PROVIDER_FAILURE,
         ):
             yield ev
         latency_ms = int((time.perf_counter() - t0) * 1000)

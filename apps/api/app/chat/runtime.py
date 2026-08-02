@@ -51,10 +51,15 @@ async def run_turn(
     *,
     executor: ToolExecutor | None = None,
     max_iters: int = 1,
+    fallback_message: str | None = None,
 ) -> AsyncIterator[StreamEvent]:
     """Stream a turn, forwarding events and accumulating into `result`.
 
     Emits one aggregated `done` event at the end (intermediate provider `done`s are folded in).
+
+    `fallback_message` is what a *visitor-facing* caller wants said when the provider fails
+    outright — pass it from the widget/channel/chat paths, leave it unset for the Playground,
+    where an operator is debugging and wants the raw error rather than a soothing sentence.
     """
     result.provider = provider.name
     result.model = req.model
@@ -85,6 +90,15 @@ async def run_turn(
                     result.finish_reason = ev.finish_reason
         except ProviderError as exc:
             result.error = str(exc)
+            # A provider failure must never reach a visitor as an empty reply. That is exactly
+            # what happened live (ADR-044): a malformed API key made Gemini 400 on every turn,
+            # `content` stayed "", and the widget returned HTTP 200 with nothing in it — silent
+            # for an unknown period, because an empty string looks like a quiet bot, not an
+            # outage. Say the agent's fallback line instead, and keep `result.error` set so the
+            # log and the persisted message still carry the real cause.
+            if fallback_message and not result.content.strip():
+                result.content += fallback_message
+                yield StreamEvent(type="token", delta=fallback_message)
             yield StreamEvent(type="error", error=str(exc))
             break
 

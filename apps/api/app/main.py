@@ -74,6 +74,36 @@ def _warn_missing_secrets() -> None:
         log.warning("missing_key", provider="groq", effect="stubbed; set GROQ_API_KEY")
     if not settings.n8n_api_key:
         log.warning("missing_key", service="n8n", effect="disabled; set N8N_API_KEY")
+    _warn_malformed_keys()
+
+
+# A credential can't contain these and still be valid, so their presence means a typo or a
+# half-pasted value — the state that used to masquerade as "configured" (ADR-044).
+_MALFORMED = (" ", "\t", "#")
+
+
+def _warn_malformed_keys() -> None:
+    """Catch a key that is present but obviously junk, instead of 400ing forever in silence.
+
+    Placeholder comments no longer reach here (config.py drops them), so anything matching now
+    is genuine bad input. Values are never logged — only the setting name.
+    """
+    for name in (
+        "groq_api_key",
+        "gemini_api_key",
+        "openrouter_api_key",
+        "openai_api_key",
+        "anthropic_api_key",
+        "n8n_api_key",
+    ):
+        value = getattr(settings, name, None)
+        if isinstance(value, str) and value.strip() and any(c in value for c in _MALFORMED):
+            log.warning(
+                "malformed_key",
+                setting=name.upper(),
+                effect="requests using it will be rejected by the provider",
+                fix="re-copy the key; it contains whitespace or a '#'",
+            )
 
 
 def _init_sentry() -> None:
