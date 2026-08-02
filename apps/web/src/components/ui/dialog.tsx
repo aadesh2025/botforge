@@ -17,7 +17,12 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-surface p-6 shadow-pop",
+        // Centred with auto margins, not `-translate-*`: `animate-fade-up` ends on
+        // `transform: translateY(0)` with fill-mode `both`, so it permanently clobbered the
+        // centering transform and every dialog was anchored *at* the viewport centre rather
+        // than centred on it. Small dialogs still landed on-screen, which is why it went
+        // unnoticed; a taller one gets clipped off the right and bottom edges.
+        "fixed inset-0 z-50 m-auto h-fit max-h-[calc(100vh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-xl border border-border bg-surface p-6 shadow-pop",
         "data-[state=open]:animate-fade-up",
         className,
       )}
