@@ -8,6 +8,9 @@ export interface PersonaConfig {
   fallbackMessage: string;
   suggestedPrompts: string[];
   blockedTopics: string[];
+  /** The role template this agent was created from, if any. Read-only provenance — it drives
+   *  the builder's next-step hint and nothing else. Null for agents started from scratch. */
+  templateId: string | null;
 }
 
 /** One link in the agent's provider fallback chain (NFR-4). */

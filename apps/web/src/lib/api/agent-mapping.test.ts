@@ -102,4 +102,24 @@ describe("draftToPatch", () => {
     const patch = draftToPatch(versionToDraft(agent, version()));
     expect((patch.persona as Record<string, unknown>).tone).toBe("Friendly");
   });
+
+  it("preserves the creating template's id across an autosave", () => {
+    // The builder's persona round-trip is lossy by construction (it rebuilds the object from
+    // named fields), so provenance has to be echoed explicitly or the next autosave would
+    // strip it and the next-step hint would vanish on first edit.
+    const draft = versionToDraft(
+      agent,
+      version({ persona: { displayName: "Ava", tone: "Concise", template_id: "appointment_scheduler" } }),
+    );
+    expect(draft.persona.templateId).toBe("appointment_scheduler");
+    expect((draftToPatch(draft).persona as Record<string, unknown>).template_id).toBe(
+      "appointment_scheduler",
+    );
+  });
+
+  it("omits template_id entirely for an agent started from scratch", () => {
+    const draft = versionToDraft(agent, version());
+    expect(draft.persona.templateId).toBeNull();
+    expect(draftToPatch(draft).persona as Record<string, unknown>).not.toHaveProperty("template_id");
+  });
 });

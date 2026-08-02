@@ -84,6 +84,20 @@ export interface ApiVersion {
   created_at: string;
 }
 
+/** A creation-time starting point from `GET /v1/agent-templates`. Static catalog data:
+ *  identical for every org, copied into the first draft, never referenced afterwards. */
+export interface ApiAgentTemplate {
+  id: string;
+  label: string;
+  icon: string;
+  description: string;
+  system_prompt: string;
+  welcome_message: string;
+  suggested_prompts: string[];
+  tone: string;
+  suggested_next_step: string | null;
+}
+
 export interface ApiProviderInfo {
   name: string;
   label: string;

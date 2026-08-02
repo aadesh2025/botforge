@@ -30,9 +30,12 @@ test("criterion 1: invited signup → create agent → chat", async ({ page, req
   // Land on the dashboard, inside the org they were invited to.
   await page.waitForURL("**/dashboard", { timeout: 20_000 });
 
-  // Create an agent.
+  // Create an agent. Creation now starts with a role picker; this criterion is about the
+  // plain onboarding path, so it takes the start-from-scratch option (templates have their
+  // own spec).
   await page.goto("/agents");
   await page.getByRole("button", { name: /new agent/i }).first().click();
+  await page.getByText("Start from scratch").click();
   await page.getByPlaceholder(/agent name/i).fill("Support Bot");
   await page.getByRole("button", { name: /create & configure/i }).click();
 

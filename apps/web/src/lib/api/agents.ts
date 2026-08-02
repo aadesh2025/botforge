@@ -1,7 +1,7 @@
 "use client";
 
 import { api, apiForm, apiStream } from "./client";
-import type { ApiAgent, ApiVersion } from "./types";
+import type { ApiAgent, ApiAgentTemplate, ApiVersion } from "./types";
 
 /** Upload a widget/assistant logo for an agent. Returns the public logo URL (a relative API path). */
 export function uploadWidgetLogo(agentId: string, file: File) {
@@ -18,8 +18,18 @@ export function getAgent(id: string) {
   return api<ApiAgent>(`/v1/agents/${id}`, { orgScoped: true });
 }
 
-export function createAgent(name: string, description?: string) {
-  return api<ApiAgent>("/v1/agents", { method: "POST", orgScoped: true, body: { name, description } });
+/** The role templates offered when creating an agent. Static, so it caches indefinitely. */
+export function listAgentTemplates() {
+  return api<ApiAgentTemplate[]>("/v1/agent-templates", { orgScoped: true });
+}
+
+/** `templateId` seeds the first draft from a role template; omitting it creates a blank agent. */
+export function createAgent(name: string, opts?: { description?: string; templateId?: string }) {
+  return api<ApiAgent>("/v1/agents", {
+    method: "POST",
+    orgScoped: true,
+    body: { name, description: opts?.description, template_id: opts?.templateId ?? null },
+  });
 }
 
 export function deleteAgent(id: string) {

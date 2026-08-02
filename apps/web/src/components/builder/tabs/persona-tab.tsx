@@ -1,15 +1,53 @@
 "use client";
 
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Lightbulb, X } from "lucide-react";
 import { Field, SectionCard } from "@/components/builder/field";
 import { ChipInput } from "@/components/builder/chip-input";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { listAgentTemplates } from "@/lib/api/agents";
 import { useBuilder } from "@/lib/store/builder";
 import { toneOptions } from "@/lib/mock/builder";
 
 // ~4 chars per token is a fine heuristic for a live counter.
 const estTokens = (s: string) => Math.ceil(s.length / 4);
+
+/** What a template-created agent still needs wired up by hand.
+ *
+ * A pointer, never an action: the template deliberately doesn't auto-attach a calendar or CRM
+ * tool, because an agent that looks configured but has no credentials fails on its first real
+ * visitor. Dismissal is local to the browser — it's a nudge, not state worth a write. */
+function TemplateNextStep({ templateId }: { templateId: string }) {
+  const [dismissed, setDismissed] = useState(false);
+  const { data: templates } = useQuery({
+    queryKey: ["agent-templates"],
+    queryFn: listAgentTemplates,
+    staleTime: Infinity,
+  });
+  const step = templates?.find((t) => t.id === templateId)?.suggested_next_step;
+  if (!step || dismissed) return null;
+
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-ember/25 bg-ember/[0.04] px-4 py-3">
+      <Lightbulb className="mt-0.5 size-4 shrink-0 text-ember-soft" />
+      <p className="flex-1 text-sm leading-relaxed text-muted">
+        <span className="font-medium text-text">Suggested next step. </span>
+        {step}
+      </p>
+      <button
+        type="button"
+        onClick={() => setDismissed(true)}
+        aria-label="Dismiss suggestion"
+        className="rounded-md p-1 text-faint transition-colors hover:text-text"
+      >
+        <X className="size-4" />
+      </button>
+    </div>
+  );
+}
 
 export function PersonaTab() {
   const draft = useBuilder((s) => s.draft);
@@ -19,6 +57,7 @@ export function PersonaTab() {
 
   return (
     <div className="space-y-6">
+      {p.templateId && <TemplateNextStep templateId={p.templateId} />}
       <SectionCard title="Identity" description="How your agent introduces itself to people.">
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Display name" htmlFor="displayName" description="Shown in the chat header.">

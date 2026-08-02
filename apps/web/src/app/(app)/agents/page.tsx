@@ -4,13 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Bot, Loader2, Plus } from "lucide-react";
+import { Bot, Plus } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { NewAgentDialog, type NewAgentSubmit } from "@/components/agents/new-agent-dialog";
 import { createAgent, listAgents } from "@/lib/api/agents";
 import { useSession } from "@/lib/store/session";
 import { apiAgentStatusMeta as statusMeta } from "@/lib/display";
@@ -26,18 +25,12 @@ export default function AgentsPage() {
   });
 
   const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
 
-  async function onCreate(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      const agent = await createAgent(name);
-      router.push(`/agents/${agent.id}`);
-    } finally {
-      setBusy(false);
-    }
+  async function onCreate({ name, templateId }: NewAgentSubmit) {
+    const agent = await createAgent(name, { templateId: templateId ?? undefined });
+    // Land on the Persona tab: whatever the template filled in is the first thing to review,
+    // and it's editable from the moment it loads.
+    router.push(`/agents/${agent.id}?tab=persona`);
   }
 
   return (
@@ -98,19 +91,7 @@ export default function AgentsPage() {
         </div>
       )}
 
-      <Dialog open={creating} onOpenChange={setCreating}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New agent</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={onCreate} className="space-y-4">
-            <Input autoFocus placeholder="Agent name" value={name} onChange={(e) => setName(e.target.value)} />
-            <Button type="submit" variant="primary" className="w-full" disabled={busy || !name.trim()}>
-              {busy && <Loader2 className="size-4 animate-spin" />} Create & configure
-            </Button>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <NewAgentDialog open={creating} onOpenChange={setCreating} onSubmit={onCreate} />
     </div>
   );
 }

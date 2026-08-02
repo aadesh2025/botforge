@@ -32,6 +32,7 @@ export function versionToDraft(
       fallbackMessage: v.fallback_message ?? "",
       suggestedPrompts: v.suggested_prompts ?? [],
       blockedTopics: (persona.blockedTopics as string[]) ?? [],
+      templateId: (persona.template_id as string) ?? null,
     },
     model: {
       provider: (mc.provider as Provider) ?? "groq",
@@ -95,6 +96,9 @@ export function draftToPatch(draft: AgentDraft): Record<string, unknown> {
       displayName: p.displayName,
       tone: p.tone,
       blockedTopics: p.blockedTopics,
+      // Echoed back so provenance survives even though the backend merges persona on write —
+      // an autosave that omitted it would otherwise depend on that merge to not lose it.
+      ...(p.templateId ? { template_id: p.templateId } : {}),
     },
     model_config: {
       provider: m.provider,
