@@ -287,3 +287,31 @@ async def test_template_prompts_never_ask_for_citation_markers(client: AsyncClie
         # The phrase appears only inside the explicit prohibition.
         assert "never narrate your sources" in prompt
         assert "according to the documents" in prompt.split("never narrate your sources")[1]
+
+
+async def test_every_seeded_prompt_still_refuses_to_guess(client: AsyncClient) -> None:
+    """Softening the *voice* must never soften the grounding.
+
+    This pins a regression that a unit test alone could not have caught, so it pins the prompt
+    text instead. Rewriting `DEFAULT_SYSTEM_PROMPT` for tone once ended the never-narrate-your-
+    sources rule with "Just answer." — and with no retrieved context the model read that as
+    "don't hedge" and invented support hours and a refund window in 3 of 3 sampled replies,
+    where the previous prompt refused in 3 of 3. The two clauses asserted below are what closed
+    it: the prohibition is scoped to phrasing, and the no-context case is stated outright.
+    """
+    from app.modules.agents.service import DEFAULT_SYSTEM_PROMPT
+
+    headers, _ = await _headers(client)
+    templates = (await client.get("/v1/agent-templates", headers=headers)).json()
+    prompts = [("default", DEFAULT_SYSTEM_PROMPT)] + [(t["id"], t["system_prompt"]) for t in templates]
+
+    for name, raw in prompts:
+        prompt = raw.lower()
+        assert "only" in prompt and "context" in prompt, f"{name} dropped the only-from-context rule"
+        assert "do not guess" in prompt or "do not use" in prompt, f"{name} dropped the no-guess rule"
+        # The no-context case has to be spelled out; "there is no context" is the exact state the
+        # model over-answered in.
+        assert "no context was provided" in prompt, f"{name} leaves the no-retrieval case implicit"
+        # The prohibition must be scoped, or it reads as licence to answer anyway.
+        assert "phrasing only" in prompt, f"{name} lets 'don't cite sources' imply 'answer anyway'"
+        assert "just answer." not in prompt, f"{name} reintroduced the phrase that caused the regression"
