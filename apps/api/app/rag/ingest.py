@@ -13,6 +13,7 @@ import httpx
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.pii import scan_document_text
 from app.core.logging import get_logger
 from app.llm.registry import build_embedding_provider
 from app.models import Chunk, Document, KnowledgeBase
@@ -65,6 +66,19 @@ async def ingest_document(
         text = await _read_source(document, url_transport=url_transport)
         if not text.strip():
             raise loaders.LoaderError("No extractable text in document.")
+
+        # Scan before chunking, so a contact detail split across a chunk boundary is still
+        # counted once against the whole document (docs/11 Phase B, §6).
+        document.pii_flags = scan_document_text(text)
+        if document.pii_flags:
+            # Counts only — never the values. A PII report that echoes the PII is the same
+            # leak in a different place.
+            log.warning(
+                "document_pii_detected",
+                document_id=str(document.id),
+                organization_id=str(document.organization_id),
+                flags=document.pii_flags,
+            )
 
         chunks = chunk_text(
             text,

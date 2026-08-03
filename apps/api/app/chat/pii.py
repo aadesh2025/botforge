@@ -136,6 +136,30 @@ def find_pii(
     return sorted(found, key=lambda m: m.start)
 
 
+def scan_document_text(text: str, *, regions: list[str] | None = None) -> dict[str, int]:
+    """`{kind: count}` for a document about to enter the retrieval corpus (docs/11 §6).
+
+    **Reports; never rewrites, never blocks.** A business's own support documentation
+    legitimately contains its public contact details, and silently mangling a client's
+    knowledge base is a worse outcome than the leak it would prevent — the operator has to be
+    the one who decides what comes out. So the document ingests normally and carries a flag.
+
+    Secrets reuse `guardrails._SECRET_PATTERNS` rather than a second copy, so "what a secret
+    looks like" has one definition across input screening, output redaction and ingest.
+    """
+    from app.chat.guardrails import _SECRET_PATTERNS  # local: avoids a circular import
+    from app.core.config import settings
+
+    regions = regions or [
+        r.strip() for r in settings.guard_pii_phone_regions.split(",") if r.strip()
+    ]
+    flags = summarize(find_pii(text, regions=regions, include_addresses=True))
+    secrets = sum(len(p.findall(text or "")) for p in _SECRET_PATTERNS)
+    if secrets:
+        flags["secret"] = secrets
+    return flags
+
+
 def summarize(matches: list[PiiMatch]) -> dict[str, int]:
     """`{kind: count}` — the shape stored on a document and printed by the audit script.
 

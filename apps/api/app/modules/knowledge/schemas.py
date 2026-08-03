@@ -62,6 +62,10 @@ class DocumentOut(BaseModel):
     status: str
     error_message: str | None
     chunk_count: int
+    #: `{kind: count}` from the ingest-time PII scan (docs/11 Phase B). Counts only — the
+    #: values are never returned. `None` = ingested before the scan existed and never
+    #: checked; `{}` = scanned and clean. The UI must not present those as the same thing.
+    pii_flags: dict[str, int] | None = None
     created_at: dt.datetime
     updated_at: dt.datetime
 

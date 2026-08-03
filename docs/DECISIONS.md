@@ -18,6 +18,30 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-054: Ingest flags PII, and never redacts or blocks
+- **Date:** 2026-08-03
+- **Status:** accepted
+- **Context:** docs/11 §1.5 — the retrieval corpus is part of the attack surface (OWASP LLM08),
+  and the live PII leak happened because the knowledge base held a founder's personal contact
+  details. The obvious response is to strip PII at ingest.
+- **Decision:** Scan extracted text before chunking, store `{kind: count}` on
+  `documents.pii_flags`, log it, surface it in the UI — and **change nothing**. The document
+  ingests normally with its text intact.
+- **Alternatives considered:** *Auto-redact at ingest* — a business's own support documentation
+  legitimately contains its public contact details, so this silently mangles a client's
+  knowledge base and produces an agent that cannot answer "how do I contact you?". The damage
+  is invisible until a customer hits it. *Block the ingest* — an operator uploading their real
+  contact page gets a failure with no way to proceed, and the corpus stays empty rather than
+  imperfect. Both replace a leak the output guard already catches with a data-loss bug it
+  cannot.
+- **Consequences:** Egress (ADR-053) is the enforcing layer and ingest is the *visibility*
+  layer; they are deliberately asymmetric. `pii_flags` is **nullable**: `NULL` means never
+  scanned (every document ingested before migration 0015) and `{}` means scanned and clean —
+  collapsing them would let the UI claim a document is clean when nobody has looked. Secret
+  detection reuses `guardrails._SECRET_PATTERNS` so there is one definition across input
+  screening, output redaction and ingest. Cleaning the live corpus (docs/11 §6) remains
+  operator work; no code substitutes for it, and this ADR is why.
+
 ### ADR-053: PII egress is allowlist-based, and phone numbers use libphonenumber
 - **Date:** 2026-08-03
 - **Status:** accepted
