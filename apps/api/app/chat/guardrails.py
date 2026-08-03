@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
-from app.chat.normalize import matching_candidates
+from app.chat.normalize import despaced_forms, matching_candidates
 
 # Lines/spans in untrusted content that look like attempts to override instructions.
 # Unchanged since Phase 16 — these run over retrieved documents and tool output, where a
@@ -154,6 +154,17 @@ def wrap_untrusted(text: str, *, kind: str = "retrieved-context") -> str:
     )
 
 
+@lru_cache(maxsize=256)
+def _whitespace_relaxed(pattern: re.Pattern[str]) -> re.Pattern[str]:
+    """The same pattern with required whitespace made optional.
+
+    Used only against a fully-collapsed de-spaced string, where the original word boundaries
+    are gone. Applying this to ordinary text would match `ignoreallpreviousinstructions`
+    inside a longer word, which is why it never touches the normal candidate list.
+    """
+    return re.compile(pattern.pattern.replace(r"\s+", r"\s*"), pattern.flags)
+
+
 @dataclass(frozen=True)
 class InputVerdict:
     """The outcome of screening a visitor's message.
@@ -177,13 +188,27 @@ class InputVerdict:
 def screen_user_message(text: str, *, max_chars: int | None = None) -> InputVerdict:
     """Screen the visitor's own turn for direct prompt injection (docs/11 §1.1).
 
-    Matched against the raw text, its normalised form, and shallow-decoded candidates, so
-    zero-width splitting, homoglyphs and base64 don't walk past an ASCII regex.
+    Matched against the raw text, its normalised form, shallow-decoded candidates, and a
+    de-spaced reading, so zero-width splitting, homoglyphs, base64 and "I g n o r e  a l l"
+    don't walk past an ASCII regex.
 
     Returns a verdict — it never returns modified text. The caller decides what to say, and
     the customer's message is persisted exactly as typed either way.
+
+    **This is an English-first deterministic layer.** The patterns are English, and a
+    straightforward translation of "ignore all previous instructions" into Hindi, Tamil,
+    Spanish or Chinese passes cleanly — `tests/fixtures/redteam/attacks_multilingual.yaml`
+    records exactly which, as asserted known misses. Multilingual coverage depends on the L2
+    classifier in docs/11 §4-L2 (Phase C), which handles 8 languages. Translated regex is
+    deliberately *not* the answer: it scales to no language in particular and would cost the
+    precision these patterns were tuned for.
     """
     candidates = matching_candidates(text, max_chars=max_chars)
+    # Only populated when the text was written with letters spaced apart AND the word
+    # boundaries were unrecoverable ("i g n o r e a l l ..." with one space throughout).
+    # Scanned with whitespace-relaxed patterns, which is safe precisely because this string
+    # only exists for input that already tripped the spacing heuristic.
+    collapsed = [c for c in despaced_forms(text) if " " not in c]
     flags: list[str] = []
 
     contains_secret = any(p.search(c) for c in candidates for p in _SECRET_PATTERNS)
@@ -194,7 +219,9 @@ def screen_user_message(text: str, *, max_chars: int | None = None) -> InputVerd
     first_pattern: str | None = None
     for category, patterns in _INPUT_FAMILIES:
         for pattern in patterns:
-            if any(pattern.search(c) for c in candidates):
+            if any(pattern.search(c) for c in candidates) or any(
+                _whitespace_relaxed(pattern).search(c) for c in collapsed
+            ):
                 if first_category is None:
                     first_category, first_pattern = category, pattern.pattern
                 flags.append(category)

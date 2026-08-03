@@ -141,12 +141,71 @@ def decoded_candidates(text: str) -> list[str]:
     return [c for c in out if c.strip()]
 
 
+# Character-spacing evasion: "I g n o r e   a l l   p r e v i o u s". Same class as the
+# zero-width trick, but it uses a character the normaliser legitimately keeps, so stripping is
+# not an option — the collapsed form is emitted as an extra candidate instead.
+#
+# Both thresholds exist to protect precision. A span must be long *and* mostly single letters
+# before anything collapses, which is what keeps "I need a A A battery" (5 tokens) and
+# "my order id is A B 1 2 9 9" (10 tokens, 6 single) out of it.
+_SPACED_MIN_TOKENS = 12
+_SPACED_MIN_RATIO = 0.6
+_TOKEN_SPLIT = re.compile(r"(\s+)")
+
+
+def despaced_forms(text: str) -> list[str]:
+    """Collapsed readings of a message written with letters spaced apart.
+
+    Returns up to two strings, or nothing when the text does not look spaced out:
+
+    - **gap-aware** — single spaces *between single characters* are treated as intra-word and
+      removed, while wider gaps stay word boundaries. `"I g n o r e   a l l   p r e v i o u s"`
+      becomes `"ignore all previous"`, which the existing L1 patterns match unchanged.
+    - **fully collapsed** — every space removed, for the degenerate case where the attacker
+      used one space everywhere and word boundaries are unrecoverable. Only useful against
+      whitespace-relaxed patterns, which is how `screen_user_message()` uses it.
+    """
+    stripped = strip_invisible(unicodedata.normalize("NFKC", text or ""))
+    parts = _TOKEN_SPLIT.split(stripped)
+    tokens = [t for t in parts[0::2] if t]
+    gaps = parts[1::2]
+    if len(tokens) < _SPACED_MIN_TOKENS:
+        return []
+    singles = sum(1 for t in tokens if len(t) == 1)
+    if singles / len(tokens) < _SPACED_MIN_RATIO:
+        return []
+
+    pieces: list[str] = []
+    raw_tokens = parts[0::2]
+    for i, tok in enumerate(raw_tokens):
+        if not tok:
+            continue
+        pieces.append(tok)
+        nxt = next((t for t in raw_tokens[i + 1 :] if t), None)
+        if nxt is None:
+            break
+        gap = gaps[i] if i < len(gaps) else " "
+        # Join only when a *single* space sits between two *single* characters. Anything
+        # wider, or either side being a real word, stays a boundary.
+        joined = len(gap) == 1 and len(tok) == 1 and len(nxt) == 1
+        pieces.append("" if joined else " ")
+
+    gap_aware = _WHITESPACE_RUN.sub(" ", "".join(pieces)).strip()
+    collapsed = "".join(tokens)
+    out = [gap_aware]
+    if collapsed != gap_aware:
+        out.append(collapsed)
+    return [o for o in out if o]
+
+
 def matching_candidates(text: str, *, max_chars: int | None = None) -> list[str]:
     """Every string a guardrail should test: raw, normalised, and shallow-decoded forms."""
     raw = text or ""
     candidates = [raw, normalize_for_matching(raw, max_chars=max_chars)]
     for decoded in decoded_candidates(raw):
         candidates.append(normalize_for_matching(decoded, max_chars=max_chars))
+    for despaced in despaced_forms(raw):
+        candidates.append(normalize_for_matching(despaced, max_chars=max_chars))
     # Order-preserving dedupe: patterns run once per distinct string.
     seen: set[str] = set()
     unique: list[str] = []
