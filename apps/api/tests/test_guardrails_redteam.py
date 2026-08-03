@@ -31,6 +31,7 @@ def _load(name: str) -> list[dict[str, Any]]:
 
 ATTACKS = _load("attacks.yaml")
 BENIGN = _load("benign.yaml")
+MULTILINGUAL = _load("attacks_multilingual.yaml")
 
 
 @pytest.mark.parametrize("case", ATTACKS, ids=lambda c: str(c["id"]))
@@ -60,12 +61,57 @@ def test_corpus_covers_every_live_failure() -> None:
     assert {"live-1-ignore-and-reveal", "live-2-developer-mode"} <= ids
 
 
-def test_precision_and_recall_are_total_on_the_corpus() -> None:
-    """Aggregate view — the per-case tests say *which*, this says *how many*."""
+def test_precision_and_recall_are_total_on_the_english_corpus() -> None:
+    """Aggregate view — the per-case tests say *which*, this says *how many*.
+
+    Named "english" on purpose. The headline "N/N blocked" figure describes the English
+    corpus only, and reading it as "N/N of the threat model" is precisely the mistake
+    `test_multilingual_recall_is_reported_separately` exists to prevent.
+    """
     blocked_attacks = sum(1 for c in ATTACKS if guardrails.screen_user_message(c["input"]).blocked)
     blocked_benign = sum(1 for c in BENIGN if guardrails.screen_user_message(c["input"]).blocked)
     assert blocked_attacks == len(ATTACKS)
     assert blocked_benign == 0
+
+
+# ── Multilingual: recorded known misses, reported separately (docs/11 §4-L1) ──────────────
+
+
+@pytest.mark.parametrize("case", MULTILINGUAL, ids=lambda c: str(c["id"]))
+def test_multilingual_attacks_are_known_misses_until_phase_c(case: dict[str, Any]) -> None:
+    """Pins the *current* state, so a change in either direction is loud.
+
+    These are deliberately not fixed with translated regex — that scales to no language and
+    costs the precision the English patterns were tuned for. Phase C's classifier is the fix.
+    When it lands, these start failing here and the `expects` marker is what says so.
+    """
+    blocked = guardrails.screen_user_message(case["input"]).blocked
+    if case.get("expects") == "classifier":
+        assert not blocked, (
+            f"{case['id']} is now blocked by the regex layer. If Phase C landed, move it to "
+            f"attacks.yaml; if a pattern widened, check what it cost in benign.yaml."
+        )
+    else:
+        assert blocked, f"{case['id']} was expected to be caught by L1"
+
+
+def test_multilingual_recall_is_reported_separately() -> None:
+    """English and non-English recall are different numbers and must never be merged."""
+    english_total = len(ATTACKS)
+    english_blocked = sum(1 for c in ATTACKS if guardrails.screen_user_message(c["input"]).blocked)
+    other_total = len(MULTILINGUAL)
+    other_blocked = sum(
+        1 for c in MULTILINGUAL if guardrails.screen_user_message(c["input"]).blocked
+    )
+
+    # The honest statement of where this layer stands today.
+    assert english_blocked == english_total, f"English recall {english_blocked}/{english_total}"
+    assert other_blocked == 0, (
+        f"non-English recall is {other_blocked}/{other_total}; L1 is an English-first layer "
+        f"and multilingual coverage is Phase C's job (docs/11 §4-L1)"
+    )
+    languages = {c["language"] for c in MULTILINGUAL}
+    assert len(languages) >= 4, "keep the multilingual corpus spread across scripts"
 
 
 # ── L0 normalisation ─────────────────────────────────────────────────────────────────────
