@@ -175,6 +175,12 @@ export interface ApiDocument {
   status: ApiDocStatus;
   error_message: string | null;
   chunk_count: number;
+  /**
+   * `{kind: count}` from the ingest-time PII scan (docs/11 Phase B) — counts only, never the
+   * values. `null` means the document predates the scan and has never been checked; `{}` means
+   * it was scanned and is clean. Those are different things and the UI must not merge them.
+   */
+  pii_flags: Record<string, number> | null;
   created_at: string;
   updated_at: string;
 }

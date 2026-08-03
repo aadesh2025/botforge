@@ -16,6 +16,7 @@ import {
   Type,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PiiBadge, PiiSummary } from "@/components/knowledge/pii-flags";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -195,6 +196,8 @@ export default function KnowledgeDetailPage() {
         )}
       </div>
 
+      {!isLoading && rows.length > 0 && <PiiSummary documents={rows} />}
+
       {/* Documents table */}
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
         <div className="flex items-center justify-between border-b border-border p-5">
@@ -237,8 +240,11 @@ export default function KnowledgeDetailPage() {
                         <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-faint">
                           <DocIcon type={docType(doc)} />
                         </span>
-                        <span className="max-w-[320px] truncate font-medium text-text">
-                          {docName(doc)}
+                        <span className="flex min-w-0 flex-col gap-1">
+                          <span className="max-w-[320px] truncate font-medium text-text">
+                            {docName(doc)}
+                          </span>
+                          <PiiBadge flags={doc.pii_flags} />
                         </span>
                       </div>
                     </td>
