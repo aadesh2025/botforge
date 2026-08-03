@@ -265,6 +265,32 @@ async def test_discovery_without_a_key_reports_the_catalog(client: AsyncClient) 
     assert resp.json()["error"] == "No API key configured."
 
 
+async def test_a_rejected_key_is_not_echoed_back_in_the_error(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Providers quote the rejected key in their 401 body — OpenAI returns
+    `Incorrect API key provided: sk-live-*******8888`. Masked or not, that is secret material
+    in an API response and a log line."""
+    from app.modules.credentials import service
+
+    headers = await _org_headers(client)
+    await client.put("/v1/credentials/providers/openai", json={"api_key": "sk-tail-9999"}, headers=headers)
+
+    def _rejected(*_a: object, **_k: object) -> FakeChatProvider:
+        raise ProviderError(
+            'provider returned 401: {"error": {"message": "Incorrect API key provided: '
+            'sk-live-*******9999. You can find your API key at ..."}}'
+        )
+
+    monkeypatch.setattr(service, "build_chat_provider", _rejected)
+    resp = await client.get("/v1/credentials/providers/openai/models", headers=headers)
+    error = resp.json()["error"]
+
+    assert "401" in error, "the operator still needs to know the key was rejected"
+    assert "sk-live" not in error and "9999" not in error
+    assert "[key]" in error
+
+
 async def test_non_chat_models_are_filtered_out_of_discovery() -> None:
     """A provider returns one flat list for every modality; embeddings are not agent models."""
     from app.modules.credentials.service import _is_chat_model

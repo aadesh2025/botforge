@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 
 from sqlalchemy import select
@@ -34,10 +35,16 @@ __all__ = [
 # Model ids a chat agent can never be pointed at, filtered out of *live* discovery. Providers
 # return one flat list for every modality, so an unfiltered OpenAI or Gemini response offers
 # embedding and speech models in the builder's model dropdown.
+#
+# This is necessarily incomplete — the id is the only signal the /models response gives us, and
+# a vendor can name an audio model anything (`canopylabs/orpheus-*` on Groq was found this way,
+# during live verification, after passing every marker below). It removes the common noise; it
+# is not a guarantee that every listed model can hold a conversation.
 _NON_CHAT_MARKERS = (
     "embed",
     "whisper",
     "tts",
+    "orpheus",
     "dall-e",
     "imagen",
     "moderation",
@@ -306,6 +313,24 @@ def _is_chat_model(model_id: str) -> bool:
     return not any(marker in lowered for marker in _NON_CHAT_MARKERS)
 
 
+def _safe_error(exc: Exception) -> str:
+    """A provider failure the operator can act on, without echoing key material.
+
+    Upstream 401 bodies quote the rejected key back at you — OpenAI returns
+    `Incorrect API key provided: sk-live-*******8888`. Partially masked is still a fragment of
+    a live secret in an API response and a log line, and the body can carry account ids too, so
+    key-shaped runs are stripped and the rest is truncated. The status and reason survive,
+    which is the part that tells someone what to fix.
+    """
+    text = _KEYISH.sub("[key]", str(exc))
+    return text[:200].strip()
+
+
+# Deliberately looser than `guardrails._SECRET_PATTERNS`, which matches whole live keys: this
+# has to catch the *masked* forms providers echo back (`sk-live-*******8888`).
+_KEYISH = re.compile(r"\b(sk|gsk|xai|sk-ant|sk-or)[-_][A-Za-z0-9*_\-]{4,}", re.I)
+
+
 async def list_provider_models(
     session: AsyncSession, ctx: OrgContext, provider: str
 ) -> schemas.ProviderModels:
@@ -333,7 +358,7 @@ async def list_provider_models(
         discovered = await client.list_models()
     except (ProviderError, AppError) as exc:
         return schemas.ProviderModels(
-            provider=provider, source="catalog", models=fallback, error=str(exc)
+            provider=provider, source="catalog", models=fallback, error=_safe_error(exc)
         )
 
     models = [
