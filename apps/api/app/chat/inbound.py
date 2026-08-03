@@ -8,8 +8,10 @@ bot does not generate (the operator replies via the inbox).
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import time
 from collections.abc import AsyncIterator
+from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,10 +20,14 @@ from app.chat.assembly import build_messages, compose_system_prompt
 from app.chat.handoff import trigger_handoff, wants_handoff
 from app.chat.runtime import TurnResult, run_turn
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.llm.fake import RefusalProvider
 from app.llm.types import StreamEvent
 from app.models import Agent, AgentVersion, Conversation, Message
 from app.rag.agent_retrieval import retrieve_for_version
+from app.rag.retrieval import Citation
+
+log = get_logger("chat.inbound")
 
 _DEFAULT_REFUSAL = "I'm not able to help with that topic. Is there something else I can do for you?"
 # Said to a visitor when the provider itself fails and the agent has no fallback line of its
@@ -103,7 +109,32 @@ class InboundTurn:
             yield StreamEvent(type="message", message_id=str(msg.id))
             return
 
-        context_block, citations = await retrieve_for_version(session, org_id, self.version, self.message)
+        # L1 input guard (docs/11 §4-L1). The visitor's own message is untrusted content —
+        # this is the half of the threat model that was missing, and the fix for the live
+        # "ignore all previous instructions" / "developer mode" failures. Screened before
+        # retrieval so an attack doesn't spend an embedding call.
+        guard = (
+            guardrails.screen_user_message(
+                self.message, max_chars=settings.max_user_message_chars
+            )
+            if settings.guard_input_enabled
+            else guardrails.InputVerdict()
+        )
+        if guard.blocked:
+            # Hash, never the payload: the raw text is an attack string and may carry PII.
+            log.warning(
+                "guard_input_blocked",
+                agent_id=str(self.agent.id),
+                conversation_id=str(conv.id),
+                category=guard.category,
+                flags=guard.flags,
+                message_sha256=hashlib.sha256(self.message.encode("utf-8")).hexdigest()[:16],
+            )
+            context_block, citations = "", cast(list[Citation], [])
+        else:
+            context_block, citations = await retrieve_for_version(
+                session, org_id, self.version, self.message
+            )
         messages = build_messages(
             system_prompt=compose_system_prompt(self.version.system_prompt, self.version.persona),
             context_block=context_block,
@@ -123,9 +154,14 @@ class InboundTurn:
         )
         req = _build_chat_request(self.version, messages, stream=True)
 
-        # Blocked-topics guardrail: refuse pre-LLM when the message touches a blocked topic.
+        # Pre-LLM refusals. The input guard redirects without naming a rule; a blocked topic
+        # uses the agent's own refusal line, which the operator wrote for exactly that case.
         topics = guardrails.blocked_topics_for(self.version.persona)
-        if topics and guardrails.matches_blocked_topic(self.message, topics):
+        if guard.blocked:
+            provider = RefusalProvider(guardrails.INJECTION_REDIRECT)
+            citations = []
+            executor = None
+        elif topics and guardrails.matches_blocked_topic(self.message, topics):
             provider = RefusalProvider(self.version.fallback_message or _DEFAULT_REFUSAL)
             citations = []
             executor = None

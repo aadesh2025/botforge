@@ -74,6 +74,21 @@ class Settings(BaseSettings):
     summary_provider: str = "groq"
     summary_model: str = "llama-3.1-8b-instant"
 
+    # --- Guardrails (docs/11) ---
+    # Hard ceiling on a single visitor message. Also the LLM10 unbounded-consumption control:
+    # without it, one caller can push an arbitrarily large prompt through a paid provider.
+    max_user_message_chars: int = 8000
+    # L1 static pre-filter on the visitor's own message (direct prompt injection, OWASP LLM01).
+    # Off means BotForge defends retrieved content but not the person typing — the docs/11 §1.1
+    # asymmetry. Kept switchable because a false positive costs a real customer a real answer.
+    guard_input_enabled: bool = True
+    # L5 output guardrail: system-prompt leakage + persona breaks.
+    guard_output_enabled: bool = True
+    # Fraction of the assembled system prompt's 8-grams that may appear in a reply before it
+    # is treated as leakage. Low enough to catch paraphrase-free quoting, high enough that a
+    # reply legitimately reusing the agent's own vocabulary is not suppressed.
+    guard_output_leak_threshold: float = 0.35
+
     # --- Tools (Phase 9) ---
     # Max tool-call iterations per turn before the runtime forces a final answer.
     tool_max_iterations: int = 4

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ from app.models import Agent, AgentVersion, Conversation, Message
 from app.modules.conversations import schemas
 from app.modules.orgs.deps import OrgContext
 from app.rag.agent_retrieval import retrieve_for_version
+from app.rag.retrieval import Citation
 from app.tools.service import build_tooling
 from app.webhooks.dispatch import emit_event
 
@@ -247,7 +249,27 @@ async def _prepare_turn(
     await _persist_user_message(session, conv, data.message)
     await session.flush()
 
-    context_block, citations = await retrieve_for_version(session, ctx.org.id, version, data.message)
+    # L1 input guard (docs/11 §4-L1) — same screen the widget and channels run, so an
+    # operator testing from the dashboard sees the behaviour a visitor would get.
+    guard = (
+        guardrails.screen_user_message(data.message, max_chars=settings.max_user_message_chars)
+        if settings.guard_input_enabled
+        else guardrails.InputVerdict()
+    )
+    if guard.blocked:
+        log.warning(
+            "guard_input_blocked",
+            agent_id=str(agent.id),
+            conversation_id=str(conv.id),
+            category=guard.category,
+            flags=guard.flags,
+            message_sha256=hashlib.sha256(data.message.encode("utf-8")).hexdigest()[:16],
+        )
+        context_block, citations = "", cast(list[Citation], [])
+    else:
+        context_block, citations = await retrieve_for_version(
+            session, ctx.org.id, version, data.message
+        )
     messages = build_messages(
         system_prompt=compose_system_prompt(version.system_prompt, version.persona),
         context_block=context_block,
@@ -267,8 +289,11 @@ async def _prepare_turn(
     )
     req = _build_chat_request(version, messages, stream=stream)
 
-    # Blocked-topics guardrail: refuse pre-LLM when the message touches a blocked topic.
+    # Pre-LLM refusals. The input guard redirects without naming a rule (docs/11 §4a); a
+    # blocked topic uses the agent's own refusal line.
     topics = guardrails.blocked_topics_for(version.persona)
+    if guard.blocked:
+        return conv, RefusalProvider(guardrails.INJECTION_REDIRECT), req, [], None
     if topics and guardrails.matches_blocked_topic(data.message, topics):
         provider = RefusalProvider(_refusal_text(version))
         return conv, provider, req, [], None
