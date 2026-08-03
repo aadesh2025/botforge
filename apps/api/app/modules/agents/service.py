@@ -594,6 +594,9 @@ async def playground_stream(
     async for ev in run_turn(
         provider, req, [c.model_dump(mode="json") for c in citations], result,
         executor=executor, max_iters=settings.tool_max_iterations,
+        # The Playground shows the operator what the model actually said — same reason it
+        # withholds `fallback_message` and re-raises provider errors (docs/11 §4-L5).
+        guard_output=False,
     ):
         yield f"data: {ev.model_dump_json()}\n\n"
 
@@ -620,6 +623,9 @@ async def playground_once(
     async for _ev in run_turn(
         provider, req, [c.model_dump(mode="json") for c in citations], result,
         executor=executor, max_iters=settings.tool_max_iterations,
+        # The Playground shows the operator what the model actually said — same reason it
+        # withholds `fallback_message` and re-raises provider errors (docs/11 §4-L5).
+        guard_output=False,
     ):
         pass
     if result.error:

@@ -106,6 +106,19 @@ def compose_system_prompt(
     return "\n\n".join(parts)
 
 
+def instruction_prompt_of(messages: list[Message]) -> str | None:
+    """The instruction prompt from an assembled message list, for the output leak check.
+
+    `build_messages()` places the instruction prompt **first**, ahead of the retrieved-context
+    block, and that ordering is the contract this reads. Taking every system message instead
+    would hand the leak check the knowledge-base content too, and suppress ordinary grounded
+    answers for quoting the documents they are supposed to quote (docs/11 §4-L5).
+    """
+    if messages and messages[0].role == "system":
+        return messages[0].content
+    return None
+
+
 def build_messages(
     *,
     system_prompt: str | None,

@@ -11,10 +11,15 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.chat import output_guard
 from app.chat.guardrails import neutralize_injections
+from app.core.config import settings
+from app.core.logging import get_logger
 from app.llm.base import ChatProvider, ProviderError
 from app.llm.pricing import compute_cost_micros
 from app.llm.types import ChatRequest, Message, StreamEvent, ToolCall, Usage
+
+log = get_logger("chat.runtime")
 
 # executor(call) -> {"output": dict, "status": str, "error": str|None}
 ToolExecutor = Callable[[ToolCall], Awaitable[dict[str, Any]]]
@@ -52,6 +57,8 @@ async def run_turn(
     executor: ToolExecutor | None = None,
     max_iters: int = 1,
     fallback_message: str | None = None,
+    protected_prompt: str | None = None,
+    guard_output: bool = True,
 ) -> AsyncIterator[StreamEvent]:
     """Stream a turn, forwarding events and accumulating into `result`.
 
@@ -60,6 +67,15 @@ async def run_turn(
     `fallback_message` is what a *visitor-facing* caller wants said when the provider fails
     outright — pass it from the widget/channel/chat paths, leave it unset for the Playground,
     where an operator is debugging and wants the raw error rather than a soothing sentence.
+
+    `protected_prompt` is the assembled *instruction* prompt for the leak check — deliberately
+    not read off `req.messages`, which also holds the retrieved-context system message, and
+    echoing knowledge-base content back to a customer is the product working (docs/11 §4-L5).
+    Leave it unset to skip the leak check while keeping persona and secret checks.
+
+    `guard_output=False` disables L5 entirely. The Playground passes it for the same reason it
+    withholds `fallback_message`: an operator asking "is my agent behaving?" must be shown what
+    the model actually said, and a silently regenerated persona break hides the answer.
     """
     result.provider = provider.name
     result.model = req.model
@@ -130,6 +146,55 @@ async def run_turn(
                 )
             continue
         break
+
+    # L5 output guard (docs/11 §4-L5). Runs on the accumulated reply, so a streaming client
+    # has already rendered it — hence the `replace` event rather than pre-emptive suppression
+    # (ADR-047). `result.content` is corrected here, which is what every non-streaming caller
+    # and the persistence path read, so those are protected outright.
+    if guard_output and settings.guard_output_enabled and result.content.strip():
+        verdict = output_guard.inspect(
+            result.content, protected_prompt, leak_threshold=settings.guard_output_leak_threshold
+        )
+        # One silent regeneration for a persona break: the model usually recovers when told,
+        # and serving the fallback for "I'm a large language model" throws away a real answer.
+        # A prompt leak is not retried — it gets replaced.
+        if verdict.persona_break and not verdict.leaked_prompt:
+            log.warning("output_guard_persona_break", provider=provider.name, model=req.model)
+            retry_messages = [
+                *messages,
+                Message(role="assistant", content=result.content),
+                Message(role="user", content=output_guard.REGENERATION_DIRECTIVE),
+            ]
+            try:
+                retry = ""
+                async for ev in provider.stream(
+                    req.model_copy(update={"messages": retry_messages, "tools": None})
+                ):
+                    if ev.type == "token" and ev.delta:
+                        retry += ev.delta
+                if retry.strip():
+                    result.content = retry
+            except ProviderError as exc:
+                # The first reply is still in hand; fall through and let `apply` replace it.
+                log.warning("output_guard_regeneration_failed", error=str(exc))
+
+        final = output_guard.apply(
+            result.content,
+            protected_prompt,
+            leak_threshold=settings.guard_output_leak_threshold,
+            fallback_message=fallback_message,
+        )
+        if final.leaked_prompt:
+            log.error(
+                "output_guard_prompt_leak",
+                provider=provider.name,
+                model=req.model,
+                leak_score=round(final.leak_score, 3),
+            )
+        if final.changed:
+            result.content = final.text
+            # Tell a streaming client to discard what it painted for this turn.
+            yield StreamEvent(type="replace", delta=final.text)
 
     # Re-read after streaming: a fallback chain only knows which link served once it has run,
     # and usage/cost must be attributed to the provider that actually answered.

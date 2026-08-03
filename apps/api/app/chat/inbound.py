@@ -135,12 +135,11 @@ class InboundTurn:
             context_block, citations = await retrieve_for_version(
                 session, org_id, self.version, self.message
             )
+        system_prompt = compose_system_prompt(
+            self.version.system_prompt, self.version.persona, agent_name=self.agent.name
+        )
         messages = build_messages(
-            system_prompt=compose_system_prompt(
-                self.version.system_prompt,
-                self.version.persona,
-                agent_name=self.agent.name,
-            ),
+            system_prompt=system_prompt,
             context_block=context_block,
             memory_summary=conv.memory_summary,
             history=history,
@@ -181,6 +180,7 @@ class InboundTurn:
             provider, req, [c.model_dump(mode="json") for c in citations], self.result,
             executor=executor, max_iters=settings.tool_max_iterations,
             fallback_message=self.version.fallback_message or _DEFAULT_PROVIDER_FAILURE,
+            protected_prompt=system_prompt,
         ):
             yield ev
         latency_ms = int((time.perf_counter() - t0) * 1000)

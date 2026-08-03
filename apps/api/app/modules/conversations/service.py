@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat import guardrails, memory
-from app.chat.assembly import build_messages, compose_system_prompt
+from app.chat.assembly import build_messages, compose_system_prompt, instruction_prompt_of
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
 from app.core.config import settings
@@ -344,7 +344,9 @@ async def chat_events(
     result = TurnResult()
     t0 = time.perf_counter()
     async for ev in run_turn(
-        provider, req, citations, result, executor=executor, max_iters=settings.tool_max_iterations
+        provider, req, citations, result, executor=executor,
+        max_iters=settings.tool_max_iterations,
+        protected_prompt=instruction_prompt_of(req.messages),
     ):
         yield ev
     latency_ms = int((time.perf_counter() - t0) * 1000)
@@ -369,7 +371,9 @@ async def chat_once(
     result = TurnResult()
     t0 = time.perf_counter()
     async for _ev in run_turn(
-        provider, req, citations, result, executor=executor, max_iters=settings.tool_max_iterations
+        provider, req, citations, result, executor=executor,
+        max_iters=settings.tool_max_iterations,
+        protected_prompt=instruction_prompt_of(req.messages),
     ):
         pass
     latency_ms = int((time.perf_counter() - t0) * 1000)
