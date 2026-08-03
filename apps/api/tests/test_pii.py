@@ -48,6 +48,36 @@ def test_regression_personal_gmail_is_detected() -> None:
     assert _kinds("just email founder.personal@gmail.com directly").get("email") == 1
 
 
+# The shape the live knowledge base actually had. Found by running the audit script against
+# the real corpus, not by writing a test: PDF extraction turned the ☎ glyph into a \x01
+# control character and the number's internal spacing into tabs, and libphonenumber matched
+# **nothing** in that text. The one document Phase B exists for was invisible to the detector.
+PDF_EXTRACTED = "Contact\n\x01 founder.personal@gmail.com | \x01 +91\t93453\t27506\n"
+
+
+def test_regression_pdf_extracted_contact_line_is_detected() -> None:
+    flags = _kinds(PDF_EXTRACTED)
+    assert flags.get("email") == 1
+    assert flags.get("phone") == 1, "control characters and tabs must not hide a phone number"
+
+
+def test_offsets_stay_valid_against_the_original_text() -> None:
+    """The cleaned copy is length-preserving, so a redaction slices the right span."""
+    for m in find_pii(PDF_EXTRACTED, regions=REGIONS):
+        assert PDF_EXTRACTED[m.start : m.end] == m.value
+    out, counts = output_guard.redact_pii(PDF_EXTRACTED, build_allowlist([]), regions=REGIONS)
+    assert counts == {"email": 1, "phone": 1}
+    assert "founder.personal@gmail.com" not in out
+    assert "93453" not in out
+
+
+def test_nonbreaking_spaces_do_not_hide_a_number() -> None:
+    # chr() rather than a literal or an escape: both are invisible in a diff, and ruff
+    # (correctly) refuses ambiguous whitespace in source.
+    nbsp = chr(0xA0)
+    assert _kinds(f"call us on +91{nbsp}93453{nbsp}27506").get("phone") == 1
+
+
 def test_bare_digit_run_needs_phone_context() -> None:
     """The precision knife-edge: a valid IN mobile and a 10-digit order id are the same string."""
     assert _kinds("call 9345327506 today").get("phone") == 1  # context word

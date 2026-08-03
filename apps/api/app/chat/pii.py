@@ -28,6 +28,7 @@ allowlist lives with the caller because "our own support line" is org-level conf
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Literal
 
@@ -87,7 +88,42 @@ def is_allowlisted(value: str, allowlist: set[str]) -> bool:
     return _normalize_contact(value) in allowlist
 
 
-def _phone_matches(text: str, regions: list[str]) -> list[PiiMatch]:
+def _matchable(text: str) -> str:
+    """A scannable copy of `text` with **exactly the same length**, so offsets stay valid.
+
+    Found against the live corpus, not in a test. The knowledge base that leaked is
+    PDF-extracted: the `☎` glyph before the number arrived as a `\\x01` control character and
+    the number's internal spacing as **tabs**. `PhoneNumberMatcher` finds **zero** numbers in
+    that text and **two** once both are turned into ordinary spaces — so the one document
+    Phase B exists for was invisible to the phone detector. Non-breaking spaces do the same.
+
+    Tabs are converted and newlines are not, which is the minimum that works: measured against
+    that document, keeping `\\t` yields 0 matches and converting it yields 2. Newlines stay so
+    the address pattern and the phone matcher still see line boundaries rather than one run-on
+    string, which would invent numbers that span two lines.
+
+    Length-preserving is the point: `find_pii` returns offsets that the output guard slices the
+    *original* string with, so NFKC (which can change length, `ﬁ` → `fi`) is not usable here.
+    Every offending character maps to exactly one space.
+    """
+    return "".join(
+        ch
+        if ch == "\n"
+        else " "
+        if unicodedata.category(ch).startswith("C") or ch.isspace()
+        else ch
+        for ch in text
+    )
+
+
+def _phone_matches(scan: str, original: str, regions: list[str]) -> list[PiiMatch]:
+    """`scan` is the length-preserving cleaned copy; `original` is what the caller will slice.
+
+    Matching happens on `scan` (tabs and control characters gone), but the reported `value`
+    comes from `original`, so a caller comparing it against an allowlist or logging a length
+    sees the text as it really is rather than our cleaned rendering of it.
+    """
+    text = scan
     seen: dict[tuple[int, int], PiiMatch] = {}
     # `None` finds numbers written with an explicit +country code in any country; each named
     # region additionally finds locally-formatted numbers for that country.
@@ -104,7 +140,9 @@ def _phone_matches(text: str, regions: list[str]) -> list[PiiMatch]:
                     # A bare digit run with no formatting and no phone word: far more likely
                     # an order or invoice reference, and redacting those breaks real answers.
                     continue
-                seen[(m.start, m.end)] = PiiMatch("phone", raw, m.start, m.end)
+                seen[(m.start, m.end)] = PiiMatch(
+                    "phone", original[m.start : m.end], m.start, m.end
+                )
         except Exception:  # a bad region string must never break a reply
             continue
     return list(seen.values())
@@ -120,18 +158,22 @@ def find_pii(
     text = text or ""
     if not text.strip():
         return []
+    # Same length as `text`, so every offset below indexes the original correctly.
+    scan = _matchable(text)
     found: list[PiiMatch] = [
-        PiiMatch("email", m.group(0), m.start(), m.end()) for m in _EMAIL.finditer(text)
+        PiiMatch("email", text[m.start() : m.end()], m.start(), m.end())
+        for m in _EMAIL.finditer(scan)
     ]
     email_spans = [(m.start, m.end) for m in found]
-    for pm in _phone_matches(text, regions or []):
+    for pm in _phone_matches(scan, text, regions or []):
         # A phone-looking run inside an email address is part of the address, not a number.
         if any(s <= pm.start < e for s, e in email_spans):
             continue
         found.append(pm)
     if include_addresses:
         found.extend(
-            PiiMatch("address", m.group(0), m.start(), m.end()) for m in _ADDRESS.finditer(text)
+            PiiMatch("address", text[m.start() : m.end()], m.start(), m.end())
+            for m in _ADDRESS.finditer(scan)
         )
     return sorted(found, key=lambda m: m.start)
 

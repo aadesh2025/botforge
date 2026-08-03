@@ -58,5 +58,8 @@ clean-devdata: ## Remove ephemeral @example.com test users/orgs + the live_demo 
 provision: ## Provision a client end-to-end: make provision NAME="Acme Co" EMAIL=owner@acme.com
 	node scripts/provision-client.mjs --name "$(NAME)" --email "$(EMAIL)" --plan "$(or $(PLAN),starter)"
 
+audit-kb-pii: ## Scan every knowledge base for contact details and secrets (read-only)
+	cd apps/api && ./.venv/Scripts/python.exe ../../scripts/audit_kb_pii.py
+
 test-scripts: ## Unit-test the provisioning script's helpers
 	node --test scripts/provision-client.test.mjs
