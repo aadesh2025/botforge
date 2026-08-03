@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.crypto import decrypt
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.llm import catalog
 from app.llm.anthropic import AnthropicProvider
 from app.llm.base import ChatProvider, EmbeddingProvider, ProviderError
 from app.llm.embeddings import OllamaEmbeddingProvider
@@ -24,6 +25,7 @@ from app.llm.openai_compatible import (
     CustomProvider,
     GroqProvider,
     OllamaProvider,
+    OpenAICompatibleProvider,
     OpenAIProvider,
     OpenRouterProvider,
 )
@@ -36,41 +38,13 @@ log = get_logger("llm.registry")
 ProviderResolver = Callable[..., Awaitable["ChatProvider"]]
 
 # provider -> catalog metadata. `requires_key`: needs an API key to work at all.
-PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
-    "groq": {
-        "label": "Groq",
-        "free": True,
-        "requires_key": True,
-        "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
-    },
-    "gemini": {
-        "label": "Google Gemini",
-        "free": True,
-        "requires_key": True,
-        "models": ["gemini-1.5-flash", "gemini-1.5-pro"],
-    },
-    "ollama": {"label": "Ollama (local)", "free": True, "requires_key": False, "models": ["llama3.1", "qwen2.5"]},
-    "openrouter": {
-        "label": "OpenRouter",
-        "free": True,
-        "requires_key": True,
-        "models": ["meta-llama/llama-3.1-70b-instruct:free"],
-    },
-    "openai": {
-        "label": "OpenAI",
-        "free": False,
-        "requires_key": True,
-        "models": ["gpt-4o", "gpt-4o-mini", "gpt-4.1-mini"],
-    },
-    "anthropic": {
-        "label": "Anthropic",
-        "free": False,
-        "requires_key": True,
-        "models": ["claude-sonnet-5", "claude-haiku-4-5-20251001"],
-    },
-    "custom": {"label": "Custom endpoint", "free": True, "requires_key": False, "models": []},
-}
+# Derived from `llm/catalog.py`, which is the source of truth (provider list, model lists,
+# endpoints, pricing). This name and shape are kept for the existing callers.
+PROVIDER_CATALOG: dict[str, dict[str, Any]] = catalog.legacy_catalog()
 
+# Providers with a platform-wide key in the environment. The catalog's other providers are
+# bring-your-own-key only: an org supplies one under Settings → Provider keys, which is stored
+# encrypted per-org rather than shared across every tenant on the deployment.
 _ENV_KEY = {
     "groq": "groq_api_key",
     "gemini": "gemini_api_key",
@@ -78,6 +52,21 @@ _ENV_KEY = {
     "openai": "openai_api_key",
     "anthropic": "anthropic_api_key",
 }
+
+
+def env_key_for(provider: str) -> str | None:
+    """The platform env key for a provider, or None when unset.
+
+    Blank/whitespace-only values read as unset — `.env.example` ships placeholder lines and a
+    comment-only value already cost this project a live outage (ADR-044).
+    """
+    attr = _ENV_KEY.get(provider)
+    if attr is None:
+        return None
+    value = getattr(settings, attr, None)
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
 
 
 def build_chat_provider(
@@ -105,6 +94,17 @@ def build_chat_provider(
         return CustomProvider(base_url, api_key, transport=transport)
     if provider == "fake":
         return FakeChatProvider()
+    # Providers that speak the OpenAI wire format at a fixed endpoint need no adapter of their
+    # own — the catalog entry carries the base URL. A stored credential may still override it
+    # (a regional endpoint or a proxy in front of the vendor).
+    spec = catalog.get_provider(provider)
+    if spec is not None and spec.kind == "openai_compatible":
+        url = base_url or spec.base_url
+        if not url:
+            raise AppError(
+                "llm.custom_base_url_required", f"A base_url is required for '{provider}'.", 400
+            )
+        return OpenAICompatibleProvider(url, api_key, name=provider, transport=transport)
     raise AppError("llm.unknown_provider", f"Unknown provider '{provider}'.", 400)
 
 
@@ -135,12 +135,7 @@ async def resolve_credential(
         api_key = decrypt(chosen.api_key_enc) if chosen.api_key_enc else None
         return api_key, chosen.base_url
 
-    env_attr = _ENV_KEY.get(provider)
-    env_key = getattr(settings, env_attr) if env_attr else None
-    # Treat blank/whitespace-only env values as unset (e.g. placeholder .env lines).
-    if isinstance(env_key, str) and not env_key.strip():
-        env_key = None
-    return env_key, None
+    return env_key_for(provider), None
 
 
 async def get_chat_provider(

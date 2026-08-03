@@ -15,8 +15,38 @@ router = APIRouter(prefix="/v1/credentials", tags=["credentials"])
 
 
 @router.get("/providers", response_model=list[schemas.ProviderInfo])
-async def list_providers(_: OrgContext = Depends(current_org)) -> list[schemas.ProviderInfo]:
-    return service.list_providers()
+async def list_providers(
+    session: AsyncSession = Depends(get_session), ctx: OrgContext = Depends(current_org)
+) -> list[schemas.ProviderInfo]:
+    return await service.list_providers(session, ctx)
+
+
+@router.get("/providers/{provider}/models", response_model=schemas.ProviderModels)
+async def list_provider_models(
+    provider: str,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.ProviderModels:
+    return await service.list_provider_models(session, ctx, provider)
+
+
+@router.put("/providers/{provider}", response_model=schemas.CredentialOut)
+async def upsert_provider_key(
+    provider: str,
+    data: schemas.ProviderKeyUpsert,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.CredentialOut:
+    return await service.upsert_provider_key(session, ctx, provider, data)
+
+
+@router.delete("/providers/{provider}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_provider_key(
+    provider: str,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> None:
+    await service.delete_provider_key(session, ctx, provider)
 
 
 @router.get("", response_model=list[schemas.CredentialOut])
