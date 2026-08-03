@@ -4,13 +4,24 @@
  * fixtures now and swapped to the generated OpenAPI client later without churn.
  */
 
+/** Mirrors `PROVIDER_NAMES` in `apps/api/app/llm/catalog.py`, which is the source of truth.
+ *
+ * The names are pinned rather than widened to `string` so a typo in a draft is a type error,
+ * but nothing reads a *model* list from the client any more — that comes from
+ * `GET /v1/credentials/providers`, because only the server knows which keys an org holds. */
 export type Provider =
   | "groq"
   | "gemini"
   | "ollama"
   | "openrouter"
+  | "cerebras"
   | "openai"
   | "anthropic"
+  | "mistral"
+  | "deepseek"
+  | "xai"
+  | "together"
+  | "fireworks"
   | "custom";
 
 export type AgentStatus = "live" | "draft" | "paused";

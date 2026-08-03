@@ -88,20 +88,6 @@ export interface AgentDraft {
   widget: WidgetConfig;
 }
 
-export const providerCatalog: Record<Provider, { label: string; models: string[]; free: boolean }> = {
-  groq: {
-    label: "Groq",
-    free: true,
-    models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
-  },
-  gemini: { label: "Google Gemini", free: true, models: ["gemini-1.5-flash", "gemini-1.5-pro"] },
-  ollama: { label: "Ollama (local)", free: true, models: ["llama3.1", "qwen2.5", "phi3"] },
-  openrouter: { label: "OpenRouter", free: true, models: ["meta-llama/llama-3.1-70b-instruct:free"] },
-  openai: { label: "OpenAI", free: false, models: ["gpt-4o", "gpt-4o-mini", "gpt-4.1-mini"] },
-  anthropic: { label: "Anthropic", free: false, models: ["claude-sonnet-5", "claude-haiku-4-5-20251001"] },
-  custom: { label: "Custom endpoint", free: false, models: ["custom-model"] },
-};
-
 export const toneOptions = [
   "Friendly",
   "Professional",
@@ -113,6 +99,11 @@ export const toneOptions = [
 
 // The fake `knowledgeBases`, `tools`, `versions` and `makeDraft("Support Concierge")`
 // fixtures that used to live here were removed on 2026-07-30: every screen that once
-// rendered them now reads the real API (see docs/PROGRESS.md). What remains is the
-// builder's *type* vocabulary plus two static config lists, neither of which is
-// per-tenant data — see ADR-041 for why `providerCatalog` is still a client-side list.
+// rendered them now reads the real API (see docs/PROGRESS.md).
+//
+// `providerCatalog` followed on 2026-08-03 (the roadmap item ADR-041 left open). It listed
+// each provider's models client-side, so the Model tab offered whatever was true when the
+// list was typed — including `mixtral-8x7b-32768`, which Groq had already retired — and it
+// could not know which providers this org actually holds a key for. Both now come from
+// `GET /v1/credentials/providers`. What remains here is the builder's *type* vocabulary plus
+// `toneOptions`, which is genuinely static copy rather than per-tenant data.

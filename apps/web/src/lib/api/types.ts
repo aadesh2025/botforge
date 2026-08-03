@@ -98,12 +98,45 @@ export interface ApiAgentTemplate {
   suggested_next_step: string | null;
 }
 
+export interface ApiModelOption {
+  id: string;
+  label: string;
+  context: number | null;
+  tools: boolean;
+  note: string | null;
+  /** False when no per-1K rate is published, so a $0 cost means "not tracked", not "free". */
+  pricing_known: boolean;
+}
+
+/** How the server resolved this provider's key — see `resolve_credential()`. */
+export type ApiKeySource = "org" | "env" | "not_required" | "none";
+
 export interface ApiProviderInfo {
   name: string;
   label: string;
   free: boolean;
   requires_key: boolean;
+  /** Model ids only. Prefer `available_models` for anything user-facing. */
   models: string[];
+  available_models: ApiModelOption[];
+  /** True when this org can actually run the provider today. */
+  configured: boolean;
+  key_source: ApiKeySource;
+  masked_key: string | null;
+  credential_id: string | null;
+  base_url: string | null;
+  base_url_required: boolean;
+  api_key_url: string | null;
+  key_hint: string | null;
+  description: string | null;
+}
+
+export interface ApiProviderModels {
+  provider: string;
+  /** `catalog` means discovery was unavailable and these are the static defaults. */
+  source: "live" | "catalog";
+  models: ApiModelOption[];
+  error: string | null;
 }
 
 export interface ApiCredential {

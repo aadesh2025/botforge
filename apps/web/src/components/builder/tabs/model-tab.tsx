@@ -18,25 +18,85 @@ import {
 } from "@/components/ui/select";
 import { useBuilder } from "@/lib/store/builder";
 import { useSession } from "@/lib/store/session";
-import { listCredentials } from "@/lib/api/credentials";
-import { providerCatalog } from "@/lib/mock/builder";
+import { listProviderModels, listProviders } from "@/lib/api/credentials";
+import type { ApiProviderInfo } from "@/lib/api/types";
 import type { Provider } from "@/lib/mock/types";
 import type { FeatureToggles } from "@/lib/mock/builder";
+
+/** Providers this org holds a key for, plus whichever one the agent is already on.
+ *
+ * The pinned entry matters: an agent live on a provider whose key was since removed must not
+ * have its model silently rewritten by the picker just because the option vanished. It stays
+ * selectable and flagged, and only an operator can move it. */
+function useSelectableProviders(current: string) {
+  const orgId = useSession((s) => s.activeOrgId);
+  const { data, isLoading } = useQuery({
+    queryKey: ["providers", orgId],
+    queryFn: listProviders,
+    enabled: Boolean(orgId),
+  });
+  const all = data ?? [];
+  const configured = all.filter((p) => p.configured);
+  const currentSpec = all.find((p) => p.name === current);
+  const options =
+    currentSpec && !currentSpec.configured ? [...configured, currentSpec] : configured;
+  return { options, all, configured, isLoading, byName: new Map(all.map((p) => [p.name, p])) };
+}
 
 export function ModelTab() {
   const draft = useBuilder((s) => s.draft);
   const update = useBuilder((s) => s.update);
+  const orgId = useSession((s) => s.activeOrgId);
+  const providerName = draft?.model.provider ?? "";
+  const { options, configured, byName, isLoading } = useSelectableProviders(providerName);
+  // Ask the provider what it can actually run; the catalogue is only the fallback.
+  const models = useQuery({
+    queryKey: ["provider-models", orgId, providerName],
+    queryFn: () => listProviderModels(providerName),
+    enabled: Boolean(orgId && providerName),
+    staleTime: 5 * 60 * 1000,
+  });
+
   if (!draft) return null;
   const m = draft.model;
-  // First provider not already used as the primary or an existing fallback.
-  const nextFallback = (Object.keys(providerCatalog) as Provider[]).find(
-    (k) => k !== m.provider && !m.fallbacks.some((f) => f.provider === k),
-  );
-  const provider = providerCatalog[m.provider];
+  const provider = byName.get(m.provider);
+  // First *configured* provider not already used as the primary or an existing fallback.
+  const nextFallback = configured.find(
+    (p) => p.name !== m.provider && !m.fallbacks.some((f) => f.provider === p.name),
+  )?.name as Provider | undefined;
+
+  const modelOptions = models.data?.models ?? provider?.available_models ?? [];
+  // Same reasoning as the pinned provider: a model that has been retired upstream stays
+  // selected until someone changes it deliberately.
+  const modelIds = modelOptions.map((o) => o.id);
+  const shownModels = modelIds.includes(m.model)
+    ? modelOptions
+    : [...modelOptions, { id: m.model, label: `${m.model} (not offered)` }];
+
+  if (!isLoading && configured.length === 0) {
+    return (
+      <div className="space-y-6">
+        <SectionCard title="Provider & model" description="No LLM provider is connected yet.">
+          <div className="rounded-md border border-border bg-surface-2/50 p-5 text-center">
+            <p className="text-sm text-text">This agent has no model it can run.</p>
+            <p className="mx-auto mt-1 max-w-md text-xs text-muted">
+              Add an API key for a provider and its models become selectable here.
+            </p>
+            <Link
+              href="/settings/credentials"
+              className="mt-3 inline-block text-sm text-ember-soft underline underline-offset-2"
+            >
+              Add a provider key
+            </Link>
+          </div>
+        </SectionCard>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <SectionCard title="Provider & model" description="Free-first: Groq is the fastest free default.">
+      <SectionCard title="Provider & model" description="Only providers you hold a key for are listed.">
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Provider">
             <Select
@@ -44,7 +104,9 @@ export function ModelTab() {
               onValueChange={(v) =>
                 update((d) => {
                   d.model.provider = v as Provider;
-                  d.model.model = providerCatalog[v as Provider].models[0];
+                  // Seed with the new provider's first model so the pair is never mismatched;
+                  // the live list loads a moment later and the operator can refine it.
+                  d.model.model = byName.get(v)?.available_models[0]?.id ?? "";
                 })
               }
             >
@@ -52,10 +114,11 @@ export function ModelTab() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(providerCatalog) as Provider[]).map((key) => (
-                  <SelectItem key={key} value={key}>
-                    {providerCatalog[key].label}
-                    {providerCatalog[key].free ? "  · free" : ""}
+                {options.map((p) => (
+                  <SelectItem key={p.name} value={p.name}>
+                    {p.label}
+                    {p.free ? "  · free" : ""}
+                    {p.configured ? "" : "  · no key"}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -67,22 +130,27 @@ export function ModelTab() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {provider.models.map((model) => (
-                  <SelectItem key={model} value={model}>
-                    {model}
+                {shownModels.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </Field>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={provider.free ? "success" : "warn"}>
-            {provider.free ? "Free tier" : "Paid provider"}
-          </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          {provider ? (
+            <Badge variant={provider.free ? "success" : "warn"}>
+              {provider.free ? "Free tier" : "Paid provider"}
+            </Badge>
+          ) : null}
+          {provider && !provider.configured ? (
+            <Badge variant="error">No key — this agent cannot reply</Badge>
+          ) : null}
           {m.fallbacks.length > 0 ? (
             <Badge variant="default">
-              Fallback: {m.fallbacks.map((f) => providerCatalog[f.provider].label).join(" → ")}
+              Fallback: {m.fallbacks.map((f) => byName.get(f.provider)?.label ?? f.provider).join(" → ")}
             </Badge>
           ) : null}
         </div>
@@ -99,7 +167,7 @@ export function ModelTab() {
                   onValueChange={(v) =>
                     update((d) => {
                       d.model.fallbacks[i].provider = v as Provider;
-                      d.model.fallbacks[i].model = providerCatalog[v as Provider].models[0];
+                      d.model.fallbacks[i].model = byName.get(v)?.available_models[0]?.id ?? "";
                     })
                   }
                 >
@@ -107,11 +175,12 @@ export function ModelTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(providerCatalog) as Provider[])
-                      .filter((k) => k !== m.provider)
-                      .map((key) => (
-                        <SelectItem key={key} value={key}>
-                          {providerCatalog[key].label}
+                    {options
+                      .filter((p) => p.name !== m.provider)
+                      .map((p) => (
+                        <SelectItem key={p.name} value={p.name}>
+                          {p.label}
+                          {p.configured ? "" : "  · no key"}
                         </SelectItem>
                       ))}
                   </SelectContent>
@@ -124,17 +193,19 @@ export function ModelTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {providerCatalog[f.provider].models.map((model) => (
-                      <SelectItem key={model} value={model}>
-                        {model}
-                      </SelectItem>
-                    ))}
+                    {(byName.get(f.provider)?.available_models ?? [{ id: f.model, label: f.model }]).map(
+                      (model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          {model.label}
+                        </SelectItem>
+                      ),
+                    )}
                   </SelectContent>
                 </Select>
                 <Button
                   variant="ghost"
                   size="sm"
-                  aria-label={`Remove ${providerCatalog[f.provider].label} fallback`}
+                  aria-label={`Remove ${byName.get(f.provider)?.label ?? f.provider} fallback`}
                   onClick={() => update((d) => void d.model.fallbacks.splice(i, 1))}
                 >
                   <X className="size-4" />
@@ -150,7 +221,7 @@ export function ModelTab() {
                   if (nextFallback === undefined) return;
                   d.model.fallbacks.push({
                     provider: nextFallback,
-                    model: providerCatalog[nextFallback].models[0],
+                    model: byName.get(nextFallback)?.available_models[0]?.id ?? "",
                   });
                 })
               }
@@ -159,13 +230,14 @@ export function ModelTab() {
             </Button>
             {m.fallbacks.length === 0 ? (
               <p className="text-xs text-faint">
-                No fallback configured — if {provider.label} fails, the turn returns an error.
+                No fallback configured — if {provider?.label ?? m.provider} fails, the turn returns an
+                error.
               </p>
             ) : null}
           </div>
         </Field>
         <Field label="Credentials" description="Which key this agent will use for the selected provider.">
-          <CredentialStatus provider={m.provider} />
+          <CredentialStatus provider={provider} name={m.provider} />
         </Field>
       </SectionCard>
 
@@ -290,41 +362,46 @@ function FeatureRow({
   );
 }
 
-/** Shows which key this agent will actually use, from the real credentials API.
+/** Shows which key this agent will actually use.
  *
  * The backend resolves keys agent-scoped → org default → platform env key, so the old
  * "Organization default key / Bring your own / Custom base URL" select was doubly wrong: it
- * was never persisted, and the choice isn't the agent's to make. */
-function CredentialStatus({ provider }: { provider: Provider }) {
-  const activeOrgId = useSession((s) => s.activeOrgId);
-  const { data, isLoading } = useQuery({
-    queryKey: ["credentials", activeOrgId],
-    queryFn: listCredentials,
-    enabled: Boolean(activeOrgId),
-  });
-
-  if (isLoading) {
+ * was never persisted, and the choice isn't the agent's to make. `key_source` reports which
+ * of those three the server would land on, so this can state it rather than infer it. */
+function CredentialStatus({ provider, name }: { provider: ApiProviderInfo | undefined; name: string }) {
+  if (!provider) {
     return <p className="text-sm text-muted">Checking credentials…</p>;
   }
 
-  const forProvider = (data ?? []).filter((c) => c.provider === provider);
-  const chosen = forProvider.find((c) => c.is_default) ?? forProvider[0];
-  const label = providerCatalog[provider].label;
-
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
-      {chosen ? (
+      {provider.key_source === "org" && (
         <>
           <Badge variant="success">Key configured</Badge>
           <span className="text-muted">
-            {chosen.label || `${label} key`} · <span className="font-mono text-xs">{chosen.masked_key}</span>
+            {provider.label} · <span className="font-mono text-xs">{provider.masked_key}</span>
           </span>
         </>
-      ) : (
+      )}
+      {provider.key_source === "env" && (
         <>
-          <Badge variant="warn">No stored key</Badge>
+          <Badge variant="success">Platform key</Badge>
           <span className="text-muted">
-            Falls back to the platform environment key for {label}, if one is set.
+            Using this deployment&apos;s shared {provider.label} key. Add your own to override it.
+          </span>
+        </>
+      )}
+      {provider.key_source === "not_required" && (
+        <>
+          <Badge variant="default">No key needed</Badge>
+          <span className="text-muted">{provider.label} runs without an API key.</span>
+        </>
+      )}
+      {provider.key_source === "none" && (
+        <>
+          <Badge variant="error">No key</Badge>
+          <span className="text-muted">
+            Every reply on {name} will fail until a key is added.
           </span>
         </>
       )}

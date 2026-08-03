@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { CornerDownLeft, FileText, RotateCcw, Sparkles, Wrench } from "lucide-react";
 import { useBuilder } from "@/lib/store/builder";
+import { useSession } from "@/lib/store/session";
 import { playgroundStream } from "@/lib/api/agents";
-import { providerCatalog } from "@/lib/mock/builder";
+import { listProviders } from "@/lib/api/credentials";
 import { cn } from "@/lib/utils";
 
 interface Msg {
@@ -19,6 +21,13 @@ interface Msg {
 export function Playground() {
   const draft = useBuilder((s) => s.draft);
   const agentId = useBuilder((s) => s.agentId);
+  const orgId = useSession((s) => s.activeOrgId);
+  // Shares the Model tab's cache entry, so this costs no extra request in the builder.
+  const providers = useQuery({
+    queryKey: ["providers", orgId],
+    queryFn: listProviders,
+    enabled: Boolean(orgId),
+  });
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -83,7 +92,9 @@ export function Playground() {
     setMessages(draft ? [{ id: idRef.current++, role: "assistant", text: draft.persona.welcomeMessage }] : []);
 
   if (!draft) return null;
-  const modelLabel = `${providerCatalog[draft.model.provider]?.label ?? draft.model.provider} · ${draft.model.model}`;
+  const providerLabel =
+    providers.data?.find((p) => p.name === draft.model.provider)?.label ?? draft.model.provider;
+  const modelLabel = `${providerLabel} · ${draft.model.model}`;
 
   return (
     <div className="flex h-[calc(100vh-8.5rem)] flex-col overflow-hidden rounded-lg border border-border bg-surface">

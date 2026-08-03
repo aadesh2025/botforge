@@ -1,14 +1,9 @@
-import type { AgentStatus, Channel, Provider } from "./mock/types";
+import type { AgentStatus, Channel } from "./mock/types";
 
-export const providerLabel: Record<Provider, string> = {
-  groq: "Groq",
-  gemini: "Gemini",
-  ollama: "Ollama",
-  openrouter: "OpenRouter",
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  custom: "Custom",
-};
+// `providerLabel` lived here until 2026-08-03. It had no importers and was a third copy of
+// the provider labels (after `providerCatalog` and the server catalogue); display names now
+// come from `GET /v1/credentials/providers` so they cannot disagree with what the deployment
+// can actually run.
 
 export const channelLabel: Record<Channel, string> = {
   web: "Web",
