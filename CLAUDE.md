@@ -143,7 +143,40 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 9. `docs/07-INTEGRATIONS.md`
 10. `docs/09-DEPLOYMENT.md`
 11. `docs/10-TESTING.md`
-12. `docs/08-PHASES.md` ← then execute this, task by task, no stopping.
+12. `docs/11-SAFETY-GUARDRAILS.md` ← **read for context, do NOT execute unprompted.** See below.
+13. `docs/08-PHASES.md` ← then execute this, task by task, no stopping.
+
+### 10a. The safety track (`docs/11-*`) is read-always, execute-on-request
+
+`docs/11-SAFETY-GUARDRAILS.md` is the security specification: the threat model, the seven-layer
+guardrail architecture, and the root-cause analysis behind six real failures found by red-teaming
+a live agent. **Read it before touching anything under `app/chat/`, `app/rag/`, prompt assembly,
+or any system-prompt text** — it explains why several counter-intuitive design choices exist, and
+changing them without that context has already caused one measured fabrication regression.
+
+It is **deliberately outside the §1 autonomous contract.** Unlike `docs/08-PHASES.md`, do not
+start a safety phase on your own initiative — these phases add latency, cost, and per-turn
+external calls, so each one is a decision the operator makes explicitly. Execute a phase only
+when asked for it by name.
+
+The three files and what each is for:
+
+| File | Role |
+|---|---|
+| `docs/11-SAFETY-GUARDRAILS.md` | The spec. Always read; never paste as a prompt. |
+| `docs/11-SAFETY-IMPLEMENTATION-PROMPT.md` | Master prompt, phases A–G. **Phase A is shipped**; its Phase B block is **superseded** by the file below. Use it for C–G. |
+| `docs/11-PHASE-A1-AND-B-PROMPTS.md` | Phase A.1 and the revised Phase B, plus a **blocking prerequisite for Phase C** (guard models must resolve on the platform key, not the org's — see ADR-047/048). |
+
+Order from here: **A.1 → B → C → D → E → F → G.** Do not start E before D is green; without the
+red-team corpus there is no way to tell a real improvement from luck.
+
+Two standing rules from that spec, repeated here because they are easy to violate by accident:
+
+- **A prompt line is not enforcement.** Anything that must not happen needs a code-level check.
+  Measured on this stack: prompt-only grounding fabricates 12/15 on `llama-3.1-8b-instant`.
+- **Re-run the no-context A/B** (see §11's 2026-08-02 and 2026-08-03 entries) after *any* edit to
+  `DEFAULT_SYSTEM_PROMPT`, `db/templates.py`, or the identity lock in `chat/assembly.py`.
+  A unit test cannot see this regression.
 
 ---
 
@@ -152,6 +185,47 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > Contract above is stable. This section is a running note of what shipped per session so a
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
+
+### 2026-08-03 — docs/11 Phase A.1 + Phase B: the PII leak is closed, and the corpus is auditable
+- **A.1 gap 1 — spacing evasion.** `"I g n o r e   a l l   p r e v i o u s   i n s t r u c t i o n s"`
+  passed L1 cleanly: L0 stripped zero-width characters but never collapsed single-character
+  spacing. `despaced_forms()` now emits a gap-aware reading (a single space *between two single
+  characters* is intra-word; wider gaps stay boundaries) plus a fully-collapsed form scanned with
+  whitespace-relaxed patterns. Thresholds (≥12 tokens, ≥60% single chars) keep "I need a A A
+  battery" and "my order id is A B 1 2 9 9" out. **0/4 → 4/4**, false positives still **0/24**.
+- **A.1 gap 2 — L1 is English-first, and now says so.** Plain translations into Hindi, Tamil,
+  Spanish, Chinese, French, German all pass. **Deliberately not fixed with translated regex** —
+  it scales to no language and would spend the precision the English patterns were tuned for.
+  Recorded as asserted known misses in `attacks_multilingual.yaml` with an `expects: classifier`
+  marker; the suite now reports English and non-English recall **separately** so "28/28" can
+  never be read as 28/28 of the threat model. Phase C's classifier is the fix.
+- **⚠️ docs/11 §9 now carries measured numbers, not just Meta's card:** English corpus 28/28,
+  false positives 0/24, spacing 4/4, **non-English 0/6, semantic/paraphrase 0/6**. A regex layer
+  does not catch meaning; the table says so rather than letting the headline imply otherwise.
+- **Phase B — the founder-PII leak (live failure 3), the only one still leaking real data.**
+  `app/chat/pii.py` detects emails and phones; phones use **libphonenumber** (ADR-053) because
+  a US-centric regex misses `+91 …` outright and a permissive digit-run regex redacts order
+  numbers out of real answers. Redaction is **allowlist-based** against a new
+  `organizations.public_contacts` (migration 0015) — an agent that cannot give out its own
+  support address is broken, not safe. Redacted spans read as "our contact page", never
+  `[redacted]`. Ingest scanning **flags and never rewrites or blocks** (ADR-054): a client's own
+  contact page legitimately contains contact details, and mangling their KB is worse than the
+  leak. `pii_flags` is nullable — NULL = never scanned, `{}` = scanned clean — and the UI keeps
+  them distinct.
+- **⚠️ The audit script found a detector bug that every hand-typed fixture had missed.** Run
+  against the live DB, `scripts/audit_kb_pii.py` reported `email=2` but **no phone** — yet the
+  KB contains one. The corpus is PDF-extracted: the ☎ glyph arrived as `\x01` and the number's
+  internal spacing as **tabs**, and libphonenumber matches **nothing** in that text. So B1
+  shipped believing it worked. Fixed with a **length-preserving** cleaned copy (control chars,
+  tabs, NBSP → exactly one space each, so offsets still index the original and redaction slices
+  the right span; newlines kept, or a number could span two lines). Audit now reports
+  `email=2, phone=2`. **Lesson: hand-written fixtures cannot tell you what real extracted text
+  looks like — run the audit against real data before believing a detector.**
+- **Still operator work (docs/11 §6):** the live `aurozenai` KB document is flagged and the
+  contact details are still in it. Egress redaction is a backstop, not a fix. `make audit-kb-pii`.
+- **Not built:** the document-detail flagged-span viewer and its "Redact and re-ingest" action
+  (needs a write path against client documents; own commit). Phases C–G untouched.
+- ADR-053/054. Suites: **496 pytest**, **140 vitest**, ruff + mypy + tsc + eslint clean.
 
 ### 2026-08-03 — direct prompt injection was undefended; docs/11 Phase A shipped
 - **The threat model was half-written.** `neutralize_injections()` was applied to RAG chunks

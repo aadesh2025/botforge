@@ -180,7 +180,27 @@ for prod; local default in dev.
   wording are being suppressed; the knowledge-base content is deliberately **not** part of the
   comparison, so quoting retrieved documents never counts.
 
+- `GUARD_PII_EGRESS_ENABLED` (default `true`) — redact emails and phone numbers from a reply
+  unless the org has allowlisted them (docs/11 Phase B, ADR-053). Secret redaction runs
+  regardless of this flag. The allowlist is `Organization.public_contacts`, **not** an env var:
+  it is per-tenant, and an empty one means the agent shares no contact details at all — safe,
+  but not useful, so provisioning should seed it with the client's real support address.
+- `GUARD_PII_PHONE_REGIONS` (default `IN,US,GB`) — ISO country codes used to read phone numbers
+  written *without* a country code, most likely first. Numbers written with an explicit `+CC`
+  are found regardless. Add a region when a client's customers write local-format numbers from
+  somewhere else; each one is an extra scan pass, so keep the list short.
+- `GUARD_PII_REDACT_ADDRESSES` (default `false`) — street addresses are counted in a document's
+  `pii_flags` but not redacted from replies. Detection precision is materially worse than
+  email/phone ("12 Month Plan" reads as a house number), so this stays off until the
+  false-positive rate is measured on real traffic.
+
 > The Playground bypasses the output guardrail entirely, the same way it withholds an agent's
 > fallback message and re-raises provider errors: an operator testing an agent has to see what
 > the model actually said. Guardrail behaviour is therefore visible on the widget, channels and
 > dashboard chat, but not in the builder's test pane.
+
+> **Finding what is already in a knowledge base:** `make audit-kb-pii` scans every KB across
+> every org and reports counts per document (never the values). It exits non-zero when anything
+> is found. `--apply` backfills `documents.pii_flags` for documents ingested before migration
+> 0015; it never edits document text — removing PII from a client's corpus is an operator
+> decision (ADR-054).
