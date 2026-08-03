@@ -108,6 +108,14 @@ class Organization(Base, UUIDPrimaryKey, TimestampMixin, SoftDeleteMixin):
     #: Org-wide rather than per-agent: a client thinks about their business's CRM, not
     #: about which bot happened to take the message. On by default, with an off switch.
     auto_crm_capture_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    #: Emails / phone numbers / URLs the agent may share freely (docs/11 Phase B). Everything
+    #: else that looks like a contact detail is redacted from replies before a visitor sees it.
+    #:
+    #: An explicit column rather than a key in `settings`, because this is a security control:
+    #: in the generic bag an unrelated settings write could clobber it, and nothing in the model
+    #: would say it existed. Empty means the agent shares no contact details at all, which is
+    #: the safe default but not a useful one — provisioning seeds it from the org's own details.
+    public_contacts: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
 
 

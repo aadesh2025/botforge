@@ -88,6 +88,15 @@ class Settings(BaseSettings):
     # is treated as leakage. Low enough to catch paraphrase-free quoting, high enough that a
     # reply legitimately reusing the agent's own vocabulary is not suppressed.
     guard_output_leak_threshold: float = 0.35
+    # L5 PII egress: redact emails/phones from a reply unless the org allowlisted them.
+    guard_pii_egress_enabled: bool = True
+    # Regions used to read phone numbers written *without* a country code. Numbers written
+    # with an explicit +CC are found regardless. Comma-separated ISO codes, most likely first.
+    guard_pii_phone_regions: str = "IN,US,GB"
+    # Street-address detection is materially less precise than email/phone ("12 Month Plan"
+    # reads as a house number), so it ships flag-only: counted in a document's `pii_flags`,
+    # never redacted from a reply, until the false-positive rate is measured on real traffic.
+    guard_pii_redact_addresses: bool = False
 
     # --- Tools (Phase 9) ---
     # Max tool-call iterations per turn before the runtime forces a final answer.

@@ -28,6 +28,11 @@ dependencies = [
     # Async SMTP: the stdlib `smtplib` is blocking and would stall the event loop on
     # every send. One SMTP client covers every relay (Resend/Postmark/SendGrid/SES/...).
     "aiosmtplib>=3.0",
+    # PII egress detection (docs/11 Phase B). Google's libphonenumber metadata, so a number
+    # is validated against the real numbering plan of its country rather than a regex guess.
+    # The leak that prompted this was an Indian mobile; a US-centric pattern misses it, and a
+    # permissive one redacts order numbers and prices out of ordinary replies. See ADR-053.
+    "phonenumbers>=8.13",
 ]
 
 [dependency-groups]

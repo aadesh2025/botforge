@@ -18,12 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chat import guardrails
 from app.chat.assembly import build_messages, compose_system_prompt
 from app.chat.handoff import trigger_handoff, wants_handoff
+from app.chat.pii import build_allowlist
 from app.chat.runtime import TurnResult, run_turn
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.llm.fake import RefusalProvider
 from app.llm.types import StreamEvent
-from app.models import Agent, AgentVersion, Conversation, Message
+from app.models import Agent, AgentVersion, Conversation, Message, Organization
 from app.rag.agent_retrieval import retrieve_for_version
 from app.rag.retrieval import Citation
 
@@ -181,11 +182,22 @@ class InboundTurn:
             executor=executor, max_iters=settings.tool_max_iterations,
             fallback_message=self.version.fallback_message or _DEFAULT_PROVIDER_FAILURE,
             protected_prompt=system_prompt,
+            pii_allowlist=await self._pii_allowlist(),
         ):
             yield ev
         latency_ms = int((time.perf_counter() - t0) * 1000)
         self.assistant_message = await _finalize_turn(session, conv, self.result, latency_ms, self.message)
         yield StreamEvent(type="message", message_id=str(self.assistant_message.id))
+
+    async def _pii_allowlist(self) -> set[str]:
+        """Contact details this org has published, which the agent may share freely.
+
+        One PK lookup per turn, usually served from the session's identity map. An org that
+        cannot be loaded yields an empty set — "share nothing" — because failing open here
+        would mean a lookup blip re-opens the exact leak this exists to close.
+        """
+        org = await self.session.get(Organization, self.conversation.organization_id)
+        return build_allowlist(list(org.public_contacts or []) if org else [])
 
     async def run(self) -> None:
         """Non-streaming: run the turn to completion (channels send `self.result.content`)."""

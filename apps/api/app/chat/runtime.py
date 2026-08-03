@@ -59,6 +59,7 @@ async def run_turn(
     fallback_message: str | None = None,
     protected_prompt: str | None = None,
     guard_output: bool = True,
+    pii_allowlist: set[str] | None = None,
 ) -> AsyncIterator[StreamEvent]:
     """Stream a turn, forwarding events and accumulating into `result`.
 
@@ -149,7 +150,7 @@ async def run_turn(
 
     # L5 output guard (docs/11 §4-L5). Runs on the accumulated reply, so a streaming client
     # has already rendered it — hence the `replace` event rather than pre-emptive suppression
-    # (ADR-047). `result.content` is corrected here, which is what every non-streaming caller
+    # (ADR-049). `result.content` is corrected here, which is what every non-streaming caller
     # and the persistence path read, so those are protected outright.
     if guard_output and settings.guard_output_enabled and result.content.strip():
         verdict = output_guard.inspect(
@@ -183,7 +184,21 @@ async def run_turn(
             protected_prompt,
             leak_threshold=settings.guard_output_leak_threshold,
             fallback_message=fallback_message,
+            # `None` skips PII redaction entirely (the Playground); an empty set means the org
+            # has published no contacts, so every contact detail is redacted. Those are
+            # different states and must not collapse into one.
+            pii_allowlist=pii_allowlist if settings.guard_pii_egress_enabled else None,
+            pii_regions=[r.strip() for r in settings.guard_pii_phone_regions.split(",") if r.strip()],
+            redact_addresses=settings.guard_pii_redact_addresses,
         )
+        if final.pii_redacted:
+            # Category and count only. Logging the value would move the leak into the log.
+            log.warning(
+                "output_guard_pii_egress",
+                provider=provider.name,
+                model=req.model,
+                redacted=final.pii_redacted,
+            )
         if final.leaked_prompt:
             log.error(
                 "output_guard_prompt_leak",

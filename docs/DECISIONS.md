@@ -18,6 +18,37 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-053: PII egress is allowlist-based, and phone numbers use libphonenumber
+- **Date:** 2026-08-03
+- **Status:** accepted
+- **Context:** Live failure 3 (docs/11 §0) — asked *"can i get your number or gmail"*, the agent
+  returned the founder's personal Gmail and mobile. It was not hallucinating; it retrieved them
+  correctly from a knowledge base that should not have held them. Cleaning the corpus is
+  necessary but not sufficient: the corpus will never be perfectly clean.
+- **Decision:** Redact contact details from replies **unless** they appear on an org-level
+  `public_contacts` allowlist. Detect phone numbers with **`phonenumbers`** (Google's
+  libphonenumber), a new runtime dependency. Replace a redacted span with a natural noun phrase
+  ("our contact page"), never a `[redacted]` token.
+- **Alternatives considered:** *Blocklist the known-bad values* — requires knowing every personal
+  detail in advance, and a new one enters the corpus with every document. *Regex phone matching*
+  — measured against the real leak shape: a US-centric pattern misses `+91 93453 27506`
+  entirely, and a permissive digit-run pattern redacts order numbers, invoice totals and
+  tracking references out of ordinary replies, breaking the product to fix a leak.
+  libphonenumber validates against each country's actual numbering plan. *Redact-everything with
+  no allowlist* — an agent that cannot give out its own support address is broken in a way an
+  operator notices on day one.
+- **Consequences:** One new dependency, justified by it carrying the numbering-plan metadata we
+  would otherwise be approximating. A bare digit run is still ambiguous (a valid Indian mobile
+  and a 10-digit order id are the same string), so a match additionally requires an explicit
+  `+`, internal separators, or a phone word nearby — tests pin both directions. `public_contacts`
+  is an explicit column rather than a key in `Organization.settings`, because in the generic bag
+  an unrelated settings write could clobber a security control. An empty allowlist means "share
+  nothing", which is safe but not useful, so provisioning should seed it. **Street addresses are
+  flag-only** (`GUARD_PII_REDACT_ADDRESSES=false`): precision is materially worse — "12 Month
+  Plan" reads as a house number — so they are counted but not redacted until measured on real
+  traffic. `None` allowlist means "skip the check" (the Playground) and is deliberately distinct
+  from an empty set.
+
 ### ADR-052: No guardrail framework — borrow the ideas, not the dependency
 - **Date:** 2026-08-03
 - **Status:** accepted

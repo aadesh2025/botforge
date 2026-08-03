@@ -51,6 +51,11 @@ class Document(Base, UUIDPrimaryKey, TimestampMixin):
     error_message: Mapped[str | None] = mapped_column(Text)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     storage_path: Mapped[str | None] = mapped_column(String(1024))
+    #: `{kind: count}` from the ingest-time PII scan (docs/11 Phase B) — e.g.
+    #: `{"email": 2, "phone": 1}`. Counts only, never the values: a PII report that echoes the
+    #: PII is the same leak in a different place. `None` means the document predates the scan;
+    #: `{}` means it was scanned and is clean, and the UI distinguishes the two.
+    pii_flags: Mapped[dict[str, int] | None] = mapped_column(JSONB)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
 
 

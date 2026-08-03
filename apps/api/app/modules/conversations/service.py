@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat import guardrails, memory
 from app.chat.assembly import build_messages, compose_system_prompt, instruction_prompt_of
+from app.chat.pii import build_allowlist
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
 from app.core.config import settings
@@ -347,6 +348,7 @@ async def chat_events(
         provider, req, citations, result, executor=executor,
         max_iters=settings.tool_max_iterations,
         protected_prompt=instruction_prompt_of(req.messages),
+        pii_allowlist=build_allowlist(list(ctx.org.public_contacts or [])),
     ):
         yield ev
     latency_ms = int((time.perf_counter() - t0) * 1000)
@@ -374,6 +376,7 @@ async def chat_once(
         provider, req, citations, result, executor=executor,
         max_iters=settings.tool_max_iterations,
         protected_prompt=instruction_prompt_of(req.messages),
+        pii_allowlist=build_allowlist(list(ctx.org.public_contacts or [])),
     ):
         pass
     latency_ms = int((time.perf_counter() - t0) * 1000)

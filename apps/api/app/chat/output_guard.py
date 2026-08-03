@@ -1,7 +1,7 @@
 """L5 — output guardrail (docs/11 §4-L5).
 
 The last line of defence: what the model actually produced, checked before a visitor sees it
-and before it is persisted. Three checks in Phase A —
+and before it is persisted.
 
 1. **Secret redaction** — unchanged, `guardrails.redact_secrets()`.
 2. **System-prompt leak** — 8-gram shingle overlap against the assembled system prompt.
@@ -9,8 +9,11 @@ and before it is persisted. Three checks in Phase A —
    point: the identity lock *asks* the model not to reveal its instructions, and docs/11 §1.4
    is the record of how much an ask is worth.
 3. **Persona break** — "I'm a large language model", "as an AI", and friends. Live failure 6.
-
-PII egress is Phase B and deliberately not here.
+4. **PII egress** (Phase B) — emails and phone numbers that the org has not published are
+   replaced with a natural phrase. Live failure 3: asked for a contact, the agent returned the
+   founder's personal Gmail and mobile, having retrieved them correctly from a knowledge base
+   that should never have held them. Detection lives in `app/chat/pii.py`; the allowlist is
+   org-level, because "our own support address" is configuration, not a code constant.
 
 **Why shingles rather than substring search.** A leak is rarely verbatim: the model
 paraphrases, reorders clauses, or translates. Overlap on normalised 8-grams degrades
@@ -28,10 +31,11 @@ instruction prompt.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.chat.guardrails import redact_secrets
 from app.chat.normalize import normalize_for_matching
+from app.chat.pii import find_pii, is_allowlisted
 
 _SHINGLE_N = 8
 
@@ -60,6 +64,13 @@ REGENERATION_DIRECTIVE = (
 )
 
 
+# What a redacted contact detail is replaced with. A natural noun phrase, not "[redacted]":
+# "you can reach us at [redacted]" reads like a bug and announces that something was hidden,
+# where "you can reach us at our contact page" reads like a person. It is grammatical after
+# "at", "on", "via" and "through", which is where a model puts a contact detail.
+PII_REPLACEMENT = "our contact page"
+
+
 @dataclass(frozen=True)
 class OutputVerdict:
     """What the output guard found. `text` is always safe to send."""
@@ -69,10 +80,47 @@ class OutputVerdict:
     persona_break: bool = False
     leak_score: float = 0.0
     changed: bool = False
+    #: `{kind: count}` of contact details redacted from the reply. Counts only — the values
+    #: are what we are trying not to disclose, so they are never carried or logged.
+    pii_redacted: dict[str, int] = field(default_factory=dict)
 
     @property
     def violated(self) -> bool:
         return self.leaked_prompt or self.persona_break
+
+
+def redact_pii(
+    text: str,
+    allowlist: set[str],
+    *,
+    regions: list[str] | None = None,
+    redact_addresses: bool = False,
+) -> tuple[str, dict[str, int]]:
+    """Strip contact details the org has not published, leaving allowlisted ones intact.
+
+    The allowlist is the whole point: a support agent saying "email support@theirbusiness.com"
+    is the product working, and an agent that cannot give out its own support address is
+    broken in a way an operator will notice immediately. Everything else goes — the corpus
+    will never be perfectly clean, so this is built as though it never will be.
+    """
+    matches = find_pii(text, regions=regions, include_addresses=redact_addresses)
+    if not matches:
+        return text, {}
+
+    counts: dict[str, int] = {}
+    out = []
+    cursor = 0
+    for m in matches:
+        if m.start < cursor:  # overlapping spans: keep the first
+            continue
+        if is_allowlisted(m.value, allowlist):
+            continue
+        out.append(text[cursor : m.start])
+        out.append(PII_REPLACEMENT)
+        counts[m.kind] = counts.get(m.kind, 0) + 1
+        cursor = m.end
+    out.append(text[cursor:])
+    return "".join(out), counts
 
 
 def _shingles(text: str, n: int = _SHINGLE_N) -> set[str]:
@@ -122,6 +170,9 @@ def apply(
     *,
     leak_threshold: float,
     fallback_message: str | None = None,
+    pii_allowlist: set[str] | None = None,
+    pii_regions: list[str] | None = None,
+    redact_addresses: bool = False,
 ) -> OutputVerdict:
     """Return a verdict whose `text` is safe to send and to persist.
 
@@ -134,7 +185,14 @@ def apply(
     """
     verdict = inspect(reply, protected_prompt, leak_threshold=leak_threshold)
     safe = redact_secrets(verdict.text)
+    pii_counts: dict[str, int] = {}
+    if pii_allowlist is not None:
+        safe, pii_counts = redact_pii(
+            safe, pii_allowlist, regions=pii_regions, redact_addresses=redact_addresses
+        )
     if verdict.violated:
+        # A suppression replaces the whole reply, so any redaction above is moot — but the
+        # counts are kept, because "this turn also tried to emit PII" is worth knowing.
         safe = fallback_message or _DEFAULT_SUPPRESSION
     return OutputVerdict(
         text=safe,
@@ -142,6 +200,7 @@ def apply(
         persona_break=verdict.persona_break,
         leak_score=verdict.leak_score,
         changed=safe != reply,
+        pii_redacted=pii_counts,
     )
 
 
