@@ -508,10 +508,17 @@ def _build_request(
     data: schemas.PlaygroundRequest,
     stream: bool,
     context_block: str = "",
+    *,
+    agent_name: str | None = None,
+    business_name: str | None = None,
 ) -> ChatRequest:
     mc = version.model_config_json or {}
     messages: list[Message] = []
-    system_prompt = compose_system_prompt(version.system_prompt, version.persona)
+    # The Playground runs the same identity lock as production. An operator asking "is my
+    # agent configured correctly?" has to be shown what a visitor would actually get.
+    system_prompt = compose_system_prompt(
+        version.system_prompt, version.persona, agent_name=agent_name, business_name=business_name
+    )
     if system_prompt:
         messages.append(Message(role="system", content=system_prompt))
     if context_block:
@@ -576,7 +583,10 @@ async def playground_stream(
         session, ctx, agent, provider_name, version.model_config_json or {}
     )
     context_block, citations = await _retrieve_context(session, ctx, version, data.message)
-    req = _build_request(version, data, stream=True, context_block=context_block)
+    req = _build_request(
+        version, data, stream=True, context_block=context_block,
+        agent_name=agent.name, business_name=ctx.org.name,
+    )
     specs, executor = await _playground_tooling(session, ctx, agent, version, provider)
     if specs:
         req.tools = specs
@@ -599,7 +609,10 @@ async def playground_once(
         session, ctx, agent, provider_name, version.model_config_json or {}
     )
     context_block, citations = await _retrieve_context(session, ctx, version, data.message)
-    req = _build_request(version, data, stream=False, context_block=context_block)
+    req = _build_request(
+        version, data, stream=False, context_block=context_block,
+        agent_name=agent.name, business_name=ctx.org.name,
+    )
     specs, executor = await _playground_tooling(session, ctx, agent, version, provider)
     if specs:
         req.tools = specs

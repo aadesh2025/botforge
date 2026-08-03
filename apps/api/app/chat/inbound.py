@@ -136,7 +136,11 @@ class InboundTurn:
                 session, org_id, self.version, self.message
             )
         messages = build_messages(
-            system_prompt=compose_system_prompt(self.version.system_prompt, self.version.persona),
+            system_prompt=compose_system_prompt(
+                self.version.system_prompt,
+                self.version.persona,
+                agent_name=self.agent.name,
+            ),
             context_block=context_block,
             memory_summary=conv.memory_summary,
             history=history,

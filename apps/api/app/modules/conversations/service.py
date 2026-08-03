@@ -271,7 +271,12 @@ async def _prepare_turn(
             session, ctx.org.id, version, data.message
         )
     messages = build_messages(
-        system_prompt=compose_system_prompt(version.system_prompt, version.persona),
+        system_prompt=compose_system_prompt(
+            version.system_prompt,
+            version.persona,
+            agent_name=agent.name,
+            business_name=ctx.org.name,
+        ),
         context_block=context_block,
         memory_summary=conv.memory_summary,
         history=history,
