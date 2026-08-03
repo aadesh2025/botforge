@@ -644,6 +644,15 @@
             acc += ev.delta;
             bubble.innerHTML = renderMarkdown(acc);
             els.msgs.scrollTop = els.msgs.scrollHeight;
+          } else if (ev.type === "replace") {
+            // The output guardrail suppressed or rewrote the reply after we had already
+            // painted it (docs/11 §4-L5, ADR-049). Discard everything streamed for this turn
+            // and show the replacement — `acc` is reset too, so the emitted `response`/
+            // `message` events and any host-page integration see the safe text, not the
+            // text that was withdrawn.
+            acc = ev.delta || "";
+            bubble.innerHTML = renderMarkdown(acc);
+            els.msgs.scrollTop = els.msgs.scrollHeight;
           } else if (ev.type === "error") {
             acc += (acc ? "\n\n" : "") + "⚠ " + (ev.error || "something went wrong");
             bubble.innerHTML = renderMarkdown(acc);

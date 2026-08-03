@@ -153,6 +153,84 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-03 — direct prompt injection was undefended; docs/11 Phase A shipped
+- **The threat model was half-written.** `neutralize_injections()` was applied to RAG chunks
+  (`rag/context.py`) and tool output (`runtime.py`) and **never to the visitor's own message** —
+  `inbound.py` passed `self.message` straight into `build_messages()`. So BotForge blocked
+  *indirect* injection and was wide open to *direct* injection (OWASP LLM01), which is five of the
+  six failures a live red-team session found. Verified against the code before writing anything.
+- **L0 `chat/normalize.py`** (NFKC, zero-width + bidi stripping, Cyrillic/Greek homoglyph folding,
+  length cap, one shallow base64/percent/ROT13 decode pass) and **L1 `screen_user_message()`**
+  (five named families over raw + normalised + decoded candidates). `neutralize_injections()` is
+  untouched and still **defangs** retrieved content; the visitor's turn **refuses** instead —
+  ADR-050 explains why those must stay different. Blocked messages are still persisted verbatim.
+- **⚠️ Precision, not recall, is the binding constraint here.** The first pattern draft blocked
+  *"how do I enable dark mode?"*, *"can you show me the instructions?"* and anyone asking for a
+  colleague named **Dan**. Patterns are now anchored on wording with no support reading (named
+  jailbreak modes only; possessive *"your* instructions", never *"the* instructions"). 19 benign
+  fixtures pin it at **0 false positives**; paraphrase is Phase C's job, not L1's.
+  `matches_blocked_topic()` also moved off substring containment, which had been refusing
+  *"how do I cancel my cancellation?"* on the topic `cancel`.
+- **⚠️ The identity lock's first draft made fabrication WORSE — 11/15 → 15/15** with no retrieved
+  context. Same failure as 2026-08-02's "Just answer.": told *"never explain how you work"* and
+  *"do not acknowledge that a rule prevented you"*, the model generalises to *"never hedge"* and
+  invents opening hours. Fixed by scoping the secrecy rules to **phrasing** and stating the
+  no-information case outright; re-measured **10/15 vs a 12/15 baseline**. The clause carries a
+  comment saying not to touch it without re-running the A/B. **Do not skip that A/B.**
+- **Separately worth knowing: that baseline is 12/15, not 0/3.** Prompt-only grounding does not
+  hold on `llama-3.1-8b-instant` at all. The "0/3" recorded on 2026-08-02 was measured on a larger
+  model and does not generalise down — which is docs/11 §1.4's whole thesis and why live failure 4
+  ("What's the capital of France") happened.
+- **L5 `chat/output_guard.py`**: 8-gram shingle overlap against the *instruction* prompt only (not
+  the retrieved-context block — echoing the KB back is the product working), plus persona-break
+  regexes with **one silent regeneration** before falling back. Streaming forced ADR-049: tokens
+  are already painted, so the guard corrects afterwards via a new `replace` event rather than
+  buffering every reply and spending first-token latency (NFR-1 p50 417 ms) on a rare event.
+  Channels and persistence read `result.content` and are protected outright; the widget honours
+  `replace`. The **Playground opts out** (`guard_output=False`) for the same reason it withholds
+  `fallback_message`.
+- ADR-049/050/051/052. Suites: **444 pytest**, ruff + mypy clean.
+- **Phases B–G of `docs/11-SAFETY-GUARDRAILS.md` are NOT built.** B (PII egress + ingest scanning,
+  which is what actually fixes the founder-PII leak), C (Prompt Guard 2 classifier), D (full
+  red-team corpus), E (distress detection + attention queue), F (template variables), G (web
+  access). The operator's own KB clean-up (docs/11 §6) is still outstanding and no code replaces it.
+
+### 2026-08-03 — provider keys are managed per provider, and the Model tab only offers what runs
+- **The builder offered providers the org had no key for** (`5418b39` backend, `64db9cb` frontend,
+  **ADR-047/048**). The Model tab rendered `providerCatalog`, a hardcoded list in
+  `lib/mock/builder.ts`, so all seven appeared whether or not a key existed — the obvious way to
+  configure an agent was to select one that could not answer, and it failed later as a dead agent
+  instead of then and there. It was stale too: still offering Groq's retired
+  `mixtral-8x7b-32768`. Settings → Provider keys is now a grid of every provider (click → paste
+  key → save, one key per provider via `PUT /v1/credentials/providers/{name}`), and the Model tab
+  lists only providers with `configured: true`.
+- **Model lists are a seed, not the truth.** `app/llm/catalog.py` is the one source (providers,
+  models, endpoints, pricing) but where a key exists `GET /v1/credentials/providers/{name}/models`
+  asks the provider. Live verification justified it on the spot: the real Groq account returned
+  `qwen/qwen3.6-27b`, `groq/compound`, `allam-2-7b` — none seeded — and several seeded ids were
+  absent. Discovery failure returns `source: "catalog"` + the reason, **never a 5xx**; an
+  unreachable provider still has to render a usable dropdown.
+- **Six providers added with no adapter** (Mistral, DeepSeek, xAI, Together, Fireworks, Cerebras):
+  they speak the OpenAI wire format at a fixed `base_url`, so each is one catalogue entry. All
+  BYO-key — **no new env vars**.
+- **⚠️ Two things must never be silently rewritten.** `configured` means "will a turn work?", not
+  "is there a credential row" — a platform **env** key counts, which is how the live Groq agents
+  run with no row at all; filtering on rows would have hidden the provider they already use. And
+  an unavailable provider/model stays **selected and selectable** (flagged `no key — this agent
+  cannot reply` / `(not offered)`), because dropping it leaves the `<Select>` unmatched and the
+  debounced autosave then persists a provider nobody chose.
+- **Two quiet-wrong-number fixes:** pricing is `None` when unpublished rather than `0`, with a
+  `pricing_unknown` log for a paid model with no rate ($0 in a cost report is wrong, not free);
+  and provider errors are stripped of key-shaped runs before reaching the client — a rejected key
+  comes back as `Incorrect API key provided: sk-live-*******8888`.
+- Deleted `providerCatalog` (the ADR-041 follow-up) and the unused `providerLabel` map.
+  `vitest.setup.ts` gained ResizeObserver/pointer-capture stubs — jsdom has neither and every
+  Radix Slider/Select test failed on render, not on its assertion.
+- Suites: **430 pytest**, **131 vitest**, ruff + mypy + tsc + eslint clean, 3 new Playwright checks.
+- **Note:** built alongside a concurrent session implementing `docs/11-SAFETY-GUARDRAILS.md`
+  Phase A in the same working tree. Commits were path-scoped (`git commit -m … -- <paths>`) so
+  neither swept up the other's in-flight files.
+
 ### 2026-08-02 — a `.env` placeholder comment was being sent as an API key (silent live outage)
 - **The live agent served empty replies with HTTP 200 to every visitor**, for an unknown period.
   Log: `...?key=%23+%5BHUMAN%5D+Google+Gemini+free+tier` — the placeholder comment *was* the key.
@@ -179,13 +257,20 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 - Suites: **349 pytest**, ruff + mypy clean.
 
 ### 2026-08-02 — replies stopped reading like a citation list; agents now start from a role
-- **The research-paper voice was one clause** (`b25c1c6`): `build_context_block()`'s header told the
+- **The research-paper voice was one clause** (`b25c1c6`, **ADR-045**): `build_context_block()`'s header told the
   model to "cite sources as [n] when relevant", so customers got "According to the documents [1]
   and [2]…". The numbering is *our* bookkeeping — the caller returns the same citations as
   structured data for the widget to render — so the header now forbids visible markers outright.
   System prompt held constant: old header **3/3** replies with `[n]`, new **0/3**, and a live call
   still returned `citations: 1`. The structured citation payload is untouched.
-- **Role templates at creation time** (`a557418` backend, `a22d1ff` frontend): four prebuilt roles
+- **Live client agent republished** (operational, no commit): "aurozen ai"'s *stored* prompt — the
+  one real visitors get — carried its **own** citation instruction ("briefly reference the relevant
+  document or section") plus an explicit grounding escape hatch ("unless the user explicitly asks
+  for general knowledge"). Rewritten with the ADR-045 clauses, applied to draft **v5** and
+  published, which also moved the live model **gemini → groq** (v4/v5 were otherwise identical, and
+  gemini was the provider hit by the key bug below). v4 stays published, so rollback works. Note
+  `DEFAULT_SYSTEM_PROMPT` was never this agent's prompt — editing code would not have fixed it.
+- **Role templates at creation time** (`a557418` backend, `a22d1ff` frontend, **ADR-046**): four prebuilt roles
   seeding the first draft's prompt/welcome/suggested prompts/tone/model, plus "Start from scratch"
   which is unchanged. Catalog is static data in `app/db/templates.py` (a fifth role is one entry —
   no schema change, no migration), served by `GET /v1/agent-templates`, applied via optional

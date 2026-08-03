@@ -162,3 +162,25 @@ for prod; local default in dev.
 - `TOOL_MAX_ITERATIONS` (default `4`) — max tool-call iterations per turn before the runtime
   forces a final answer.
 - `TOOL_TIMEOUT_SECONDS` (default `15`) — per-tool execution timeout (HTTP / built-in tools).
+
+## Guardrails (docs/11)
+- `MAX_USER_MESSAGE_CHARS` (default `8000`) — hard ceiling on a single visitor message. Also
+  the OWASP **LLM10** unbounded-consumption control: without it one caller can push an
+  arbitrarily large prompt through a paid provider.
+- `GUARD_INPUT_ENABLED` (default `true`) — the L1 static pre-filter on the visitor's own
+  message (direct prompt injection, **LLM01**). With it off, BotForge still defends retrieved
+  documents and tool output but not the person typing — the asymmetry docs/11 §1.1 documents.
+  Switchable because a false positive costs a real customer a real answer; the benign fixture
+  corpus in `tests/fixtures/redteam/benign.yaml` is what keeps that rate at zero.
+- `GUARD_OUTPUT_ENABLED` (default `true`) — the L5 output guardrail: system-prompt leakage and
+  persona breaks. Secret redaction runs regardless of this flag.
+- `GUARD_OUTPUT_LEAK_THRESHOLD` (default `0.35`) — fraction of a reply's normalised 8-grams
+  that may also appear in the assembled system prompt before the reply is treated as a leak
+  and replaced. Lower is stricter. Raise it if legitimate answers that reuse the agent's own
+  wording are being suppressed; the knowledge-base content is deliberately **not** part of the
+  comparison, so quoting retrieved documents never counts.
+
+> The Playground bypasses the output guardrail entirely, the same way it withholds an agent's
+> fallback message and re-raises provider errors: an operator testing an agent has to see what
+> the model actually said. Guardrail behaviour is therefore visible on the widget, channels and
+> dashboard chat, but not in the builder's test pane.

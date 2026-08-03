@@ -18,6 +18,147 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-052: No guardrail framework — borrow the ideas, not the dependency
+- **Date:** 2026-08-03
+- **Status:** accepted
+- **Context:** Phase A of docs/11 builds a layered guardrail pipeline. NeMo Guardrails and
+  Guardrails AI both exist and both are good.
+- **Decision:** Take neither as a dependency. Borrow NeMo's staged-rail structure (input →
+  retrieval → generation → output) and Guardrails AI's validator-chain shape, implemented
+  directly in `app/chat/`.
+- **Alternatives considered:** **NeMo Guardrails** — requires Colang, a second language whose
+  flows would live outside the Python the rest of the runtime is written in, for a product with
+  no scripted dialog flows. **Guardrails AI** — its centre of gravity is structured-output
+  validation (schema conformance, retries on malformed JSON), which is not the problem here;
+  prompt injection and persona breaks are its periphery. **Self-hosted DeBERTa** (ProtectAI /
+  Prompt Guard weights) — a model server, GPU or slow CPU inference, and version management, to
+  replace a $0.04/M API call.
+- **Consequences:** No new weight, and the guardrails compose with the existing typed-error and
+  structured-logging conventions instead of sitting alongside them. The cost is that we maintain
+  the patterns ourselves, which is why the fixture corpus (docs/11 §5) is treated as part of the
+  implementation rather than an extra. Revisit NeMo if BotForge ever needs scripted dialog flows;
+  revisit self-hosting if per-turn cost or data residency changes.
+
+### ADR-051: Guardrails fail open on availability and closed on enforcement
+- **Date:** 2026-08-03
+- **Status:** accepted
+- **Context:** docs/11 §2 requires that a guardrail which *errors* must not take chat down,
+  while a guardrail that *fires* must not be overridable.
+- **Decision:** Deterministic layers (L0/L1/L5) run in-process and cannot fail independently of
+  the request, so they are effectively always on and gated only by explicit config flags. The
+  model-backed layers landing in Phase C/E get a bounded timeout and **fail open**, with an
+  error-level log and a metric. Enforcement itself never fails open: once a verdict says blocked,
+  the decision is made in Python before or after inference, and the model is never asked to
+  confirm or reconsider it.
+- **Alternatives considered:** *Fail closed on guard-model errors* — a Groq outage would refuse
+  every visitor on every client site, converting a degraded dependency into a total outage.
+  *Fail open silently* — this repo has already shipped two silent-failure incidents (ADR-044's
+  empty replies, the `echo:` substitution); a third is not acceptable.
+- **Consequences:** A guard-model outage degrades to L0/L1-only coverage rather than downtime,
+  and the logs say which. The `GUARD_*_ENABLED` flags exist so a layer can be switched off
+  deliberately, which is a different thing from failing and is logged differently.
+
+### ADR-050: The visitor's message is untrusted content, and refusing beats defanging it
+- **Date:** 2026-08-03
+- **Status:** accepted
+- **Context:** `neutralize_injections()` had been applied to RAG chunks and tool output since
+  Phase 16 but never to the user's own message, so direct prompt injection (OWASP LLM01) was
+  undefended while indirect injection was covered — five of the six live red-team failures.
+- **Decision:** Screen the visitor's turn with a separate function, `screen_user_message()`,
+  which returns a **verdict** and refuses; keep `neutralize_injections()` unchanged for
+  retrieved content, where it **defangs and continues**.
+- **Alternatives considered:** *Run `neutralize_injections()` on the user message too* — it
+  rewrites matched spans into `[filtered: …]`, so the model would answer a mangled version of
+  what the customer typed, and a false positive silently corrupts a real question. *Refuse on
+  retrieved content instead* — a document that happens to contain an injection string would then
+  break every legitimate question about that document.
+- **Consequences:** Two matcher sets to keep in step, with opposite tuning pressures: the
+  retrieved-content set stays conservative because a false positive deletes content the customer
+  asked about, and the input set is tuned for **precision** because a false positive refuses a
+  paying customer. The verdict carries no modified text, so the message is persisted exactly as
+  typed. The refusal deliberately does not name the rule that fired — "I can't reveal my system
+  prompt" confirms there is one and invites harder probing.
+
+### ADR-049: The output guardrail corrects after streaming rather than buffering the reply
+- **Date:** 2026-08-03
+- **Status:** accepted
+- **Context:** L5 (docs/11 §4-L5) has to judge a complete reply, but tokens are streamed to the
+  widget as they arrive. By the time a persona break or prompt leak is detectable, the visitor
+  has already seen part of it.
+- **Decision:** Run the guard on the accumulated reply after the provider pass, correct
+  `result.content` in place, and emit a new `replace` stream event carrying the safe text so a
+  streaming client discards what it rendered for that turn.
+- **Alternatives considered:** *Buffer every reply until it is checked, then emit* — correct and
+  simple, but it converts first-token latency into full-completion latency on **every** turn to
+  defend against a rare event, against a measured NFR-1 of p50 417 ms first token. *Check
+  incrementally mid-stream and cut off* — the visitor still sees the offending prefix, so it adds
+  complexity without removing the exposure. *Do nothing for streaming callers* — leaves the
+  widget, the surface with the most visitors, as the only unprotected one.
+- **Consequences:** Non-streaming callers — every messaging channel, and the persistence path —
+  are protected outright, because they read `result.content` after the correction. Streaming
+  clients must honour `replace`; a client that ignores it shows the unsafe text, and the event is
+  additive so older clients degrade rather than break. A visitor watching closely can see text
+  appear and then be replaced, which is a deliberate trade against paying latency on every other
+  turn. The bundled widget honours `replace` and resets its accumulator, so the `response` and
+  `message` events it emits to a host page carry the safe text rather than the withdrawn text.
+
+### ADR-047: One provider catalogue on the server; the model list is a seed, not the truth
+- **Date:** 2026-08-03
+- **Status:** accepted (closes the `providerCatalog` follow-up left open by ADR-041)
+- **Context:** which providers exist, which models each runs, and what they cost lived in three
+  places that could disagree: `PROVIDER_CATALOG` in `llm/registry.py`, a hardcoded
+  `providerCatalog` in `apps/web/src/lib/mock/builder.ts`, and `PRICING`. The client list was the
+  one the builder's Model tab actually rendered, so it offered every provider whether or not the
+  org held a key — the obvious way to configure an agent was to select one that could not answer,
+  which surfaces as a dead agent rather than a validation error. It was also stale: it still
+  offered Groq's `mixtral-8x7b-32768`, retired upstream.
+- **Decision:** `app/llm/catalog.py` is the single source of truth (providers, models, endpoints,
+  pricing); `PROVIDER_CATALOG` is derived from it and the client list is deleted.
+  `GET /v1/credentials/providers` annotates each entry with `configured` + `key_source`, and the
+  Model tab renders only what this org can run. **Static model lists are a seed, not the truth** —
+  `GET /v1/credentials/providers/{name}/models` asks the provider itself wherever a key exists,
+  and the catalogue is the fallback. Confirmed necessary during live verification: the real Groq
+  account returned `qwen/qwen3.6-27b`, `groq/compound` and `allam-2-7b`, none of which are in the
+  seed, while several seeded ids were absent from it.
+- **Alternatives considered:** *(a)* keep the static list and hand-maintain it — the failure mode
+  is a silently wrong dropdown, and vendors retire models on their own schedule; *(b)* discovery
+  only, no static list — a provider with no key yet has nothing to show, and an unreachable
+  provider would render an empty picker; *(c)* fail the request when discovery fails — an
+  unreachable provider still has to render a usable dropdown, so it returns `source: "catalog"`
+  with the reason in `error` instead of a 5xx.
+- **Consequences:** adding an OpenAI-compatible provider is one entry in the catalogue with a
+  `base_url` and no adapter (six added this way: Mistral, DeepSeek, xAI, Together, Fireworks,
+  Cerebras), all bring-your-own-key, so no new env vars. Discovery costs one upstream call per
+  provider per builder visit, cached 5 minutes client-side. The non-chat filter is name-based and
+  necessarily incomplete — Groq's `canopylabs/orpheus-*` speech models passed every marker until
+  live verification caught them.
+
+### ADR-048: `configured` counts an env key, and nothing about a live agent is rewritten silently
+- **Date:** 2026-08-03
+- **Status:** accepted
+- **Context:** "show only providers with a key" has two edge cases that decide whether the
+  feature is safe. The platform's own agents — including the live client one — run on the
+  deployment's `GROQ_API_KEY` with **no credential row at all**, so a filter keyed on stored rows
+  would hide the provider they are already using. And an agent may be pointed at a provider or
+  model that is no longer on offer, because its key was removed or the vendor retired the model.
+- **Decision:** `configured` answers "will a turn work?", not "is there a row": an org
+  credential, a platform env key, or a provider needing no key all count, reported as
+  `key_source: org | env | not_required | none`. The Model tab additionally **pins** the agent's
+  current provider and model even when unavailable, flagged `no key — this agent cannot reply`
+  and `(not offered)`, rather than dropping them from the options.
+- **Alternatives considered:** dropping unavailable entries from the list — leaves the `<Select>`
+  with no matching option, and the builder's debounced autosave then persists whatever the
+  control falls back to, silently moving a live agent to a provider nobody chose. Auto-migrating
+  to the first working provider was rejected for the same reason: the repo has been bitten twice
+  by config that changed itself quietly (ADR-044, the `echo:` incident).
+- **Consequences:** an operator can still save an agent that cannot reply — deliberately, since
+  the alternative is editing their config for them — but it is stated in red at the point of
+  choice. Masked key fragments require `tools:manage`; the usable-provider list only needs
+  `read`, because the model picker is gated on `agents:write`. Provider error text is stripped of
+  key-shaped runs before it reaches the client: a rejected-key 401 quotes the key back
+  (`Incorrect API key provided: sk-live-*******8888`), and masked or not that is secret material
+  in an API response and a log line.
+
 ### ADR-041: Dashboard/profile/versions read the API; what stays a static client list
 - **Date:** 2026-07-30
 - **Status:** accepted
@@ -102,6 +243,60 @@ Format each entry as below. Newest at the top.
 - **Operational prerequisite:** tagging needs an n8n API key with **tag read/create** scopes plus
   workflow "update tags". A workflow-only key returns 403 on every tag call. Both the one-off
   script and the provisioner preflight this and say so, rather than half-tagging an inventory.
+
+### ADR-046: Agent role templates are static catalog data, and only *suggest* their integrations
+- **Date:** 2026-08-02
+- **Status:** accepted
+- **Context:** creating an agent was a bare name field producing one generic blank draft, so every
+  operator started from the same empty persona regardless of what the agent was for.
+- **Decision:** four prebuilt roles (Customer Support, Lead Qualification, Appointment Scheduler,
+  Info Collector) in `app/db/templates.py` as a frozen-dataclass list, served by
+  `GET /v1/agent-templates` and applied through an optional `template_id` on `POST /v1/agents`.
+  Creation **copies** the template's system prompt, welcome message, suggested prompts, tone and
+  model overrides into the first draft. Three sub-decisions carry the weight:
+  - **Static data, not rows.** Adding a fifth role is one `AgentTemplate(...)` entry — no schema
+    change, no migration, no seeding step that can drift per environment.
+  - **Copy, never reference.** Nothing is read back at runtime, so editing a template can never
+    retroactively change a live agent. The id *is* persisted (`persona.template_id`) but purely as
+    a hint for the builder's next-step banner; an unknown id renders no banner rather than erroring,
+    so a template can be deleted safely.
+  - **Suggest integrations, never attach them.** Where a role implies a knowledge base, a CRM
+    automation or a calendar, the builder shows a dismissible banner. Auto-attaching would produce
+    agents that look configured and fail at runtime, since the operator has no credentials wired up
+    yet — a worse outcome than an obvious blank.
+- **Alternatives considered:** a DB table with a seeder (rejected: migration + drift for data that
+  is code); forcing every agent through a template (rejected: `template_id` is optional and its
+  absence reproduces today's blank agent byte for byte); auto-provisioning each role's tooling
+  (rejected per above); a locked/read-only template prompt (rejected: it is a starting point, and
+  the operator must be able to edit it immediately).
+- **Consequences:** `_merge_persona`'s merge-on-write preserves `template_id` across autosaves, and
+  the mapping layer only echoes it back when present, so scratch agents stay clean. Model overrides
+  are merged over `DEFAULT_MODEL_CONFIG`, so a template states only what it cares about — the
+  scheduler runs at temperature 0.2, where creative phrasing turns into a wrong booking.
+
+### ADR-045: Citations are structured data — the model never writes inline `[n]` markers
+- **Date:** 2026-08-02
+- **Status:** accepted
+- **Context:** grounded replies read like a research paper — "According to the documents [1] and
+  [2], Aurozen AI provides two main services…". The cause was one clause in
+  `build_context_block()`'s header instructing the model to "cite sources as [n] when relevant".
+  The numbering exists for *our* bookkeeping: the caller already returns the same citations as
+  structured data for the widget and dashboard to render as a sources list, so repeating them
+  inline was pure duplication in the worst possible register.
+- **Decision:** the header forbids visible source-listing language outright and asks for a normal
+  human answer. The returned citation list is untouched — this is strictly about what the model's
+  own words look like. Proved causal with the system prompt held constant: old header emitted
+  `[n]` in 3 of 3 sampled replies, new header 0 of 3, with `citations` still populated.
+- **Consequences — and the trap this ADR mainly exists to record:** the first rewrite of the
+  *default system prompt* to match this voice **silently cost the grounding**. Ending the
+  never-narrate-your-sources rule with "Just answer." made the model read "don't mention the
+  documents" as "don't hedge": with no retrieved context it invented support hours and a refund
+  window in 3 of 3 samples, where the previous prompt refused in 3 of 3. The same failure then
+  turned up in the `customer_support` template, whose "resolve it in as few messages as possible"
+  body overpowered the softer shared `_GROUNDING` text. Both fixed by dropping "Just answer.",
+  stating the no-context case outright, and scoping the prohibition to *phrasing*.
+  **A unit test cannot see this** — it needs a live model on the no-retrieval path. Tests pin the
+  clauses instead; re-run the no-context A/B before softening any prompt's voice again.
 
 ### ADR-044: A comment-only `.env` value is *unset*, and a provider failure always says something
 - **Date:** 2026-08-02
