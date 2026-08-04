@@ -15,7 +15,7 @@ from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat import attention, guard_models, guardrails, policy_guard
+from app.chat import attention, guard_models, guardrails, policy_guard, variables
 from app.chat.assembly import build_messages, compose_system_prompt
 from app.chat.handoff import trigger_handoff, wants_handoff
 from app.chat.pii import build_allowlist
@@ -24,7 +24,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.llm.fake import RefusalProvider
 from app.llm.types import StreamEvent
-from app.models import Agent, AgentVersion, Conversation, Message, Organization
+from app.models import Agent, AgentVersion, Contact, Conversation, Message, Organization
 from app.rag.agent_retrieval import retrieve_for_version
 from app.rag.retrieval import Citation
 
@@ -164,8 +164,13 @@ class InboundTurn:
         if policy is not None:
             await attention.apply_policy_verdict(session, conv, policy)
 
+        org = await self._org()
         system_prompt = compose_system_prompt(
-            self.version.system_prompt, self.version.persona, agent_name=self.agent.name
+            self.version.system_prompt,
+            self.version.persona,
+            agent_name=self.agent.name,
+            business_name=org.name if org else None,
+            variables=await self._variables(org),
         )
         # mild/elevated steer the tone; the bot keeps answering either way. Only `crisis`
         # suppresses generation, and it is handled below with a written holding message.
@@ -248,6 +253,24 @@ class InboundTurn:
     async def _org(self) -> Organization | None:
         """The conversation's org. One PK lookup, usually served from the identity map."""
         return await self.session.get(Organization, self.conversation.organization_id)
+
+    async def _variables(self, org: Organization | None) -> dict[str, str]:
+        """Values for `{{user_name}}` etc. Every one is escaped inside `build_context()`.
+
+        The contact's name is visitor-supplied, which is the whole reason this is escaped and
+        interpolated in a single pass (docs/11 §4b, Phase F).
+        """
+        contact = (
+            await self.session.get(Contact, self.conversation.contact_id)
+            if self.conversation.contact_id
+            else None
+        )
+        return variables.build_context(
+            user_name=getattr(contact, "display_name", None),
+            user_email=getattr(contact, "email", None),
+            agent_name=self.agent.name,
+            business_name=org.name if org else None,
+        )
 
     async def _pii_allowlist(self) -> set[str]:
         """Contact details this org has published, which the agent may share freely.

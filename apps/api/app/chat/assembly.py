@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.chat import variables as variables_module
 from app.llm.types import Message
 
 # The builder's Tone selector is a style hint, not a behaviour override, so it is appended
@@ -89,6 +90,7 @@ def compose_system_prompt(
     *,
     agent_name: str | None = None,
     business_name: str | None = None,
+    variables: dict[str, str] | None = None,
 ) -> str | None:
     """Combine the identity lock, the agent's system prompt, and its style directives.
 
@@ -97,9 +99,17 @@ def compose_system_prompt(
 
     Returns a prompt even when the agent has none of its own: an unconfigured agent still
     must not claim to be a language model or hand out a founder's mobile number.
+
+    `variables` resolves `{{user_name}}`-style placeholders (Phase F). Values are already
+    escaped by `variables.build_context()`; passing raw visitor input here would be a
+    second-order injection, which is the whole reason that helper exists.
     """
+    # Template variables (Phase F) are rendered into the *operator's* prompt only. The identity
+    # lock is built from values escaped at `build_context()` time and is never re-rendered, so
+    # a contact whose name contains `{{...}}` cannot reach it.
+    rendered = variables_module.render(system_prompt, variables) if variables else system_prompt
     parts = [identity_lock(agent_name, business_name)]
-    parts.extend(p for p in (system_prompt or "").strip().split("\n\n") if p.strip())
+    parts.extend(p for p in (rendered or "").strip().split("\n\n") if p.strip())
     directive = tone_directive(persona)
     if directive:
         parts.append(directive)

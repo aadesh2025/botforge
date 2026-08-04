@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat import variables
 from app.chat.assembly import compose_system_prompt
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
@@ -517,7 +518,13 @@ def _build_request(
     # The Playground runs the same identity lock as production. An operator asking "is my
     # agent configured correctly?" has to be shown what a visitor would actually get.
     system_prompt = compose_system_prompt(
-        version.system_prompt, version.persona, agent_name=agent_name, business_name=business_name
+        version.system_prompt,
+        version.persona,
+        agent_name=agent_name,
+        business_name=business_name,
+        # The Playground previews what a real turn renders, so an operator writing
+        # `Hi {{user_name}}` sees "Hi there" rather than the raw placeholder.
+        variables=variables.build_context(agent_name=agent_name, business_name=business_name),
     )
     if system_prompt:
         messages.append(Message(role="system", content=system_prompt))

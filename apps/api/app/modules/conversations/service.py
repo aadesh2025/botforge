@@ -12,7 +12,7 @@ from typing import Any, cast
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat import guard_models, guardrails, memory
+from app.chat import guard_models, guardrails, memory, variables
 from app.chat.assembly import build_messages, compose_system_prompt, instruction_prompt_of
 from app.chat.pii import build_allowlist
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
@@ -289,6 +289,11 @@ async def _prepare_turn(
             version.persona,
             agent_name=agent.name,
             business_name=ctx.org.name,
+            # No contact on the dashboard path, so `{{user_name}}` resolves to its fallback
+            # rather than a stale name from another conversation.
+            variables=variables.build_context(
+                agent_name=agent.name, business_name=ctx.org.name
+            ),
         ),
         context_block=context_block,
         memory_summary=conv.memory_summary,
