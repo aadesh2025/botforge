@@ -116,6 +116,18 @@ class Settings(BaseSettings):
     # the same payload costs one call, not one per attempt.
     guard_injection_cache_ttl_seconds: int = 3600
 
+    # --- L3 policy & emotion classifier (docs/11 §4-L3, Phase E) ---
+    # Grades each customer message against the markdown in `app/chat/policies/` — abuse,
+    # off-topic, PII request, and a four-level distress read that drives the attention queue.
+    guard_policy_enabled: bool = True
+    guard_policy_model: str = "openai/gpt-oss-safeguard-20b"
+    # It is a reasoning model (~200-300ms observed), so the budget is wider than L2's.
+    guard_policy_timeout_ms: int = 1200
+    # Distress detection is a triage aid, never a clinical instrument. `crisis` suppresses the
+    # bot's reply entirely, so it must stay rare; this switch exists to turn the whole layer
+    # off for a client who has not agreed to watch the queue it fills (docs/11 §9).
+    guard_distress_enabled: bool = True
+
     # --- Tools (Phase 9) ---
     # Max tool-call iterations per turn before the runtime forces a final answer.
     tool_max_iterations: int = 4

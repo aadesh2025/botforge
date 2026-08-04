@@ -15,7 +15,7 @@ from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat import guard_models, guardrails
+from app.chat import attention, guard_models, guardrails, policy_guard
 from app.chat.assembly import build_messages, compose_system_prompt
 from app.chat.handoff import trigger_handoff, wants_handoff
 from app.chat.pii import build_allowlist
@@ -151,9 +151,27 @@ class InboundTurn:
             context_block, citations = await retrieve_for_version(
                 session, org_id, self.version, self.message
             )
+        # L3 policy/emotion grading (docs/11 §4-L3). Runs on messages that got past L1/L2,
+        # because a blocked injection is not a distressed customer and grading it wastes a call.
+        policy = None
+        if not (guard.blocked or l2_blocked) and settings.guard_distress_enabled:
+            org = await self._org()
+            policy = await policy_guard.classify(
+                self.message,
+                history=[m.content for m in history if m.role == "user" and m.content],
+                org_enabled=org.guard_injection_enabled if org else None,
+            )
+        if policy is not None:
+            await attention.apply_policy_verdict(session, conv, policy)
+
         system_prompt = compose_system_prompt(
             self.version.system_prompt, self.version.persona, agent_name=self.agent.name
         )
+        # mild/elevated steer the tone; the bot keeps answering either way. Only `crisis`
+        # suppresses generation, and it is handled below with a written holding message.
+        if policy is not None and (directive := policy_guard.TONE_DIRECTIVES.get(policy.distress)):
+            system_prompt = "\n\n".join(p for p in (system_prompt, directive) if p)
+
         messages = build_messages(
             system_prompt=system_prompt,
             context_block=context_block,
@@ -162,6 +180,29 @@ class InboundTurn:
             user_message=self.message,
             window_messages=settings.memory_window_messages,
         )
+        # CRISIS — the one case that stops the bot answering (docs/11 §4-L3).
+        # A fixed, human-written line: an 8B model improvising to someone in crisis is not
+        # acceptable. It is still a real message, never silence.
+        if policy is not None and policy.suppresses_generation:
+            await trigger_handoff(session, conv, requested_by="system", reason="distress:crisis")
+            self.handed_off = True
+            msg = Message(
+                conversation_id=conv.id,
+                organization_id=conv.organization_id,
+                role="assistant",
+                content=policy_guard.CRISIS_HOLDING_MESSAGE,
+                provider="system",
+            )
+            session.add(msg)
+            conv.last_message_at = dt.datetime.now(tz=dt.UTC)
+            await session.flush()
+            self.assistant_message = msg
+            self.result.content = policy_guard.CRISIS_HOLDING_MESSAGE
+            yield StreamEvent(type="token", delta=policy_guard.CRISIS_HOLDING_MESSAGE)
+            yield StreamEvent(type="done", finish_reason="crisis")
+            yield StreamEvent(type="message", message_id=str(msg.id))
+            return
+
         provider_name = (self.version.model_config_json or {}).get("provider", "fake")
         provider = await _resolve_provider(
             session,

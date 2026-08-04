@@ -28,6 +28,15 @@ class Conversation(Base, UUIDPrimaryKey, TimestampMixin):
     contact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
     external_id: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
+    #: Severity of the open review flag on this conversation (docs/11 §L6, Phase E):
+    #: `None` | "mild" | "elevated" | "crisis".
+    #:
+    #: A **separate axis from `status`, not a value of it** (ADR-057). `status` is a lifecycle
+    #: — active → handoff → closed — while attention is a severity that coexists with any of
+    #: them: the bot keeps answering an `elevated` conversation (status stays `active`), and a
+    #: crisis that a human has taken over is still a crisis worth seeing (status `handoff`).
+    #: Folding it into `status` would make taking over a conversation erase why it was flagged.
+    attention_level: Mapped[str | None] = mapped_column(String(16))
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     title: Mapped[str | None] = mapped_column(String(512))
     meta: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict, nullable=False)
@@ -64,3 +73,37 @@ class Message(Base, UUIDPrimaryKey):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class ConversationFlag(Base, UUIDPrimaryKey):
+    """One reason a human was asked to look at a conversation (docs/11 §L6, Phase E).
+
+    Append-only history rather than a single mutable field: a conversation that went
+    `mild → elevated → crisis` over ten minutes tells an operator something a final-state
+    column cannot, and the Attention tab renders that trajectory. `Conversation.attention_level`
+    is the denormalised current maximum, kept for cheap sorting and filtering.
+
+    `signals` holds short spans the classifier quoted as justification, so a row explains
+    itself without a second call. Never the whole message: the flag list is read by more people
+    than the inbox is, and a distressed customer's words are not decoration.
+    """
+
+    __tablename__ = "conversation_flags"
+    __table_args__ = (Index("ix_conversation_flags_org_open", "organization_id", "resolved_at"),)
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    #: distress | abuse | injection_attempt | prompt_leak | pii_egress | off_topic_repeat
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: none | mild | elevated | crisis — ordered, so "at least elevated" is a range query.
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    signals: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))

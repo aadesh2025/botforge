@@ -47,6 +47,9 @@ class InboxItemOut(BaseModel):
     # Null for conversations that predate contact resolution — the UI falls back to the
     # channel user id.
     contact: ContactOut | None = None
+    #: Open review severity (docs/11 §L6): None | mild | elevated | crisis. Independent of
+    #: `status` — an `elevated` conversation is still `active` and the bot is still answering.
+    attention_level: str | None = None
 
 
 class SendWindowOut(BaseModel):
@@ -86,3 +89,31 @@ class NoteRequest(BaseModel):
 
 class TagsRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
+
+
+class ConversationFlagOut(BaseModel):
+    """One reason a human was asked to look."""
+
+    id: uuid.UUID
+    kind: str
+    severity: str
+    #: Short spans the classifier quoted as justification — never the whole message.
+    signals: list[str]
+    created_at: dt.datetime
+    resolved_at: dt.datetime | None
+
+
+class AttentionItemOut(InboxItemOut):
+    """A row in the Attention queue.
+
+    Carries the whole flag history rather than just the current level, because the trajectory
+    is what an operator triages on: three flags in four minutes reads very differently from one
+    flag an hour ago, and the current level alone cannot show that.
+    """
+
+    flags: list[ConversationFlagOut] = []
+    #: The last few messages, so the queue is decidable without opening each conversation.
+    recent_messages: list[MessageOut] = []
+    #: False once a human takes over. Drives the "AI is still responding" indicator — it must
+    #: never be ambiguous who is talking to the customer.
+    bot_still_answering: bool = True

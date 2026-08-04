@@ -18,6 +18,28 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-057: `attention` is an axis beside `status`, not a value of it
+- **Date:** 2026-08-04
+- **Status:** accepted
+- **Context:** docs/11 §L6 calls for a "new `conversation.attention` state, distinct from
+  `handoff`" — the bot keeps answering while a human is asked to look. The obvious reading is a
+  new value in `Conversation.status`.
+- **Decision:** A separate nullable column, `attention_level` (`mild`/`elevated`/`crisis`), plus
+  an append-only `conversation_flags` table. `status` keeps its existing lifecycle values.
+- **Alternatives considered:** *`status = "attention"`* — `status` is a lifecycle (active →
+  handoff → closed) and attention is a **severity that coexists with all three**. A crisis
+  conversation a human has taken over is `status="handoff"` and still a crisis; as a status
+  value, taking over would erase why it was flagged. It would also silently change behaviour:
+  `InboundTurn` pauses the bot on `status == "handoff"`, and any code branching on "not active"
+  would start treating flagged conversations as finished. *A single mutable severity field* —
+  loses the trajectory, and three flags in four minutes is the thing an operator triages on.
+- **Consequences:** The attention queue is its **own query**, not a filter on the inbox list —
+  that one selects conversations having a `Handoff` row, so filtering it by severity would
+  return nothing for exactly the conversations this feature exists for. Severity **only ratchets
+  up**; a customer who calms down has not stopped needing a human, and clearing is an explicit
+  operator action. `bot_still_answering` is derived from `status != "handoff"` and rendered on
+  every row, because who is currently replying must never be inferred.
+
 ### ADR-056: `public_contacts` is a list of strings, validated against the redactor's own matcher
 - **Date:** 2026-08-04
 - **Status:** accepted

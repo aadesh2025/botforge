@@ -11,10 +11,19 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels import get_channel, whatsapp
+from app.chat import attention
 from app.core import rbac
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.models import Channel, Contact, Conversation, CrmContact, Handoff, Message
+from app.models import (
+    Channel,
+    Contact,
+    Conversation,
+    ConversationFlag,
+    CrmContact,
+    Handoff,
+    Message,
+)
 from app.modules.conversations.schemas import MessageOut
 from app.modules.conversations.service import _message_out
 from app.modules.inbox import schemas
@@ -106,6 +115,7 @@ async def _item_out(
         else None
     )
     return schemas.InboxItemOut(
+        attention_level=conv.attention_level,
         id=conv.id,
         agent_id=conv.agent_id,
         channel=conv.channel,
@@ -390,3 +400,102 @@ async def send_template(
 async def inbox_stream(org_id: uuid.UUID) -> Any:
     """Subscribe to this org's inbox topic; yields events until cancelled."""
     return hub.subscribe(inbox_topic(org_id))
+
+
+# ── Attention queue (docs/11 §L6, Phase E) ───────────────────────────────────────────────
+
+
+async def attention_queue(
+    session: AsyncSession, ctx: OrgContext, *, include_resolved: bool = False
+) -> list[schemas.AttentionItemOut]:
+    """Conversations a human has been asked to look at.
+
+    **A separate query from `list_conversations`, not a filter on it.** That one is the handoff
+    queue — it selects conversations that have a `Handoff` row, i.e. where the bot is paused.
+    An attention conversation usually has no handoff at all, because the whole point is that
+    the bot is still answering while someone decides whether to step in. Filtering the handoff
+    queue by severity would therefore return an empty list on exactly the conversations this
+    feature exists for.
+
+    Ordered by severity then age, so `crisis` pins to the top and the oldest unattended
+    conversation is next. An operator working top-down is working the right order.
+    """
+    rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
+    stmt = select(Conversation).where(
+        Conversation.organization_id == ctx.org.id,
+        Conversation.attention_level.is_not(None),
+    )
+    convs = list((await session.execute(stmt)).scalars().all())
+    if not convs:
+        return []
+
+    flag_rows = (
+        (
+            await session.execute(
+                select(ConversationFlag)
+                .where(ConversationFlag.conversation_id.in_([c.id for c in convs]))
+                .order_by(ConversationFlag.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_conv: dict[uuid.UUID, list[ConversationFlag]] = {}
+    for row in flag_rows:
+        if row.resolved_at is None or include_resolved:
+            by_conv.setdefault(row.conversation_id, []).append(row)
+
+    contacts = await _contacts_by_id(session, convs)
+    items: list[schemas.AttentionItemOut] = []
+    for conv in convs:
+        base = await _item_out(session, conv, contacts.get(conv.contact_id) if conv.contact_id else None)
+        recent = (
+            (
+                await session.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conv.id)
+                    .order_by(Message.created_at.desc())
+                    .limit(6)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        items.append(
+            schemas.AttentionItemOut(
+                **base.model_dump(),
+                flags=[
+                    schemas.ConversationFlagOut(
+                        id=f.id,
+                        kind=f.kind,
+                        severity=f.severity,
+                        signals=list(f.signals or []),
+                        created_at=f.created_at,
+                        resolved_at=f.resolved_at,
+                    )
+                    for f in by_conv.get(conv.id, [])
+                ],
+                recent_messages=[MessageOut.model_validate(m, from_attributes=True) for m in reversed(recent)],
+                # A handoff means a human owns it; until then the AI is still replying and the
+                # UI has to say so unambiguously.
+                bot_still_answering=conv.status != "handoff",
+            )
+        )
+
+    items.sort(
+        key=lambda i: (
+            -attention.severity_rank(i.attention_level),
+            i.last_message_at or i.created_at,
+        )
+    )
+    return items
+
+
+async def resolve_attention(
+    session: AsyncSession, ctx: OrgContext, cid: uuid.UUID
+) -> schemas.InboxItemOut:
+    """Clear the flags on a conversation — the only way its severity goes down."""
+    rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
+    conv = await _get_conversation(session, ctx, cid)
+    await attention.resolve_flags(session, conv, user_id=ctx.user.id)
+    return await _item_out(session, conv)

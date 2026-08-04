@@ -23,6 +23,9 @@ settings.auth_rate_limit = 100_000
 # live Groq call (slow, costs tokens, and fails in CI where there is no key); the tests that
 # exercise it turn it on and inject a mock transport, the same way the LLM tests do.
 settings.guard_injection_enabled = False
+# Same for L3 (policy/distress) — also a live model call on every turn.
+settings.guard_policy_enabled = False
+settings.guard_distress_enabled = False
 
 
 @pytest.fixture

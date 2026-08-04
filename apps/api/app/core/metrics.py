@@ -29,6 +29,9 @@ _hist_sum = 0.0
 # quiet-wrong-number the `pricing_unknown` work fixed.
 _guard_calls: dict[str, int] = {}
 _guard_tokens = 0
+# L3 policy calls, bucketed by distress level so the escalation rate is graphable.
+_policy_calls: dict[str, int] = {}
+_policy_tokens = 0
 
 
 def _status_class(status: int) -> str:
@@ -53,6 +56,14 @@ def observe_guard_call(outcome: str, prompt_tokens: int) -> None:
     with _lock:
         _guard_calls[outcome] = _guard_calls.get(outcome, 0) + 1
         _guard_tokens += max(0, prompt_tokens)
+
+
+def observe_policy_call(outcome: str, total_tokens: int) -> None:
+    """Record one L3 decision. `outcome` is level_<distress>|error|unparseable|unavailable."""
+    global _policy_tokens
+    with _lock:
+        _policy_calls[outcome] = _policy_calls.get(outcome, 0) + 1
+        _policy_tokens += max(0, total_tokens)
 
 
 def render() -> str:
@@ -92,5 +103,14 @@ def render() -> str:
         )
         lines.append("# TYPE botforge_guard_tokens_total counter")
         lines.append(f"botforge_guard_tokens_total {_guard_tokens}")
+
+        # level_crisis rising is a product-safety signal, not just a metric.
+        lines.append("# HELP botforge_policy_calls_total L3 policy/distress decisions by outcome.")
+        lines.append("# TYPE botforge_policy_calls_total counter")
+        for outcome, count in sorted(_policy_calls.items()):
+            lines.append(f'botforge_policy_calls_total{{outcome="{outcome}"}} {count}')
+        lines.append("# HELP botforge_policy_tokens_total Tokens spent on the policy classifier.")
+        lines.append("# TYPE botforge_policy_tokens_total counter")
+        lines.append(f"botforge_policy_tokens_total {_policy_tokens}")
 
     return "\n".join(lines) + "\n"

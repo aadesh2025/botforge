@@ -37,6 +37,27 @@ export interface ApiInboxItem {
   created_at: string;
   handoff: ApiHandoff | null;
   contact: ApiContact | null;
+  /** Open review severity (docs/11 §L6). Independent of `status`: an `elevated` conversation
+   *  is still `active` and the bot is still replying. */
+  attention_level: "mild" | "elevated" | "crisis" | null;
+}
+
+export interface ApiConversationFlag {
+  id: string;
+  kind: string;
+  severity: "mild" | "elevated" | "crisis";
+  /** Short spans the classifier quoted — never the whole message. */
+  signals: string[];
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface ApiAttentionItem extends ApiInboxItem {
+  /** Full flag history, so the queue shows a trajectory rather than a final state. */
+  flags: ApiConversationFlag[];
+  recent_messages: ApiMessage[];
+  /** False once a human takes over. Drives the "AI is still responding" indicator. */
+  bot_still_answering: boolean;
 }
 
 /** Platform limits on replying right now. Null on channels that impose none. */
@@ -108,4 +129,22 @@ export function openInboxSocket(): WebSocket | null {
   if (!token || !org) return null;
   const wsBase = API_BASE.replace(/^http/, "ws");
   return new WebSocket(`${wsBase}/v1/inbox/ws?token=${encodeURIComponent(token)}&org_id=${org}`);
+}
+
+/** Conversations flagged for a human to look at (docs/11 §L6).
+ *
+ * Deliberately a different endpoint from `listInbox`, not a filter on it: that one is the
+ * handoff queue and selects conversations where the bot is *paused*, whereas an attention
+ * conversation usually has no handoff at all because the bot is still answering.
+ */
+export function listAttention() {
+  return api<ApiAttentionItem[]>("/v1/inbox/attention", { orgScoped: true });
+}
+
+/** Clear the flags — the only way a conversation's severity goes down. */
+export function resolveAttention(cid: string) {
+  return api<ApiInboxItem>(`/v1/inbox/conversations/${cid}/attention/resolve`, {
+    method: "POST",
+    orgScoped: true,
+  });
 }

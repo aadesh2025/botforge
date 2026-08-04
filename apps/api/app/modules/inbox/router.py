@@ -151,3 +151,26 @@ async def inbox_ws(websocket: WebSocket) -> None:
         log.warning("inbox_ws_error", error=str(exc))
     finally:
         hub.unsubscribe(inbox_topic(org_id), queue)
+
+
+@router.get("/attention", response_model=list[schemas.AttentionItemOut])
+async def attention_queue(
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> list[schemas.AttentionItemOut]:
+    """Conversations flagged for a human to look at (docs/11 §L6).
+
+    Distinct from `/conversations`, which is the handoff queue. Here the bot is usually still
+    answering — `bot_still_answering` says which.
+    """
+    return await service.attention_queue(session, ctx)
+
+
+@router.post("/conversations/{cid}/attention/resolve", response_model=schemas.InboxItemOut)
+async def resolve_attention(
+    cid: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.InboxItemOut:
+    """Clear the flags — the only way a conversation's severity goes down."""
+    return await service.resolve_attention(session, ctx, cid)
