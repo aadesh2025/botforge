@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, Loader2, MailX, UserX } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,24 @@ const FAILURES: Record<string, { icon: typeof MailX; title: string; detail: stri
 };
 
 type Mode = "login" | "signup";
+type Status = "working" | "needs-account" | "failed";
+
+/** Whether there's a stored session, read without breaking hydration.
+ *
+ * Cookies don't exist on the server, so reading them while deriving initial state renders one
+ * tree on the server and a different one on the client — the mismatch React reports as
+ * "server/client branch `if (typeof window !== 'undefined')`". `useSyncExternalStore` uses the
+ * *server* snapshot for the first client render too, so hydration matches, and React re-renders
+ * with the real value immediately afterwards. `unknown` is what both sides agree on first.
+ */
+const NEVER_CHANGES = () => () => {};
+function useStoredSession(): "in" | "out" | "unknown" {
+  return useSyncExternalStore(
+    NEVER_CHANGES,
+    () => (getAccessToken() ? "in" : "out"),
+    () => "unknown",
+  );
+}
 
 export function AcceptInvitation() {
   const router = useRouter();
@@ -40,16 +58,21 @@ export function AcceptInvitation() {
   const token = params.get("token") ?? "";
   const setSession = useSession((s) => s.setSession);
 
-  // Derived at first render rather than set from an effect: whether we can redeem straight
-  // away is knowable immediately from the token and the stored session.
-  const [status, setStatus] = useState<"working" | "needs-account" | "failed">(() => {
-    if (typeof window === "undefined") return "working"; // no cookies to read during SSR
-    if (!params.get("token")) return "failed";
-    return getAccessToken() ? "working" : "needs-account";
-  });
-  const [errorCode, setErrorCode] = useState<string | null>(() =>
-    typeof window !== "undefined" && !params.get("token") ? "org.invitation_invalid" : null,
-  );
+  const session = useStoredSession();
+  // Transitions only — a failed redeem, or signing out to use another account. Until one of
+  // those happens the status is derived, so it can never disagree with the session cookie.
+  const [override, setOverride] = useState<Status | null>(null);
+  const status: Status =
+    override ??
+    (session === "unknown"
+      ? "working" // both sides render the spinner until the client can read cookies
+      : !token
+        ? "failed"
+        : session === "in"
+          ? "working"
+          : "needs-account");
+  const setStatus = setOverride;
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("signup");
@@ -101,14 +124,16 @@ export function AcceptInvitation() {
     }
   }
 
-  // Redeem on load when there's already a session. The ref guards against React's
-  // double-mount in dev burning the single-use token.
+  // Redeem on load when there's already a session. `session === "in"` rather than
+  // `status === "working"`: the status is also "working" before the client has read cookies,
+  // and redeeming then would spend the single-use token on an unauthenticated request. The ref
+  // guards against React's double-mount in dev burning it.
   useEffect(() => {
-    if (attempted.current || status !== "working" || !token) return;
+    if (attempted.current || session !== "in" || override !== null || !token) return;
     attempted.current = true;
     void accept();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, status]);
+  }, [token, session, override]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -160,7 +185,10 @@ export function AcceptInvitation() {
   }
 
   if (status === "failed") {
-    const failure = FAILURES[errorCode ?? ""] ?? {
+    // A missing token is an unusable invitation, same as an expired one — that's the honest
+    // explanation, and there is no server error to report because nothing was ever sent.
+    const code = errorCode ?? (!token ? "org.invitation_invalid" : "");
+    const failure = FAILURES[code] ?? {
       icon: AlertTriangle,
       title: "We couldn't accept this invitation",
       detail: "Please ask whoever invited you to send a new one.",
