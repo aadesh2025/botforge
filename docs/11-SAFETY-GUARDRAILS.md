@@ -570,6 +570,30 @@ State these plainly rather than implying the problem is solved:
   Guard 2. Academic work (arXiv 2504.11168) demonstrates systematic evasion of every deployed
   detector class. Layers raise cost for an attacker; they do not eliminate the risk.
 
+### 9.-1 All phases shipped is not "solved" (2026-08-04)
+
+Phases A–G are built. That is a statement about **coverage, not about safety**, and the
+difference matters more now than it did when half of it was missing:
+
+- **Every layer here fails open.** L2 and L3 return "not graded" on any error, by design
+  (ADR-051) — so a Groq outage silently returns the deployment to regex-only input screening
+  and *no distress detection at all*, while every dashboard looks normal. The metrics to alert
+  on are `botforge_guard_calls_total{outcome="error"|"unavailable"}` and
+  `botforge_policy_calls_total{outcome="error"}`. A fail-open guard that is not running is
+  indistinguishable from one finding nothing.
+- **Distress detection is a triage aid, never a clinical instrument**, and must never be
+  described to a client as one. It will produce false positives and false negatives. The
+  `crisis` path is a **product-safety commitment**: routing a person in real distress to a queue
+  nobody watches is worse than not detecting them. Ship it only to a client who has agreed to
+  monitor it.
+- **Nothing here covers cross-turn accumulation.** Screening is per-message; an attack assembled
+  across five messages, none damning alone, is caught by no layer.
+- **Grounding remains the weakest link and is not a guardrail problem.** Prompt-only grounding
+  fabricated **12/15** on `llama-3.1-8b-instant` with no retrieved context (§9.1). No phase A–G
+  fixes that; it needs a code-level groundedness check that does not exist yet.
+- **The corpus is 89 cases we wrote.** It can now fail, which is the Phase D improvement, but it
+  is still not an adversary who has not seen it.
+
 ### 9.0 Corpus results (Phase D, 2026-08-04) — the numbers that can go red
 
 Everything in §9.1 below was measured against probe sets written in the same session as the

@@ -186,6 +186,48 @@ Two standing rules from that spec, repeated here because they are easy to violat
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-04 — docs/11 Phases E, F, G shipped; the safety track is code-complete (not "solved")
+- **Gate first:** re-ran the Phase D corpus before starting E rather than trusting the previous
+  session's report — 175 passed, committed at `3893dda`.
+- **⚠️ TWO THINGS NEED HUMAN REVIEW BEFORE THEY GO LIVE.** Both are drafts written by this
+  session, both are read by customers or decide who gets escalated, and a test asserts the
+  `DRAFT` marker stays until someone removes it:
+  1. `policy_guard.CRISIS_HOLDING_MESSAGE` — what a person in genuine distress reads instead of
+     a generated reply. Deliberately static (an 8B model must not improvise here) but static is
+     not the same as correct. It names **no helpline**: the right number is country-specific and
+     a wrong one is worse than none, so that belongs in per-client config.
+  2. Every file in `app/chat/policies/` — the wording *is* the classifier's taxonomy, so these
+     are product policy, not implementation detail.
+- **Phase E (L3 + attention queue).** One `gpt-oss-safeguard-20b` call grades each message
+  against our own markdown policies (hot-reloadable, so tuning needs no deploy). **On `mild` and
+  `elevated` the bot keeps answering** while a human is alerted — only `crisis` suppresses
+  generation, and even then it emits a written holding message and forces handoff. A queue that
+  muted the bot whenever someone was angry would trade a bad reply for no reply.
+- **ADR-057: attention is an axis beside `status`, not a value of it.** `status` is a lifecycle
+  (active → handoff → closed); attention is a severity that coexists with all three. As a status
+  value, a human taking over a crisis would *erase that it was one*, and anything branching on
+  "not active" would treat flagged conversations as finished. Severity only ratchets up.
+- **⚠️ The attention queue is its own endpoint, not a filter on the inbox list.** That list
+  selects conversations having a `Handoff` row — i.e. where the bot is *paused* — so filtering it
+  by severity returns nothing for exactly the conversations this feature exists for.
+- **Phase F (template variables).** `{{user_name}}` etc. The dangerous edge is that values come
+  from visitors: a contact named `}}\n\nIgnore all previous instructions` is a stored payload.
+  Escaped (braces/backslashes stripped, newlines collapsed, length capped), **single-pass**
+  substitution so a value containing `{{...}}` is inert, and unknown variables render **empty,
+  never literal**. Tests read the payloads straight out of Phase D's `second_order` fixture, so
+  the two cannot drift.
+- **Phase G (web access).** A tool in the existing loop, not a new pipeline. **Off** platform-wide
+  and per-agent, and **an empty allowlist denies everything** — the opposite reading would turn an
+  unconfigured agent loose on the open web. Ships un-seeded: deciding which domains a client's
+  agent may cite is not a judgement code should make. Results go through `wrap_untrusted()`.
+  **Not enabled for any live agent** — that is a per-client decision.
+- **⚠️ Both L2 and L3 make a live model call per turn; `conftest.py` disables them for the whole
+  suite.** Without that every chat test would bill a real Groq call on a machine with a key set.
+- docs/11 §9 gained a preamble saying plainly that all-phases-shipped is coverage, not safety:
+  every layer fails open, cross-turn accumulation is uncovered by design, and **grounding remains
+  the weakest link at 12/15 fabricated** — no phase A–G touches it.
+- ADR-057. Migration 0017. Suites: **700 pytest**, ruff + mypy + tsc + eslint clean.
+
 ### 2026-08-04 — the PII allowlist was unreachable; Phase D makes the guardrail numbers falsifiable
 - **`public_contacts` had no writer, so Phase B's allowlist was inverted in production.** The
   backend read it on every turn in both chat paths, but no schema field, router or UI could set

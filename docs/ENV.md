@@ -223,6 +223,31 @@ for prod; local default in dev.
 > `{outcome="unavailable"}` are the metrics to alert on, since a rising rate there means traffic
 > is running unguarded rather than that nothing is being attempted.
 
+- `GUARD_POLICY_ENABLED` / `GUARD_POLICY_MODEL` / `GUARD_POLICY_TIMEOUT_MS` — the L3 policy and
+  distress classifier (docs/11 §4-L3). Grades every customer message against the markdown in
+  `apps/api/app/chat/policies/`, which is **editable and hot-reloadable**: that wording *is* the
+  taxonomy, so tuning it needs no deploy. Runs on the platform key (ADR-055).
+- `GUARD_DISTRESS_ENABLED` (default `true`) — turns distress grading off entirely. Use it for a
+  client who has **not agreed to watch the attention queue**: routing a person in real distress
+  to a queue nobody monitors is worse than not detecting them (docs/11 §9).
+
+> **On `elevated` the bot keeps answering.** Only `crisis` suppresses the reply, and it emits a
+> fixed written holding message before handing to a human — never silence. `attention` is a
+> separate axis from `status` (ADR-057), so a crisis a human has taken over is still visibly a
+> crisis. Alert on `botforge_policy_calls_total{outcome="error"}`: L3 fails open, so an outage
+> looks exactly like "nobody is in distress today".
+
+- `WEB_SEARCH_ENABLED` (default **false**) — scoped web access (docs/11 §L7). Off platform-wide
+  *and* per-agent (`features.web_search_enabled`). `WEB_SEARCH_API_KEY` is needs-human.
+- `WEB_SEARCH_ENDPOINT` / `WEB_SEARCH_TIMEOUT_SECONDS` / `WEB_SEARCH_MONTHLY_QUOTA` — provider
+  endpoint (anything returning `{results:[{url,title,content}]}`), request budget, and the
+  per-org monthly ceiling (OWASP LLM10).
+
+> **An empty domain allowlist means nothing is searchable**, not "search anything". The
+> per-agent list (`features.web_search_allowed_domains`) ships empty and un-seeded on purpose:
+> a support agent that can search the whole web will confidently quote a competitor's pricing,
+> and deciding which domains a client's agent may cite is the client's call.
+
 > **Finding what is already in a knowledge base:** `make audit-kb-pii` scans every KB across
 > every org and reports counts per document (never the values). It exits non-zero when anything
 > is found. `--apply` backfills `documents.pii_flags` for documents ingested before migration
