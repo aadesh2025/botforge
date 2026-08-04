@@ -34,7 +34,12 @@ export interface ApiInvitation {
 /** Update org settings. Currently the auto-CRM-capture toggle; name/avatar live here too. */
 export function updateOrg(
   orgId: string,
-  body: { name?: string; avatar_url?: string; auto_crm_capture_enabled?: boolean },
+  body: {
+    name?: string;
+    avatar_url?: string;
+    auto_crm_capture_enabled?: boolean;
+    public_contacts?: string[];
+  },
 ) {
   return api<ApiOrg>(`/v1/orgs/${orgId}`, { method: "PATCH", body });
 }

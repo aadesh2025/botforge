@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2, UserPlus } from "lucide-react";
 import { Section } from "@/components/settings/section";
 import { DeleteOrg } from "@/components/settings/delete-org";
+import { PublicContacts } from "@/components/settings/public-contacts";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -87,6 +88,8 @@ export default function OrgSettingsPage() {
           returning customers by those — never by name.
         </p>
       </Section>
+
+      <PublicContacts />
 
       <Section title="Organization profile" description="How your workspace appears across BotForge.">
         <div className="grid gap-5 sm:grid-cols-2">

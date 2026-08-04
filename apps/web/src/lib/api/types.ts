@@ -50,6 +50,8 @@ export interface ApiOrg {
   avatar_url: string | null;
   /** Detect contact details customers share in chat and file them in the CRM. */
   auto_crm_capture_enabled?: boolean;
+  /** PII-redaction allowlist (docs/11 Phase B): contacts the agent may share with visitors. */
+  public_contacts?: string[];
   role: string;
   created_at: string;
   updated_at: string;

@@ -265,6 +265,27 @@ async function ensureOrg(name) {
   return org;
 }
 
+async function ensurePublicContacts(org, email) {
+  // The PII-redaction allowlist (docs/11 Phase B, ADR-053/056). An org with an empty list has
+  // an agent that redacts EVERY contact detail out of its own replies, including its own
+  // support address — which is exactly how the first client shipped, silently, for a week.
+  // Seeding the owner's email means a new client is never in that state by default.
+  step(2.5, "Public contacts (PII allowlist)");
+  const existing = Array.isArray(org.public_contacts) ? org.public_contacts : [];
+  if (existing.length > 0) {
+    // Never overwrite: by the time this re-runs the client may have curated the list, and
+    // replacing it would silently re-break replies they had already fixed.
+    reused(`${existing.length} public contact(s) already set`);
+    return existing;
+  }
+  const updated = await api("PATCH", `/v1/orgs/${org.id}`, {
+    orgId: org.id,
+    body: { public_contacts: [email] },
+  });
+  created(`public contact ${email}`);
+  return updated.public_contacts ?? [email];
+}
+
 async function ensureAgent(org, clientName) {
   const agentName = `${clientName} Assistant`;
   step(3, `Agent "${agentName}"`);
@@ -523,6 +544,7 @@ async function main() {
 
   await loginAsStaff();
   const org = await ensureOrg(name);
+  await ensurePublicContacts(org, email);
   const { agent, versionNumber, alreadyConfigured } = await ensureAgent(org, name);
   const published = await publishAgent(org, agent, versionNumber, alreadyConfigured);
 

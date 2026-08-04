@@ -18,6 +18,33 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-056: `public_contacts` is a list of strings, validated against the redactor's own matcher
+- **Date:** 2026-08-04
+- **Status:** accepted
+- **Context:** Phase B added `Organization.public_contacts` and read it on every turn, but no
+  schema, router or UI could write to it. The allowlist was therefore empty for every org, and
+  output redaction stripped each client's own support address out of its own replies — the
+  feature was live and inverted. Closing it needs a decision on the stored shape.
+- **Decision:** A flat `list[str]`. Entries are validated by `pii.classify_contact()`, which
+  reuses the same `_EMAIL` pattern and the same libphonenumber validity check the redactor
+  uses. Anything that is neither an email nor a valid phone number is **rejected with a 422**.
+- **Alternatives considered:** *Structured `{type, value}` objects* — the type is fully derivable
+  from the value, so storing it invites the two to disagree (`{type: "email", value: "+91…"}`),
+  and nothing reads the type: `is_allowlisted()` compares normalised values. It would be a
+  second source of truth for a fact already determined by the string. *Accept any string,
+  including URLs* — ADR-053's original note said "emails/phones/URLs", but redaction only acts
+  on emails and phone numbers, so a URL entry would sit in the list looking configured while
+  doing nothing. A silently inert safety setting is worse than an error message, which is the
+  same failure this ADR exists to fix.
+- **Consequences:** Validation and detection cannot drift, because they are the same code. The
+  allowlist is **per-value, not a per-org off switch**: allowlisting a support address does not
+  stop a founder's personal Gmail in the same sentence being redacted, and a test pins that.
+  `classify_contact()` deliberately does *not* go through `find_pii()` — that scans prose and
+  requires a bare digit run to look like a phone in context, whereas an allowlist entry has no
+  surrounding sentence and would be wrongly rejected. Provisioning seeds the list with the
+  client's own email so a new org is never in the broken-by-default state; a re-run never
+  overwrites a curated list.
+
 ### ADR-055: Guard models resolve on the platform key, never the org's credential chain
 - **Date:** 2026-08-04
 - **Status:** accepted

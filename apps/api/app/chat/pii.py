@@ -32,6 +32,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Literal
 
+import phonenumbers
 from phonenumbers import Leniency, PhoneNumberMatcher
 
 PiiKind = Literal["email", "phone", "address"]
@@ -77,6 +78,36 @@ def _normalize_contact(value: str) -> str:
     # all resolve to the same contact.
     tail = re.sub(r"\D", "", digits)
     return tail[-10:] if len(tail) >= 10 else (digits or v)
+
+
+def classify_contact(value: str) -> PiiKind | None:
+    """What kind of contact detail `value` is, or `None` if it is not one.
+
+    Validates an allowlist entry. Deliberately **not** `find_pii()`: that scans prose, so it
+    requires a bare digit run to look like a phone *in context* (a separator, a `+`, or a
+    nearby "call"). An allowlist entry has no surrounding sentence — it **is** the contact —
+    so those heuristics would reject a perfectly good `9345327506`.
+
+    It reuses the same `_EMAIL` pattern and the same libphonenumber validity check, so the
+    thing an operator is allowed to allowlist and the thing the redactor recognises cannot
+    drift apart.
+    """
+    text = (value or "").strip()
+    if not text:
+        return None
+    if _EMAIL.fullmatch(text):
+        return "email"
+    from app.core.config import settings  # local import: config imports nothing from here
+
+    regions = [r.strip() for r in settings.guard_pii_phone_regions.split(",") if r.strip()]
+    for region in [None, *regions]:
+        try:
+            parsed = phonenumbers.parse(text, region)
+        except phonenumbers.NumberParseException:
+            continue
+        if phonenumbers.is_valid_number(parsed):
+            return "phone"
+    return None
 
 
 def build_allowlist(entries: list[str] | None) -> set[str]:
