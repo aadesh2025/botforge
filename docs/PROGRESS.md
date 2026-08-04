@@ -38,6 +38,37 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **An invitation can be handed over as a link when the email doesn't arrive (2026-08-04).**
+  Inviting a member has always queued an email automatically, and the accept page has always let
+  the invitee set their own password and join. But a fresh deployment ships
+  `EMAIL_BACKEND=console`, which delivers to nobody — so an admin could invite a client and have
+  **no way to let them in**. The raw token was unreachable: `create_invitation` returns it only
+  outside production, and no screen ever displayed it. Spam filters and mistyped addresses fail
+  the same way in production, where the token is withheld entirely.
+
+  Pending invitations in Settings → Organization now have a link button.
+  `POST /v1/orgs/{org_id}/invitations/{id}/link` is gated on `members:manage`, scoped to the
+  caller's org (an invitation id from another tenant is a 404, not a link), and refuses an
+  accepted or expired invitation so a spent one can't be reopened. It is audited, and unlike the
+  create-time `accept_token` it **is** available in production: that one is withheld so a token
+  is never an incidental part of a response body, while this is an explicit, permissioned action
+  whose entire purpose is to hand the link to a human.
+
+  **Issuing a link is not read-only, and the dialog warns before doing it.** `token_hash` is a
+  one-way hash, so the original link cannot be read back — a new token must be minted, which
+  stops any previously sent link from working and restarts the 7-day clock. Regenerating silently
+  would break a link the client may already be holding. Verified end to end: invite → mint link →
+  client signs up with their own password → joins as `editor` → logs in later with that password
+  → replaying the link returns `org.invitation_invalid`.
+
+  Also fixed `WEB_BASE_URL`, which was `http://localhost:3000` while the web app runs on **3001**
+  here (3000 belongs to an unrelated app — CLAUDE.md §12), so every link the backend generated —
+  invitations, verification, password reset, magic links — pointed at the wrong application. That
+  is `.env` only; `.env.example` keeps the canonical 3000. **Real email delivery is still
+  unconfigured** (`EMAIL_BACKEND=console`, blank `SMTP_HOST`/`SMTP_FROM`) — that needs an SMTP
+  provider and a domain verified for SPF/DKIM, which no code can substitute for.
+  6 backend tests, 4 web unit tests.
+
 - **Safety guardrails, Phase A of `docs/11-SAFETY-GUARDRAILS.md` (2026-08-03).** A live red-team
   session broke a deployed agent six ways in about twenty messages. Five traced to one asymmetry:
   `neutralize_injections()` ran on retrieved RAG chunks and tool output but **never on the
