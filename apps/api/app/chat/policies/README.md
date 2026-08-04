@@ -4,6 +4,10 @@
 > implementing session and has **not** been reviewed by a human. They are live inputs to a
 > classifier that decides whether a customer conversation is escalated, so the wording is
 > product policy, not implementation detail. Read them before relying on the behaviour.
+>
+> Once reviewed, replace this block *and* `test_policies_are_flagged_as_unreviewed` together —
+> the marker and the test that enforces it are one safeguard, and flipping only one of them
+> removes it silently. Hot-reload means tuning the wording later needs no deploy.
 
 Each file is one concern, loaded at startup and **hot-reloadable** (`reload_policies()`), so an
 operator can tune wording without a deploy. They are concatenated into one system prompt for

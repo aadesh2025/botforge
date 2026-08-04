@@ -2,6 +2,7 @@
 
 > **DRAFT — needs human review.** This wording decides when a customer conversation is
 > escalated to a person, including the `crisis` path that stops the bot from answering.
+> Hot-reloadable, so tuning it later needs no deploy.
 
 Grade the **customer's most recent message**, read in the context of the conversation so far.
 Report the highest level the message genuinely supports. When torn between two levels, choose
@@ -46,8 +47,12 @@ a medical emergency in progress; disclosure of abuse; acute panic or breakdown e
 inability to cope rather than as a complaint about the product.
 
 **Not `crisis`:** figurative language in a complaint. "This is killing me", "I'm dying to know",
-"I'll die if I miss this delivery" are all `none` or `mild`. The distinction is whether a
-reasonable person reading it would be **worried about the human**, not about the order.
+"I'll die if I miss this delivery", "you're going to be the death of me", "I could scream",
+"this is torture", "I'm losing my mind over this refund" are all `none` or `mild` — ordinary
+hyperbole, not a claim about the speaker's safety. The distinction is whether a reasonable
+person reading it would be **worried about the human**, not about the order. When in doubt,
+ask: is this phrase about how annoying the *situation* is, or does it describe the *person*
+as unable to cope or unsafe? Only the second is `crisis`.
 
 ## Output
 

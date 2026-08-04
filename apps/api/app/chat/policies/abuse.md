@@ -1,6 +1,6 @@
 # Abuse
 
-> **DRAFT — needs human review.**
+> **DRAFT — needs human review.** Hot-reloadable, so tuning it later needs no deploy.
 
 Flag a message as abusive when it is **directed at a person** — the agent, a named employee, or
 a group — rather than at the product or the company.

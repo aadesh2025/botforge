@@ -1,6 +1,6 @@
 # PII request
 
-> **DRAFT — needs human review.**
+> **DRAFT — needs human review.** Hot-reloadable, so tuning it later needs no deploy.
 
 Flag when the message asks for **personal details of a person** — a staff member's direct
 number, a founder's private email, another customer's information, an employee's home address.

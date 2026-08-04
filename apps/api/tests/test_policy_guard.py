@@ -177,7 +177,11 @@ def test_distress_policy_keeps_crisis_narrow() -> None:
 
 
 def test_policies_are_flagged_as_unreviewed() -> None:
-    """These are drafts. The marker stays until a human has read them (docs/11 §4-L3)."""
+    """These are drafts. The marker stays until a human has read them (docs/11 §4-L3).
+
+    The marker and this assertion are **one safeguard**. Flipping either alone removes it, so
+    when the policies are genuinely reviewed, change both in the same commit.
+    """
     text = policy_guard._policy_text()
     assert "DRAFT" in text, "policy wording is unreviewed and must say so"
 

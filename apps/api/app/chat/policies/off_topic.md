@@ -1,6 +1,6 @@
 # Off topic
 
-> **DRAFT — needs human review.**
+> **DRAFT — needs human review.** Hot-reloadable, so tuning it later needs no deploy.
 
 Flag when the message asks for something **outside what this business does** — general
 knowledge, homework, code unrelated to the product, other companies' products, news, medical
