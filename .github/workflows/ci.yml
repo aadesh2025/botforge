@@ -55,6 +55,15 @@ jobs:
       - name: Migrate database
         run: uv run alembic upgrade head
 
+      # Runs before the full suite and on its own so a guardrail regression is unmissable:
+      # buried among 500+ tests, "1 failed" reads as flake. A failure here means an attack the
+      # corpus already knew about got through, or a legitimate customer message started being
+      # refused — a build failure either way, never a warning (docs/11 §5, Phase D).
+      # `-s` so the segmented recall table lands in the job log; English and non-English are
+      # reported separately and must never be merged into one headline number.
+      - name: Red-team corpus (guardrail regression gate)
+        run: uv run pytest tests/test_redteam_corpus.py tests/test_guardrails_redteam.py -q -s
+
       - name: Pytest
         run: uv run pytest -q
 

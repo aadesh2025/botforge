@@ -186,6 +186,47 @@ Two standing rules from that spec, repeated here because they are easy to violat
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-04 — the PII allowlist was unreachable; Phase D makes the guardrail numbers falsifiable
+- **`public_contacts` had no writer, so Phase B's allowlist was inverted in production.** The
+  backend read it on every turn in both chat paths, but no schema field, router or UI could set
+  it — so it was empty for every org and output redaction stripped each client's **own** support
+  email and phone out of their **own** replies. The feature was live and doing the opposite of
+  its purpose. Fixed on the existing org-settings pattern (`UpdateOrgRequest` → `update_org` →
+  `OrgOut`, gated on `ORG_MANAGE`), with a Settings chip list whose empty state says plainly that
+  the agent currently shares nothing.
+- **⚠️ Phase B's tests passed the whole time**, because they only ever asserted the
+  *not-allowlisted* direction — the direction that passes when the feature is broken. The new
+  tests assert **both directions with the same value**, so the difference is provably the
+  allowlist. When a feature has an allow and a deny path, testing only deny proves nothing.
+- Validation reuses `pii.classify_contact()` (same `_EMAIL` + libphonenumber check as the
+  redactor) so the two cannot drift; it deliberately does **not** go through `find_pii()`, which
+  scans prose and would reject a bare `9345327506`. **ADR-056**: a flat `list[str]`, not
+  `{type, value}` — the type is derivable and storing it invites disagreement — and a URL is
+  **rejected** rather than stored inert, since redaction only acts on emails and phones.
+  Provisioning now seeds the owner's email so a new org is never born broken.
+- **Phase D — the corpus that can go red.** Every recall figure through Phase C was measured
+  against probes written in the same session as the code, i.e. unfalsifiable. Now **89 cases in
+  5 files**, split by the layer that actually owns each: `attacks`/`benign` (L1),
+  `attacks_multilingual` (L2), `attacks_output` (L5), `attacks_contextual` (indirect /
+  second-order / multi-turn). Gated in CI **as its own step** — buried in 600+ tests, "1 failed"
+  reads as flake.
+- **The six live failures do not all belong to the same layer**, which is why filing them all as
+  input attacks would have been wrong: 1 and 2 are L1; **3 ("can i get your number") is a
+  perfectly reasonable question** whose *reply* was the failure, so it sits in `benign.yaml`
+  (must never be blocked) with its regression case in `attacks_output.yaml`; 4 is grounding
+  (needs a live model); 5 is corpus hygiene (§6); 6 is L5.
+- **⚠️ The corpus failed twice on its first run — both times on fixtures I had written wrong**
+  (a mislabelled category, a duplicated id). That is the point of it: a corpus that has never
+  failed has not been tested either. The duplicate-id check stays for that reason.
+- Second-order fixtures (payload in a **contact name**) are marked `expects: future_phase` and
+  the test asserts the stored value *is* recognisable as an attack — so Phase F cannot ship
+  without handling it. **Never `skip` a known gap; record it so it fails when the phase lands.**
+- **Stated, not implied away:** screening is per-message, so an attack *accumulated* across five
+  turns with no single damning message is caught by **no layer**. In docs/11 §9.0.
+- Corpus result: **35/35 English blocked · 0/31 false positives · 0/6 non-English (L2's job) ·
+  2/2 multi-turn final payload · 3/3 indirect neutralized**. ADR-056. Suites: **629 pytest**,
+  **140 vitest**, ruff + mypy + tsc + eslint clean.
+
 ### 2026-08-04 — docs/11 Phase C: the L2 classifier closes both A.1 gaps
 - **The prerequisite came first and it is the important part** (ADR-055). Guard models resolve
   through `guard_models.platform_guard_key()` — `settings.groq_api_key` only — **never**
