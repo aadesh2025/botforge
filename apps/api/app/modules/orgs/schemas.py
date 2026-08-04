@@ -96,6 +96,17 @@ class InvitationOut(BaseModel):
     accept_token: str | None = None
 
 
+class InvitationLinkOut(BaseModel):
+    """A freshly minted acceptance link for a pending invitation.
+
+    Invitation tokens are stored hashed, so the original link cannot be read back — issuing one
+    necessarily mints a new token and **invalidates any link already sent**. Callers must say so.
+    """
+
+    accept_url: str
+    expires_at: dt.datetime
+
+
 class TransferOwnershipRequest(BaseModel):
     user_id: uuid.UUID
 

@@ -276,6 +276,48 @@ async def list_invitations(session: AsyncSession, ctx: OrgContext) -> list[schem
     ]
 
 
+async def regenerate_invitation_link(
+    session: AsyncSession, ctx: OrgContext, invitation_id: uuid.UUID
+) -> schemas.InvitationLinkOut:
+    """Mint a fresh acceptance link for a pending invitation, for sending by hand.
+
+    Needed because the emailed link can go astray — a spam filter, a typo'd address, or an
+    unconfigured SMTP relay (the default `EMAIL_BACKEND=console` delivers to nobody). Without
+    this an admin has no way to get an invited client into the org.
+
+    Minting is unavoidable rather than a choice: `token_hash` is a one-way hash, so the original
+    token cannot be read back out. **The previously sent link stops working**, which is why the
+    UI has to warn before calling this, and the expiry clock restarts.
+
+    Deliberately available in production, unlike `create_invitation`'s `accept_token` (withheld
+    there so a token is never an incidental part of a response body). This one is an explicit,
+    permissioned, audited action whose entire purpose is to hand the link to a human.
+    """
+    rbac.require_permission(ctx.role, rbac.MEMBERS_MANAGE)
+    invitation = await session.get(Invitation, invitation_id)
+    if (
+        invitation is None
+        or invitation.organization_id != ctx.org.id
+        or invitation.accepted_at is not None
+        or invitation.expires_at <= _now()
+    ):
+        raise AppError("org.invitation_not_found", "That invitation is no longer pending.", 404)
+
+    raw = generate_opaque_token()
+    invitation.token_hash = hash_token(raw)
+    invitation.expires_at = _now() + INVITE_TTL
+    await session.flush()
+
+    await _write_audit(
+        session, ctx.org.id, ctx.user.id, "invitation.link_regenerated",
+        target_type="invitation", target_id=str(invitation.id), meta={"email": invitation.email},
+    )
+    return schemas.InvitationLinkOut(
+        accept_url=f"{settings.web_base_url}/invitations/accept?token={raw}",
+        expires_at=invitation.expires_at,
+    )
+
+
 async def accept_invitation(session: AsyncSession, user: User, token: str) -> schemas.OrgOut:
     stmt = select(Invitation).where(
         Invitation.token_hash == hash_token(token),

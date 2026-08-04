@@ -109,6 +109,15 @@ async def list_invitations(
     return await service.list_invitations(session, ctx)
 
 
+@router.post("/{org_id}/invitations/{invitation_id}/link", response_model=schemas.InvitationLinkOut)
+async def regenerate_invitation_link(
+    invitation_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(org_context),
+) -> schemas.InvitationLinkOut:
+    return await service.regenerate_invitation_link(session, ctx, invitation_id)
+
+
 @router.delete("/{org_id}/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_invitation(
     invitation_id: uuid.UUID,

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2, UserPlus } from "lucide-react";
 import { Section } from "@/components/settings/section";
 import { DeleteOrg } from "@/components/settings/delete-org";
+import { CopyInviteLink } from "@/components/settings/copy-invite-link";
 import { PublicContacts } from "@/components/settings/public-contacts";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -162,7 +163,11 @@ export default function OrgSettingsPage() {
       </Section>
 
       {canManage && (invites ?? []).length > 0 && (
-        <Section title="Pending invitations" description="Awaiting acceptance." noPad>
+        <Section
+          title="Pending invitations"
+          description="Awaiting acceptance. Copy a link to send by hand if the email didn't arrive."
+          noPad
+        >
           <ul className="divide-y divide-border">
             {(invites ?? []).map((inv) => (
               <li key={inv.id} className="flex items-center gap-3 px-5 py-3">
@@ -170,6 +175,7 @@ export default function OrgSettingsPage() {
                   <span className="text-sm text-text">{inv.email}</span>
                 </div>
                 <Badge variant="warn">{inv.role}</Badge>
+                <CopyInviteLink orgId={orgId} invitationId={inv.id} email={inv.email} />
                 <button
                   onClick={() => revoke.mutate(inv.id)}
                   className="rounded-md p-1.5 text-faint transition-colors hover:bg-surface-2 hover:text-error"

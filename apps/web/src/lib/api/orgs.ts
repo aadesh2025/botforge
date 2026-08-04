@@ -74,6 +74,17 @@ export function createInvitation(orgId: string, email: string, role: string) {
   return api<ApiInvitation>(`/v1/orgs/${orgId}/invitations`, { method: "POST", body: { email, role } });
 }
 
+/** Mint a fresh acceptance link to send by hand.
+ *
+ * Tokens are stored hashed, so this necessarily issues a *new* one and **invalidates any link
+ * already emailed**. Warn before calling it. */
+export function createInvitationLink(orgId: string, invitationId: string) {
+  return api<{ accept_url: string; expires_at: string }>(
+    `/v1/orgs/${orgId}/invitations/${invitationId}/link`,
+    { method: "POST" },
+  );
+}
+
 export function revokeInvitation(orgId: string, invitationId: string) {
   return api<void>(`/v1/orgs/${orgId}/invitations/${invitationId}`, { method: "DELETE" });
 }
