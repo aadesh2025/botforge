@@ -38,6 +38,45 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Inviting someone who already has an account works (2026-08-04, ADR-058).** It dead-ended
+  before: the accept page opened in signup mode, so an existing user typed their own address,
+  hit `auth.email_taken`, and got *"An account with this email already exists."* as a bare
+  error. The only way out was a small "I already have an account" toggle at the bottom of the
+  form.
+
+  **Nothing was wrong underneath**, which is worth recording because it shaped the fix.
+  `accept_invitation()` already reactivates a dormant `Membership` or creates one and applies the
+  invited role, and `OrgSwitcher` already moves between orgs — so an account could always hold
+  several orgs. The page simply could not see any of it: the token is opaque and accepting is
+  all-or-nothing, so it knew neither which org was being joined nor whether the address was
+  registered.
+
+  New unauthenticated, rate-limited `GET /v1/orgs/invitations/{token}` returns the org name,
+  role, invited address and `account_exists`. The page now leads with **"Join {org} as {role}"**,
+  opens in sign-in mode for an existing account, and renders the email **read-only** — the server
+  rejects any other address with `org.invite_email_mismatch`, so an editable field could only
+  ever produce that error. If signup still reports the address is taken (it was registered
+  between preview and submit, or the preview never loaded) the form switches to sign-in and says
+  why, instead of surfacing the 409.
+
+  A mismatch now offers **"Use a different account"**, which clears the session and returns to
+  the same invitation. The old dead end pointed at a sign-in page that kept the wrong session and
+  looped straight back to the same error.
+
+  Pending invitations carry `account_exists` too, badged **existing user** in Settings →
+  Organization, so an admin knows to say "sign in with your usual password" rather than "create
+  an account" — one batched lookup for the list, not a query per row.
+
+  **The disclosure is deliberate and bounded:** the preview reveals whether an address has an
+  account, but only to someone already holding a single-use token that was emailed to it. Spent,
+  revoked, expired and invented tokens all return the same `org.invitation_invalid`.
+
+  Verified in the browser end to end: signed in as the wrong account the page named the invited
+  address and offered "Use a different account"; that led to a locked-email sign-in form reading
+  "Join Aurozen Client as editor"; the existing password signed them in and landed them in the
+  new org. 5 backend tests, 6 web unit tests; two E2E cases rewritten from the old behaviour to
+  the new. Suites: **710 pytest**, **150 vitest**, ruff + mypy + tsc + eslint clean.
+
 - **An invitation can be handed over as a link when the email doesn't arrive (2026-08-04).**
   Inviting a member has always queued an email automatically, and the accept page has always let
   the invitee set their own password and join. But a fresh deployment ships

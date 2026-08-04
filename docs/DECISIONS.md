@@ -18,6 +18,34 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-058: An invitation is readable before it is redeemed
+- **Date:** 2026-08-04
+- **Status:** accepted
+- **Context:** inviting an address that already had an account dead-ended. The accept page
+  opened in signup mode, so the invitee hit `auth.email_taken` and got *"An account with this
+  email already exists."* with no route forward but a small toggle at the bottom of the form.
+  The page could not do better: the token is opaque and `POST .../accept` is all-or-nothing, so
+  it knew neither which org was being joined nor whether the address was registered. Nothing was
+  wrong underneath — `accept_invitation()` already reactivates or creates a `Membership`, and
+  `OrgSwitcher` already moves between orgs.
+- **Decision:** an unauthenticated, rate-limited `GET /v1/orgs/invitations/{token}` returning
+  org name, role, invited address and `account_exists`. The page leads with "Join {org} as
+  {role}", opens in sign-in mode when an account exists, and renders the email **read-only** —
+  the server rejects any other address with `org.invite_email_mismatch`, so an editable field
+  could only ever produce that error. A signup that still reports the address taken switches to
+  sign-in and explains, rather than surfacing the 409.
+- **Alternatives considered:** *(a)* auto-switch mode on `auth.email_taken` only — no new
+  endpoint and no disclosure, but the page still cannot name the org or prefill the address, and
+  the user pays a failed attempt first; *(b)* require a session before showing anything —
+  invitees usually have no account, which is the case that has to work; *(c)* fold the preview
+  into the accept call — accepting is a write, and reading must not consume a single-use token.
+- **Consequences:** the endpoint tells a token holder whether that address is registered. They
+  already hold a single-use token that was emailed to it, so this is not an enumeration oracle,
+  but it is a disclosure: hence the rate limit, and hence spent, revoked, expired and invented
+  tokens all return the same `org.invitation_invalid`. `account_exists` also rides on
+  `InvitationOut` so the members screen can badge existing users — one batched lookup for the
+  list, not a query per row.
+
 ### ADR-057: `attention` is an axis beside `status`, not a value of it
 - **Date:** 2026-08-04
 - **Status:** accepted
