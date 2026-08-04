@@ -128,6 +128,16 @@ class Settings(BaseSettings):
     # off for a client who has not agreed to watch the queue it fills (docs/11 §9).
     guard_distress_enabled: bool = True
 
+    # --- Web access (docs/11 §L7, Phase G) ---
+    # OFF by default, platform-wide, and per-agent off as well. This spends money and reaches
+    # the open internet on a customer's behalf, so it is a per-client decision.
+    web_search_enabled: bool = False
+    web_search_api_key: str | None = None
+    web_search_endpoint: str = "https://api.tavily.com/search"
+    web_search_timeout_seconds: float = 8.0
+    # Per-org monthly ceiling (OWASP LLM10, unbounded consumption).
+    web_search_monthly_quota: int = 1000
+
     # --- Tools (Phase 9) ---
     # Max tool-call iterations per turn before the runtime forces a final answer.
     tool_max_iterations: int = 4

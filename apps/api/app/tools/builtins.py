@@ -136,11 +136,32 @@ async def _http_request(_ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         return ToolResult(output={}, status="error", error=f"request failed: {exc}")
 
 
-# ── web_search (stub) ──────────────────────────────────────────────────────────────
-async def _web_search(_ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
-    return ToolResult(
-        output={"results": [], "note": "web search is not configured on this instance"},
-    )
+# ── web_search (docs/11 §L7, Phase G) ──────────────────────────────────────────────
+async def _web_search(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
+    """Search the web, scoped to the agent's allowed domains.
+
+    Off by default and denied outright when no domain is allowlisted — an empty allowlist
+    means "nothing is searchable", not "search anything". Results are wrapped as untrusted
+    content before the model sees them.
+    """
+    from app.tools import web_search as ws
+
+    enabled, allowlist, blocklist = ws.agent_policy(ctx.version.features)
+    if not enabled:
+        return ToolResult(
+            output={"results": [], "note": "web search is not enabled for this agent"},
+            status="error",
+            error="web_search_disabled",
+        )
+    try:
+        results = await ws.search(
+            str(args.get("query") or ""), allowlist=allowlist, blocklist=blocklist
+        )
+    except ws.WebSearchError as exc:
+        return ToolResult(output={"results": []}, status="error", error=str(exc))
+    except Exception as exc:  # provider/network failure must not break the turn
+        return ToolResult(output={"results": []}, status="error", error=f"web search failed: {exc}")
+    return ToolResult(output=ws.as_tool_output(results))
 
 
 # ── request_handoff ──────────────────────────────────────────────────────────────────
@@ -206,7 +227,7 @@ BUILTINS: dict[str, BuiltinTool] = {
     ),
     "web_search": BuiltinTool(
         name="web_search",
-        description="Search the public web (stub — returns no results unless configured).",
+        description="Search the web, restricted to this agent's allowed domains. Cite source URLs.",
         parameters={
             "type": "object",
             "properties": {"query": {"type": "string"}},
