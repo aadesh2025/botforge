@@ -19,6 +19,10 @@ from app.main import create_app
 
 # Keep rate limiting out of the way of functional tests; it's unit-tested separately.
 settings.auth_rate_limit = 100_000
+# L2 calls a real model over the network. Off for the suite by default so no test makes a
+# live Groq call (slow, costs tokens, and fails in CI where there is no key); the tests that
+# exercise it turn it on and inject a mock transport, the same way the LLM tests do.
+settings.guard_injection_enabled = False
 
 
 @pytest.fixture

@@ -8,6 +8,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat import guard_models
+from app.core.config import settings
 from app.core.errors import AppError
 from app.core.probes import check_database, check_redis
 from app.integrations.n8n_client import get_client as get_n8n_client
@@ -190,6 +192,9 @@ async def health(session: AsyncSession) -> schemas.HealthOut:
         users=int(users or 0),
         conversations=int(convos or 0),
         messages=int(msgs or 0),
+        guard_injection_available=guard_models.is_available(),
+        guard_injection_reason=guard_models.unavailable_reason(),
+        guard_injection_model=settings.guard_injection_model,
     )
 
 

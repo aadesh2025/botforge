@@ -18,6 +18,32 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-055: Guard models resolve on the platform key, never the org's credential chain
+- **Date:** 2026-08-04
+- **Status:** accepted
+- **Context:** Phase C adds an L2 classifier call per turn. The multi-provider work (ADR-047/048)
+  means an org may run its agent on any of 13 providers and hold **no Groq key at all**, while
+  both guard models are hosted on Groq.
+- **Decision:** Guard models resolve through `guard_models.platform_guard_key()` — a separate
+  path reading `settings.groq_api_key` only. Never `resolve_credential()`'s agent → org → env
+  chain. Guard spend is the platform's, tracked in its own metrics bucket
+  (`botforge_guard_tokens_total`) and never folded into `TurnResult`.
+- **Alternatives considered:** *Resolve like any other chat call* — the org chain falls back to
+  the env key last, so it would appear to work in dev and then, for a client on
+  Mistral/DeepSeek/xAI/Together/Fireworks/Cerebras with their own key configured, resolve to
+  *their* key against a Groq-hosted model and fail. Because the guard fails open, that failure
+  is silent: safety would switch off for exactly the clients who chose a non-Groq provider, and
+  the logs would show nothing a human reads daily. *Bill guard tokens to the org* — the call is
+  made on the platform's key, so charging it to the client's cost line misreports margin, the
+  same class of quiet-wrong-number the `pricing_unknown` work fixed.
+- **Consequences:** No org configuration can disable the guard by omission; only an explicit
+  `Organization.guard_injection_enabled = False` does, and that is a deliberate plan-tier
+  opt-out. A missing platform key is announced at startup (like `llm_force_fake`) **and**
+  surfaced in the admin console health card, because a fail-open guard that is not running looks
+  identical to a guard finding nothing. The model id lives in `Settings` with its price in
+  `llm/catalog.GUARD_MODELS` and is deliberately **not** in `PROVIDERS` — Prompt Guard answers
+  with a bare float, so an agent pointed at it would reply `0.0004` to every question.
+
 ### ADR-054: Ingest flags PII, and never redacts or blocks
 - **Date:** 2026-08-03
 - **Status:** accepted

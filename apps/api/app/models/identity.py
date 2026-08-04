@@ -116,6 +116,11 @@ class Organization(Base, UUIDPrimaryKey, TimestampMixin, SoftDeleteMixin):
     #: would say it existed. Empty means the agent shares no contact details at all, which is
     #: the safe default but not a useful one — provisioning seeds it from the org's own details.
     public_contacts: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    #: Per-org override for the L2 injection classifier (docs/11 §4-L2). `None` follows the
+    #: platform default, so an operator who never touches this tracks `GUARD_INJECTION_ENABLED`
+    #: rather than being pinned to whatever it was the day their org was created. `False` is an
+    #: explicit opt-out for a client on a plan that does not carry the per-turn cost.
+    guard_injection_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
 
 

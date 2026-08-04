@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.api.routers import health
 from app.channels.router import router as channels_router
+from app.chat import guard_models
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
@@ -75,6 +76,7 @@ def _warn_missing_secrets() -> None:
     if not settings.n8n_api_key:
         log.warning("missing_key", service="n8n", effect="disabled; set N8N_API_KEY")
     _warn_malformed_keys()
+    guard_models.warn_if_unconfigured()
 
 
 # A credential can't contain these and still be valid, so their presence means a typo or a

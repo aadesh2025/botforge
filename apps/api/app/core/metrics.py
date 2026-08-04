@@ -23,6 +23,12 @@ _requests: dict[tuple[str, str], int] = {}
 _bucket_counts: list[int] = [0] * len(_BUCKETS)
 _hist_count = 0
 _hist_sum = 0.0
+# L2 guard calls by outcome, and the tokens they spent (docs/11 §4-L2).
+# A SEPARATE bucket on purpose: guard calls run on the *platform* Groq key, not the client's,
+# so folding them into per-agent cost would misreport client margin — the same class of
+# quiet-wrong-number the `pricing_unknown` work fixed.
+_guard_calls: dict[str, int] = {}
+_guard_tokens = 0
 
 
 def _status_class(status: int) -> str:
@@ -39,6 +45,14 @@ def observe_request(method: str, status: int, duration_seconds: float) -> None:
         for i, edge in enumerate(_BUCKETS):
             if duration_seconds <= edge:
                 _bucket_counts[i] += 1
+
+
+def observe_guard_call(outcome: str, prompt_tokens: int) -> None:
+    """Record one L2 guard decision. `outcome` is scored|cache_hit|error|unavailable."""
+    global _guard_tokens
+    with _lock:
+        _guard_calls[outcome] = _guard_calls.get(outcome, 0) + 1
+        _guard_tokens += max(0, prompt_tokens)
 
 
 def render() -> str:
@@ -65,5 +79,18 @@ def render() -> str:
         lines.append(f'botforge_http_request_duration_seconds_bucket{{le="+Inf"}} {_hist_count}')
         lines.append(f"botforge_http_request_duration_seconds_sum {_hist_sum:.4f}")
         lines.append(f"botforge_http_request_duration_seconds_count {_hist_count}")
+
+        # `outcome="error"` and `outcome="unavailable"` are the ones to alert on: the guard
+        # fails open, so a rising rate there means traffic is running unguarded rather than
+        # that nothing is being attempted.
+        lines.append("# HELP botforge_guard_calls_total L2 injection-guard decisions by outcome.")
+        lines.append("# TYPE botforge_guard_calls_total counter")
+        for outcome, count in sorted(_guard_calls.items()):
+            lines.append(f'botforge_guard_calls_total{{outcome="{outcome}"}} {count}')
+        lines.append(
+            "# HELP botforge_guard_tokens_total Tokens spent on guard models, on the platform key."
+        )
+        lines.append("# TYPE botforge_guard_tokens_total counter")
+        lines.append(f"botforge_guard_tokens_total {_guard_tokens}")
 
     return "\n".join(lines) + "\n"

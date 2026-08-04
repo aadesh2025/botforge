@@ -12,7 +12,7 @@ from typing import Any, cast
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat import guardrails, memory
+from app.chat import guard_models, guardrails, memory
 from app.chat.assembly import build_messages, compose_system_prompt, instruction_prompt_of
 from app.chat.pii import build_allowlist
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
@@ -257,13 +257,25 @@ async def _prepare_turn(
         if settings.guard_input_enabled
         else guardrails.InputVerdict()
     )
+    # L2 classifier (docs/11 §4-L2), only when L1 let the message through — a regex-obvious
+    # attack costs no tokens.
+    l2_score: float | None = None
     if guard.blocked:
+        l2_blocked = False
+    else:
+        l2_blocked, l2_score = await guard_models.is_injection(
+            data.message, org_enabled=ctx.org.guard_injection_enabled
+        )
+
+    if guard.blocked or l2_blocked:
         log.warning(
             "guard_input_blocked",
             agent_id=str(agent.id),
             conversation_id=str(conv.id),
+            layer="L1" if guard.blocked else "L2",
             category=guard.category,
             flags=guard.flags,
+            l2_score=round(l2_score, 4) if l2_score is not None else None,
             message_sha256=hashlib.sha256(data.message.encode("utf-8")).hexdigest()[:16],
         )
         context_block, citations = "", cast(list[Citation], [])
@@ -298,7 +310,7 @@ async def _prepare_turn(
     # Pre-LLM refusals. The input guard redirects without naming a rule (docs/11 §4a); a
     # blocked topic uses the agent's own refusal line.
     topics = guardrails.blocked_topics_for(version.persona)
-    if guard.blocked:
+    if guard.blocked or l2_blocked:
         return conv, RefusalProvider(guardrails.INJECTION_REDIRECT), req, [], None
     if topics and guardrails.matches_blocked_topic(data.message, topics):
         provider = RefusalProvider(_refusal_text(version))

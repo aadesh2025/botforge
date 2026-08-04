@@ -98,6 +98,24 @@ class Settings(BaseSettings):
     # never redacted from a reply, until the false-positive rate is measured on real traffic.
     guard_pii_redact_addresses: bool = False
 
+    # --- L2 injection classifier (docs/11 §4-L2, Phase C) ---
+    # Catches what the L1 regexes structurally cannot: paraphrase, and every language other
+    # than English. Measured on this deployment, L1 scores 0/6 on both.
+    guard_injection_enabled: bool = True
+    # Model id, never inline: Groq deprecated `llama-guard-4-12b` in Feb 2026 and this repo
+    # shipped a stale `mixtral-8x7b-32768` for months. Priced in `llm/catalog.GUARD_MODELS`.
+    guard_injection_model: str = "meta-llama/llama-prompt-guard-2-86m"
+    # The model returns a probability in [0,1]. Measured separation on real traffic shapes is
+    # enormous — benign < 0.005, attacks > 0.998 — so 0.5 sits in empty space and the exact
+    # value is not delicate. Raise it if a client's phrasing trips it.
+    guard_injection_threshold: float = 0.5
+    # Availability budget. A guard that is slow must not make the product slow: on timeout the
+    # turn proceeds unguarded (fail open, ADR-051) with a loud log and a metric.
+    guard_injection_timeout_ms: int = 300
+    # Repeat probes are free. Keyed on sha256 of the normalised text, so an attacker retrying
+    # the same payload costs one call, not one per attempt.
+    guard_injection_cache_ttl_seconds: int = 3600
+
     # --- Tools (Phase 9) ---
     # Max tool-call iterations per turn before the runtime forces a final answer.
     tool_max_iterations: int = 4

@@ -15,7 +15,7 @@ from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.chat import guardrails
+from app.chat import guard_models, guardrails
 from app.chat.assembly import build_messages, compose_system_prompt
 from app.chat.handoff import trigger_handoff, wants_handoff
 from app.chat.pii import build_allowlist
@@ -121,14 +121,29 @@ class InboundTurn:
             if settings.guard_input_enabled
             else guardrails.InputVerdict()
         )
-        if guard.blocked:
+        # L2 classifier (docs/11 §4-L2). Runs only when L1 let the message through, so a
+        # regex-obvious attack costs no tokens; it exists for what L1 structurally cannot see
+        # — paraphrase, and every language other than English.
+        l2_score: float | None = None
+        if not guard.blocked:
+            org = await self._org()
+            l2_blocked, l2_score = await guard_models.is_injection(
+                self.message,
+                org_enabled=org.guard_injection_enabled if org else None,
+            )
+        else:
+            l2_blocked = False
+
+        if guard.blocked or l2_blocked:
             # Hash, never the payload: the raw text is an attack string and may carry PII.
             log.warning(
                 "guard_input_blocked",
                 agent_id=str(self.agent.id),
                 conversation_id=str(conv.id),
+                layer="L1" if guard.blocked else "L2",
                 category=guard.category,
                 flags=guard.flags,
+                l2_score=round(l2_score, 4) if l2_score is not None else None,
                 message_sha256=hashlib.sha256(self.message.encode("utf-8")).hexdigest()[:16],
             )
             context_block, citations = "", cast(list[Citation], [])
@@ -161,7 +176,7 @@ class InboundTurn:
         # Pre-LLM refusals. The input guard redirects without naming a rule; a blocked topic
         # uses the agent's own refusal line, which the operator wrote for exactly that case.
         topics = guardrails.blocked_topics_for(self.version.persona)
-        if guard.blocked:
+        if guard.blocked or l2_blocked:
             provider = RefusalProvider(guardrails.INJECTION_REDIRECT)
             citations = []
             executor = None
@@ -188,6 +203,10 @@ class InboundTurn:
         latency_ms = int((time.perf_counter() - t0) * 1000)
         self.assistant_message = await _finalize_turn(session, conv, self.result, latency_ms, self.message)
         yield StreamEvent(type="message", message_id=str(self.assistant_message.id))
+
+    async def _org(self) -> Organization | None:
+        """The conversation's org. One PK lookup, usually served from the identity map."""
+        return await self.session.get(Organization, self.conversation.organization_id)
 
     async def _pii_allowlist(self) -> set[str]:
         """Contact details this org has published, which the agent may share freely.

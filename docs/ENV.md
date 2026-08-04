@@ -199,6 +199,30 @@ for prod; local default in dev.
 > the model actually said. Guardrail behaviour is therefore visible on the widget, channels and
 > dashboard chat, but not in the builder's test pane.
 
+- `GUARD_INJECTION_ENABLED` (default `true`) — the L2 model-backed injection classifier
+  (docs/11 §4-L2). This is what covers **paraphrase and non-English attacks**; L1 scores 0/6 on
+  both by design. Per-org override lives on `Organization.guard_injection_enabled`, where `NULL`
+  follows this default and only an explicit `false` opts a client out.
+- `GUARD_INJECTION_MODEL` (default `meta-llama/llama-prompt-guard-2-86m`) — priced in
+  `llm/catalog.GUARD_MODELS`. Deliberately not in `PROVIDERS`: it answers with a bare
+  probability, so an agent pointed at it would reply `0.0004` to every question. Groq deprecated
+  `llama-guard-4-12b` in Feb 2026 — check the deprecations page before changing this.
+- `GUARD_INJECTION_THRESHOLD` (default `0.5`) — score at or above which a message is refused.
+  Measured on this deployment: benign traffic scores **< 0.005** and attacks **> 0.998**, so the
+  default sits in empty space and is not a delicate number.
+- `GUARD_INJECTION_TIMEOUT_MS` (default `300`) — on timeout the turn proceeds **unguarded**
+  (fail open, ADR-051) with a `guard_l2_unavailable` warning and a metric.
+- `GUARD_INJECTION_CACHE_TTL_SECONDS` (default `3600`) — Redis cache keyed on
+  `sha256(normalised text)`, so an attacker retrying one payload costs a single call.
+
+> **The guard runs on the platform `GROQ_API_KEY`, never a client's** (ADR-055). An org may run
+> its agent on any of 13 providers and hold no Groq key; resolving through the normal credential
+> chain would silently switch safety off for exactly those clients, and because it fails open,
+> nothing would say so. A missing platform key logs `guard_l2_disabled` at startup **and** shows
+> in the admin console health card — `botforge_guard_calls_total{outcome="error"}` and
+> `{outcome="unavailable"}` are the metrics to alert on, since a rising rate there means traffic
+> is running unguarded rather than that nothing is being attempted.
+
 > **Finding what is already in a knowledge base:** `make audit-kb-pii` scans every KB across
 > every org and reports counts per document (never the values). It exits non-zero when anything
 > is found. `--apply` backfills `documents.pii_flags` for documents ingested before migration

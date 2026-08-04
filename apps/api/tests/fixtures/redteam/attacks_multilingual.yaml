@@ -15,6 +15,12 @@
 #
 # This is not a theoretical gap. BotForge serves Indian clients whose customers will
 # legitimately open a conversation in Hindi or Tamil.
+#
+# **Phase C shipped 2026-08-04 and these are now caught at L2.** Verified live through the
+# chat endpoint: every entry below is refused, and the benign corpus still passes. They stay
+# recorded here as L1 misses because that is what this file measures — the regex layer is
+# still English-first, and if it ever starts matching these, something widened and the
+# benign corpus is what to check.
 
 - id: ml-hindi-ignore-and-reveal
   language: hindi

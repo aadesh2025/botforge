@@ -353,3 +353,31 @@ def legacy_catalog() -> dict[str, dict[str, Any]]:
         }
         for p in PROVIDERS
     }
+
+
+# --------------------------------------------------------------------------------------
+# Guard models (docs/11 §4-L2). Never offered to an agent — these classify, they do not chat.
+# --------------------------------------------------------------------------------------
+
+#: Models the safety layers call, kept here rather than inline for the reason this module
+#: already exists: Groq **deprecated `meta-llama/llama-guard-4-12b` on 2026-02-10**, and this
+#: repo separately shipped a stale `mixtral-8x7b-32768` for months. Check
+#: https://console.groq.com/docs/deprecations before changing an id.
+#:
+#: They are deliberately **not** in `PROVIDERS`: `GET /v1/credentials/providers` drives the
+#: builder's Model tab, and a classifier that answers with a bare float would be selectable as
+#: an agent's chat model. `guard_injection_model` in Settings is what actually picks one, so an
+#: operator can move to a successor without a deploy; this is the seed and the price book.
+GUARD_MODELS: tuple[ModelSpec, ...] = (
+    ModelSpec(
+        "meta-llama/llama-prompt-guard-2-86m",
+        "Llama Prompt Guard 2 86M",
+        context=512,
+        tools=False,
+        prompt_micros=40,  # $0.04 per 1M tokens
+        completion_micros=40,
+        note="Jailbreak/injection classifier. Returns a probability in [0,1] as its content.",
+    ),
+)
+
+GUARD_MODELS_BY_ID: dict[str, ModelSpec] = {m.id: m for m in GUARD_MODELS}

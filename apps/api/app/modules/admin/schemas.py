@@ -58,6 +58,13 @@ class HealthOut(BaseModel):
     users: int
     conversations: int
     messages: int
+    #: Whether the L2 injection classifier can actually run (docs/11 §4-L2). It **fails open**,
+    #: so an outage or a missing platform key looks exactly like "no attacks today" from the
+    #: outside — this is the one place that difference is visible without reading logs.
+    guard_injection_available: bool = True
+    #: Why it is not running, when it is not. `None` while healthy.
+    guard_injection_reason: str | None = None
+    guard_injection_model: str | None = None
 
 
 class AutomationBindingOut(BaseModel):

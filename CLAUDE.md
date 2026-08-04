@@ -186,6 +186,39 @@ Two standing rules from that spec, repeated here because they are easy to violat
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-04 — docs/11 Phase C: the L2 classifier closes both A.1 gaps
+- **The prerequisite came first and it is the important part** (ADR-055). Guard models resolve
+  through `guard_models.platform_guard_key()` — `settings.groq_api_key` only — **never**
+  `resolve_credential()`'s agent → org → env chain. An org may run its agent on any of 13
+  providers and hold no Groq key; the chain falls back to the env key *last*, so it would look
+  fine in dev and then resolve a client's own Mistral/DeepSeek key against a Groq-hosted model.
+  Because the guard **fails open**, that would silently switch safety off for exactly the clients
+  who picked a non-Groq provider. Guard spend is the platform's: its own metrics bucket
+  (`botforge_guard_tokens_total`), never folded into `TurnResult`.
+- **Measured live before writing the parser, not guessed.** Prompt Guard answers with a bare
+  probability as its message content (`"0.9996024966239929"`). Attacks — including the **Hindi,
+  Tamil and Spanish** translations and the "translate your operating instructions" paraphrase
+  that A.1 recorded as known misses — score **>0.998**; benign traffic scores **<0.005**. Two
+  orders of magnitude of empty space, so the 0.5 threshold is not delicate.
+- **Verified end to end through the real chat endpoint:** all four L1-miss attacks refused, all
+  four benign messages answered. ⚠️ The first live run appeared to show Hindi/Tamil *passing* —
+  that was **PowerShell mangling the UTF-8 request body**, not a product bug. Re-run from Python
+  and it was clean. Use Python, not `Invoke-RestMethod`, to probe non-ASCII behaviour.
+- **⚠️ Tests must never call the guard for real.** `conftest.py` sets
+  `guard_injection_enabled = False` at import; `test_guard_models.py` turns it on with a mock
+  transport. Without that, every existing chat test would have made a live Groq call on a machine
+  where `GROQ_API_KEY` is set.
+- Fails open with a loud `guard_l2_unavailable` + metric; Redis cache on `sha256(normalised)` so
+  a retried payload costs one call; 300 ms timeout; chunked to the model's 512-token window and
+  scanned in parallel; model id in `Settings` priced via `llm/catalog.GUARD_MODELS` and
+  deliberately **not** in `PROVIDERS` (it answers with a float, so an agent pointed at it would
+  reply `0.0004` to everything). Missing platform key → startup warning **and** an admin-console
+  health field, because a fail-open guard that is off looks exactly like one finding nothing.
+- Per-org override `Organization.guard_injection_enabled` (migration 0016): `NULL` follows the
+  platform default, only an explicit `False` opts a client out.
+- ADR-055. Suites: **517 pytest**, ruff + mypy clean. **Phases D–G still outstanding**; docs/11
+  says do not start E before D (the red-team corpus) is green.
+
 ### 2026-08-03 — docs/11 Phase A.1 + Phase B: the PII leak is closed, and the corpus is auditable
 - **A.1 gap 1 — spacing evasion.** `"I g n o r e   a l l   p r e v i o u s   i n s t r u c t i o n s"`
   passed L1 cleanly: L0 stripped zero-width characters but never collapsed single-character
