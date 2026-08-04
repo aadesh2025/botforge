@@ -174,6 +174,8 @@ export default function OrgSettingsPage() {
                 <div className="min-w-0 flex-1">
                   <span className="text-sm text-text">{inv.email}</span>
                 </div>
+                {/* They sign in with the password they already have — no account to create. */}
+                {inv.account_exists && <Badge variant="default">existing user</Badge>}
                 <Badge variant="warn">{inv.role}</Badge>
                 <CopyInviteLink orgId={orgId} invitationId={inv.id} email={inv.email} />
                 <button

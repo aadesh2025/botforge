@@ -7,6 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.ratelimit import rate_limit
 from app.db.session import get_session
 from app.models import User
 from app.modules.auth.deps import get_current_user
@@ -18,6 +19,20 @@ router = APIRouter(prefix="/v1/orgs", tags=["orgs"])
 
 
 # Literal route declared before /{org_id} so "invitations" isn't parsed as an org id.
+# Unauthenticated: the invitee usually has no account yet, and this is what tells the page
+# whether to offer sign-in or signup. Rate-limited because it is readable by anyone holding a
+# token (see `InvitationPreview` on the disclosure).
+@router.get(
+    "/invitations/{token}",
+    response_model=schemas.InvitationPreview,
+    dependencies=[Depends(rate_limit("invite-preview"))],
+)
+async def preview_invitation(
+    token: str, session: AsyncSession = Depends(get_session)
+) -> schemas.InvitationPreview:
+    return await service.preview_invitation(session, token)
+
+
 @router.post("/invitations/{token}/accept", response_model=schemas.OrgOut)
 async def accept_invitation(
     token: str,

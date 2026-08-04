@@ -5,10 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, Loader2, MailX, UserX } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { acceptInvitation, listOrgs } from "@/lib/api/orgs";
+import { acceptInvitation, listOrgs, previewInvitation, type InvitationPreview } from "@/lib/api/orgs";
 import { login, me, signup } from "@/lib/api/auth";
 import { ApiError } from "@/lib/api/client";
-import { getAccessToken, setActiveOrgId } from "@/lib/api/tokens";
+import { clearAuth, getAccessToken, setActiveOrgId } from "@/lib/api/tokens";
 import { useSession } from "@/lib/store/session";
 
 /** The three failures the server actually models, each worth its own explanation. */
@@ -51,13 +51,37 @@ export function AcceptInvitation() {
     typeof window !== "undefined" && !params.get("token") ? "org.invitation_invalid" : null,
   );
   const [formError, setFormError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [busy, setBusy] = useState(false);
+  // What the invitation says, read without redeeming it. Null while loading, or if the preview
+  // failed — in which case the form still works, just without the org name and a locked email.
+  const [preview, setPreview] = useState<InvitationPreview | null>(null);
   // A React 18 double-mount in dev would otherwise burn the single-use token.
   const attempted = useRef(false);
+
+  // Fetch regardless of whether there's a session: with one it names the invited address in the
+  // mismatch case, without one it decides sign-in vs signup before the user types anything.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    previewInvitation(token)
+      .then((p) => {
+        if (cancelled) return;
+        setPreview(p);
+        setEmail(p.email);
+        setMode(p.account_exists ? "login" : "signup");
+      })
+      .catch(() => {
+        /* The form falls back to asking for the address; the token is still what matters. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   /** Redeem the token with whatever session is current, then land in the new org. */
   async function accept(): Promise<boolean> {
@@ -90,6 +114,7 @@ export function AcceptInvitation() {
     e.preventDefault();
     setBusy(true);
     setFormError(null);
+    setNotice(null);
     try {
       if (mode === "signup") {
         await signup(email.trim(), password, fullName.trim() || undefined);
@@ -100,10 +125,29 @@ export function AcceptInvitation() {
       // failed to join the org they were invited to.
       await accept();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Something went wrong. Try again.");
+      // Belt to the preview's braces: the address may have been registered since the preview,
+      // or the preview may not have loaded at all. Either way "an account already exists" is a
+      // fact about which form to show, not a failure to report at someone.
+      if (err instanceof ApiError && err.code === "auth.email_taken") {
+        setMode("login");
+        setNotice("You already have an account. Enter your password to sign in and join.");
+      } else {
+        setFormError(err instanceof Error ? err.message : "Something went wrong. Try again.");
+      }
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Drop the current session and come back to this same invitation. */
+  function useAnotherAccount() {
+    clearAuth();
+    attempted.current = false;
+    setErrorCode(null);
+    setFormError(null);
+    setNotice(null);
+    setMode(preview?.account_exists ? "login" : "signup");
+    setStatus("needs-account");
   }
 
   if (status === "working") {
@@ -122,14 +166,29 @@ export function AcceptInvitation() {
       detail: "Please ask whoever invited you to send a new one.",
     };
     const Icon = failure.icon;
+    const mismatch = errorCode === "org.invite_email_mismatch";
     return (
       <div className="rounded-lg border border-border bg-surface p-6">
         <Icon className="mb-3 size-6 text-warn" aria-hidden />
         <h1 className="font-display text-lg font-semibold text-text">{failure.title}</h1>
         <p className="mt-2 text-sm text-muted">{failure.detail}</p>
-        <Button variant="outline" className="mt-4" onClick={() => router.push("/login")}>
-          Go to sign in
-        </Button>
+        {mismatch && preview && (
+          <p className="mt-2 text-sm text-muted">
+            It was sent to <span className="font-medium text-text">{preview.email}</span>.
+          </p>
+        )}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {/* Signing out is the actual remedy for a mismatch, so offer it rather than sending
+              them to a sign-in page that keeps the wrong session and loops straight back. */}
+          {mismatch && (
+            <Button variant="primary" onClick={useAnotherAccount}>
+              Use a different account
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => router.push("/login")}>
+            Go to sign in
+          </Button>
+        </div>
       </div>
     );
   }
@@ -137,11 +196,21 @@ export function AcceptInvitation() {
   return (
     <div className="rounded-lg border border-border bg-surface p-6">
       <h1 className="font-display text-lg font-semibold text-text">You&rsquo;ve been invited</h1>
-      <p className="mt-1 text-sm text-muted">
-        {mode === "signup"
-          ? "Create your account with the email the invitation was sent to."
-          : "Sign in with the email the invitation was sent to."}
-      </p>
+      {preview ? (
+        <p className="mt-1 text-sm text-muted">
+          Join <span className="font-medium text-text">{preview.organization_name}</span> as{" "}
+          <span className="font-medium text-text">{preview.role}</span>.{" "}
+          {mode === "login"
+            ? "Sign in with your existing password."
+            : "Choose a password to create your account."}
+        </p>
+      ) : (
+        <p className="mt-1 text-sm text-muted">
+          {mode === "signup"
+            ? "Create your account with the email the invitation was sent to."
+            : "Sign in with the email the invitation was sent to."}
+        </p>
+      )}
 
       <form onSubmit={onSubmit} className="mt-5 space-y-3">
         {mode === "signup" && (
@@ -161,14 +230,18 @@ export function AcceptInvitation() {
           <label htmlFor="invite-email" className="mb-1 block text-xs text-muted">
             Email
           </label>
+          {/* Locked to the invited address when we know it: the server rejects anything else
+              with `org.invite_email_mismatch`, so letting it be edited only invites that error. */}
           <Input
             id="invite-email"
             type="email"
             autoComplete="email"
             required
+            readOnly={preview !== null}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@company.com"
+            className={preview !== null ? "text-muted" : undefined}
           />
         </div>
         <div>
@@ -186,6 +259,7 @@ export function AcceptInvitation() {
           />
         </div>
 
+        {notice && <p className="text-sm text-ember-soft">{notice}</p>}
         {formError && <p className="text-sm text-error">{formError}</p>}
 
         <Button type="submit" variant="primary" className="w-full" disabled={busy}>
@@ -199,6 +273,7 @@ export function AcceptInvitation() {
         onClick={() => {
           setMode(mode === "signup" ? "login" : "signup");
           setFormError(null);
+          setNotice(null);
         }}
         className="mt-4 text-xs text-muted underline hover:text-text"
       >

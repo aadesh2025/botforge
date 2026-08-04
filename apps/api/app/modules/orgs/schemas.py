@@ -94,6 +94,28 @@ class InvitationOut(BaseModel):
     # Raw accept token — returned ONLY outside production (email delivers it in prod).
     # Lets local/dev/CI accept an invite without a live SMTP inbox.
     accept_token: str | None = None
+    # Whether this address already has a BotForge account, so the admin knows to tell them
+    # "sign in with your usual password" rather than "create an account".
+    account_exists: bool = False
+
+
+class InvitationPreview(BaseModel):
+    """What an invitation says, readable without redeeming it.
+
+    Lets the accept page name the org and role, prefill the invited address, and open in the
+    right mode instead of defaulting to signup and failing for anyone who already has an account.
+
+    `account_exists` tells a token holder whether that address is registered. They already hold a
+    single-use token that was emailed to it, so this is not an enumeration oracle — but it is a
+    disclosure, which is why the route is rate-limited and returns the same opaque
+    `org.invitation_invalid` for a spent, revoked, expired or fabricated token.
+    """
+
+    organization_name: str
+    role: str
+    email: EmailStr
+    account_exists: bool
+    expires_at: dt.datetime
 
 
 class InvitationLinkOut(BaseModel):

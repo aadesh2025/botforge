@@ -254,6 +254,9 @@ async def create_invitation(
         expires_at=invitation.expires_at,
         created_at=invitation.created_at,
         accept_token=None if settings.is_prod else raw,
+        # Already looked up above; carrying it back means the row renders its badge without
+        # waiting for a refetch.
+        account_exists=existing_user is not None,
     )
 
 
@@ -268,11 +271,24 @@ async def list_invitations(session: AsyncSession, ctx: OrgContext) -> list[schem
         )
         .order_by(Invitation.created_at.desc())
     )
+    invitations = list((await session.execute(stmt)).scalars().all())
+    # One lookup for the whole page, not one per row.
+    registered: set[str] = set()
+    if invitations:
+        emails = [i.email for i in invitations]
+        registered = set(
+            (await session.execute(select(User.email).where(User.email.in_(emails)))).scalars().all()
+        )
     return [
         schemas.InvitationOut(
-            id=i.id, email=i.email, role=i.role, expires_at=i.expires_at, created_at=i.created_at
+            id=i.id,
+            email=i.email,
+            role=i.role,
+            expires_at=i.expires_at,
+            created_at=i.created_at,
+            account_exists=i.email in registered,
         )
-        for i in (await session.execute(stmt)).scalars().all()
+        for i in invitations
     ]
 
 
@@ -314,6 +330,42 @@ async def regenerate_invitation_link(
     )
     return schemas.InvitationLinkOut(
         accept_url=f"{settings.web_base_url}/invitations/accept?token={raw}",
+        expires_at=invitation.expires_at,
+    )
+
+
+async def preview_invitation(session: AsyncSession, token: str) -> schemas.InvitationPreview:
+    """Read an invitation without redeeming it, for the acceptance page.
+
+    Unauthenticated by necessity — the invitee usually has no session yet, and knowing whether
+    they already have an account is precisely what decides whether the page should offer sign-in
+    or signup. Without it the page defaults to signup and anyone with an existing account walks
+    into `auth.email_taken` with no way forward.
+
+    The lookup deliberately matches `accept_invitation`'s exactly, so a spent, revoked, expired
+    or invented token are indistinguishable from here.
+    """
+    stmt = select(Invitation).where(
+        Invitation.token_hash == hash_token(token),
+        Invitation.accepted_at.is_(None),
+        Invitation.expires_at > _now(),
+    )
+    invitation = (await session.execute(stmt)).scalar_one_or_none()
+    if invitation is None:
+        raise AppError("org.invitation_invalid", "Invalid or expired invitation.", 400)
+
+    org = await session.get(Organization, invitation.organization_id)
+    if org is None or org.deleted_at is not None:
+        raise AppError("org.not_found", "Organization not found.", 404)
+
+    account = (
+        await session.execute(select(User.id).where(User.email == invitation.email))
+    ).scalar_one_or_none()
+    return schemas.InvitationPreview(
+        organization_name=org.name,
+        role=invitation.role,
+        email=invitation.email,
+        account_exists=account is not None,
         expires_at=invitation.expires_at,
     )
 

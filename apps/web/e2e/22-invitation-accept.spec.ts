@@ -46,8 +46,12 @@ test("a brand-new user accepts an invitation and lands in the org", async ({ pag
   await page.goto(`/invitations/accept?token=${token}`);
   await expect(page.getByRole("heading", { name: /You’ve been invited/ })).toBeVisible();
 
+  // The page reads the invitation, so the address is filled in and locked — typing a different
+  // one could only ever produce org.invite_email_mismatch.
+  await expect(page.getByLabel("Email")).toHaveValue(inviteeEmail);
+  await expect(page.getByLabel("Email")).toHaveAttribute("readonly", "");
+
   await page.getByLabel("Your name").fill("New Teammate");
-  await page.getByLabel("Email").fill(inviteeEmail);
   await page.getByLabel("Password").fill("invite-Password-123");
   await page.getByRole("button", { name: "Create account & join" }).click();
 
@@ -77,8 +81,13 @@ test("an existing user signs in from the invite page and joins", async ({ page, 
   const token = await invite(request, owner, existing.email);
 
   await page.goto(`/invitations/accept?token=${token}`);
-  await page.getByRole("button", { name: /I already have an account/ }).click();
-  await page.getByLabel("Email").fill(existing.email);
+
+  // No "I already have an account" hunt: the page knows the address is registered and opens in
+  // sign-in mode. Defaulting to signup used to send them into auth.email_taken with no way out.
+  await expect(page.getByText("Invite Existing Org")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in & join" })).toBeVisible();
+  await expect(page.getByLabel("Email")).toHaveValue(existing.email);
+
   await page.getByLabel("Password").fill(existing.password);
   await page.getByRole("button", { name: "Sign in & join" }).click();
 
@@ -88,6 +97,18 @@ test("an existing user signs in from the invite page and joins", async ({ page, 
     await request.get(`${API}/v1/orgs/${owner.orgId}/members`, { headers: auth(owner) })
   ).json();
   expect(members.some((m: { email: string }) => m.email === existing.email)).toBeTruthy();
+
+  // They keep their own org too, and both are reachable from the switcher — the point of
+  // inviting an account that already exists.
+  const orgs = await (
+    await request.get(`${API}/v1/orgs`, {
+      headers: { Authorization: `Bearer ${existing.access}` },
+    })
+  ).json();
+  expect(orgs.map((o: { name: string }) => o.name).sort()).toEqual([
+    "Invite Existing Org",
+    "Their Own Org",
+  ]);
 });
 
 test("a signed-in user with the wrong email is told exactly that", async ({

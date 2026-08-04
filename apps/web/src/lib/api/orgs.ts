@@ -29,6 +29,8 @@ export interface ApiInvitation {
   status: string;
   created_at: string;
   expires_at: string;
+  /** The address already has an account: they sign in rather than creating one. */
+  account_exists: boolean;
 }
 
 /** Update org settings. Currently the auto-CRM-capture toggle; name/avatar live here too. */
@@ -72,6 +74,20 @@ export function listInvitations(orgId: string) {
 
 export function createInvitation(orgId: string, email: string, role: string) {
   return api<ApiInvitation>(`/v1/orgs/${orgId}/invitations`, { method: "POST", body: { email, role } });
+}
+
+export interface InvitationPreview {
+  organization_name: string;
+  role: string;
+  email: string;
+  /** True when the invited address already has an account — the page offers sign-in, not signup. */
+  account_exists: boolean;
+  expires_at: string;
+}
+
+/** Read an invitation without redeeming it. Unauthenticated — the invitee has no session yet. */
+export function previewInvitation(token: string) {
+  return api<InvitationPreview>(`/v1/orgs/invitations/${encodeURIComponent(token)}`);
 }
 
 /** Mint a fresh acceptance link to send by hand.
