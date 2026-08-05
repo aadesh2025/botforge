@@ -26,7 +26,7 @@ _WORDMARK_STYLE = (
 _HEADING_STYLE = "margin:0 0 12px;font-size:20px;line-height:1.3;font-weight:650;color:#1c1917;"
 _PARAGRAPH_STYLE = "margin:0 0 24px;font-size:14px;line-height:1.6;color:#57534e;"
 _BUTTON_STYLE = (
-    "display:inline-block;padding:11px 20px;border-radius:8px;background:#e8590c;"
+    "display:inline-block;padding:11px 20px;border-radius:8px;background:#4f46e5;"
     "color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;"
 )
 _FOOTER_STYLE = "margin:24px 0 0;font-size:12px;line-height:1.6;color:#a8a29e;"

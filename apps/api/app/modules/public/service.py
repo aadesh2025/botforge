@@ -37,7 +37,7 @@ def _theme_from(widget: dict[str, Any]) -> schemas.WidgetTheme:
     """Map the stored camelCase config onto the widget's snake_case response shape."""
     buttons = widget.get("inputBarButtons")
     return schemas.WidgetTheme(
-        primary_color=widget.get("primaryColor", "#E8590C"),
+        primary_color=widget.get("primaryColor", "#6366F1"),
         position=widget.get("position", "bottom-right"),
         launcher_text=widget.get("launcherText", "Chat with us"),
         branding=widget.get("branding", True),

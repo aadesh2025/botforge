@@ -114,7 +114,7 @@
   function palette(theme) {
     theme = theme || {};
     var dark = theme.mode !== "light";
-    var accent = theme.primary_color || "#E8590C";
+    var accent = theme.primary_color || "#6366F1";
     var btn = theme.floating_button_color || accent;
     return {
       accent: accent,

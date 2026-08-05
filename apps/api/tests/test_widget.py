@@ -115,7 +115,7 @@ async def test_public_config_exposes_extended_theme(client: AsyncClient) -> None
     assert theme["font_family"] == "courier"
     assert theme["input_bar_buttons"] == ["attachment"]  # default
     # Unconfigured fields keep today's defaults.
-    assert theme["primary_color"] == "#E8590C"
+    assert theme["primary_color"] == "#6366F1"
     assert theme["floating_button_style"] is None
 
 

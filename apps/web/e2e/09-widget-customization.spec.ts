@@ -22,7 +22,7 @@ test("criterion: widget customization reflects on a live embed without re-pastin
   const account = await createAccount(request, "Widget Style Org");
   const { id, publicKey } = await createPublishedAgent(request, account, { name: "Styled Bot" });
 
-  // 1) Default look: the legacy text pill launcher, ember accent.
+  // 1) Default look: the legacy text pill launcher, brand accent.
   await embed(page, publicKey);
   const launcher = page.locator(".bf-launcher");
   await expect(launcher).toHaveClass(/bf-pill/);
