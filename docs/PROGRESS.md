@@ -38,6 +38,37 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **The Admin console was full of Playwright fixtures; the E2E run now sweeps after itself
+  (2026-08-05).** Every "org" in the staff console — *A11y Widget Org*, *Bad Token Org*,
+  *Sidebar Org*, *Somewhere Else* — was a **real row from a real signup**. The E2E suite tests
+  real flows against a real API rather than mocking the backend, and `playwright.config.ts`
+  sets no `DATABASE_URL`, so it signs its fixtures up in the same Postgres the dev app and the
+  Admin console are pointed at. Nothing was faked and nothing was broken in the Admin page; the
+  test run and real usage simply shared one database.
+
+  Measured before touching anything: **118 scratch orgs and 147 scratch users against 7 real
+  orgs.** `app/db/cleanup_devdata.py` already existed and is scoped to `%@example.com` only, so
+  it structurally cannot touch a real account — it had just never been run automatically.
+  Running it removed all 118/147 and left all 7 real orgs intact (verified by name).
+
+  **The recurrence fix is `scripts/run-e2e.mjs`**, now what `npm run test:e2e` (and `make
+  test-e2e`, and CI) actually invokes. It runs Playwright, then always sweeps. Two properties
+  matter and both are tested by hand:
+  - **Cleanup runs whether the suite passed or failed.** A *failed* run leaves more debris than
+    a passing one, so skipping cleanup on failure would skip exactly the case that needs it.
+  - **Playwright's exit code is preserved.** Verified explicitly, because getting this wrong
+    would make CI green on a failing E2E suite — a far worse bug than the one being fixed. A
+    cleanup failure is logged loudly but never overwrites a test result.
+
+  `test:e2e:raw` still runs Playwright without the sweep, for debugging a single spec or a
+  `--ui` session where the fixtures should stay put. CI now calls the wrapper too, so the sweep
+  cannot drift out of the local path and the CI path independently.
+
+  **Not done, and not needed yet:** pointing the E2E run at a separate database. That is the
+  only thing that protects you *mid-run* — the sweep is after-the-fact, so fixtures are still
+  briefly visible in the Admin console while the suite is executing. Worth doing only if E2E
+  runs start happening while the dashboard is being used for something real.
+
 - **Final palette: four greys, light-first (2026-08-05, ADR-060).** The indigo below was
   rejected on sight and lasted one commit; this replaced it the same day. The interface is now
   `#F3F4F6` page, `#1F2937` ink, `#6B7280` and `#4B5563` for the two levels of secondary text —

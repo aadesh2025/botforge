@@ -216,9 +216,12 @@ jobs:
             sleep 1
           done
 
+      # Via the wrapper, not `npx playwright test`, so local and CI share one entry point and
+      # the sweep cannot drift out of one of them. The wrapper preserves Playwright's exit
+      # code, so a failing suite still fails the job.
       - name: Run Playwright E2E
         working-directory: apps/web
-        run: npx playwright test
+        run: npm run test:e2e
 
       - name: Upload report + service logs
         if: ${{ always() }}
