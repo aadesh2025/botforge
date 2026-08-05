@@ -62,11 +62,11 @@ export function versionToDraft(
       handoff: (feat.handoff_enabled as boolean) ?? false,
     },
     widget: {
-      primaryColor: (w.primaryColor as string) ?? "#6366F1",
+      primaryColor: (w.primaryColor as string) ?? "#1F2937",
       position: (w.position as "bottom-right" | "bottom-left") ?? "bottom-right",
       launcherText: (w.launcherText as string) ?? "Chat with us",
       branding: (w.branding as boolean) ?? true,
-      mode: (w.mode as "dark" | "light") ?? "dark",
+      mode: (w.mode as "dark" | "light") ?? "light",
       widgetStyle: (w.widgetStyle as "solid" | "transparent") ?? "solid",
       backgroundColor: (w.backgroundColor as string) ?? null,
       textColor: (w.textColor as string) ?? null,

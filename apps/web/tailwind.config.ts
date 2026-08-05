@@ -51,8 +51,10 @@ const config: Config = {
         sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        card: "0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 0 rgb(0 0 0 / 0.2)",
-        pop: "0 12px 32px -8px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.4)",
+        // Shadow colour and weight are themed: pure black at dark-mode strength turns a white
+        // card into a smudge, so light tints with the ink and drops the alpha by ~5x.
+        card: "0 1px 2px 0 rgb(var(--shadow) / var(--shadow-1)), 0 1px 3px 0 rgb(var(--shadow) / var(--shadow-2))",
+        pop: "0 12px 32px -8px rgb(var(--shadow) / calc(var(--shadow-1) * 2)), 0 2px 8px -2px rgb(var(--shadow) / var(--shadow-2))",
         "accent-glow": "0 0 0 1px rgb(var(--accent) / 0.45), 0 8px 24px -8px rgb(var(--accent) / 0.4)",
         "glow-live": "0 0 0 1px rgb(var(--glow) / 0.45), 0 0 18px -4px rgb(var(--glow) / 0.5)",
       },

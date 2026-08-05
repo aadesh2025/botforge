@@ -3,79 +3,94 @@
 @tailwind utilities;
 
 /*
-  BotForge design tokens — dark-first, monochrome slate base with an indigo→violet accent.
-  Palette is stored as space-separated RGB channels so Tailwind's
-  `rgb(var(--x) / <alpha-value>)` opacity modifiers keep working.
+  BotForge design tokens — light-first monochrome greyscale.
 
-  Two rules the palette depends on, both easy to break by accident:
-  - **The accent is for one thing at a time.** It marks the active/selected element and the
-    primary action. Spread across every card and heading it stops meaning anything.
-  - **`--glow` (cyan) is rationed.** It is the "live" colour — streaming, running, connected —
-    and nothing else. Semantic success stays green, because a cyan "saved" tick reads as
-    decoration rather than confirmation.
+  The whole system is four greys: #F3F4F6 page, #1F2937 ink, #6B7280 and #4B5563 for the two
+  levels of secondary text. There is no brand hue, which is the point: in a monochrome UI the
+  *only* saturated pixels are the ones that mean something.
+
+  Consequences worth knowing before editing:
+  - **The accent is the ink, not a colour.** A primary button is #1F2937 with white on it. So
+    the accent cannot be used to decorate — anything painted with it reads as "the one action
+    here", and two of them on a screen means neither is.
+  - **Status colours stay coloured.** Red/amber/green are the only saturated things in the
+    interface, deliberately: a greyscale error state is unreadable at a glance, and colour is
+    doing real work rather than styling. They are darkened so they sit calmly against grey.
+  - **`--glow` is the accent here.** It survives as a token because code references it, but a
+    monochrome palette has no second colour to spend on "live"; motion carries that instead.
+
+  Stored as space-separated RGB channels so Tailwind's `rgb(var(--x) / <alpha-value>)` opacity
+  modifiers keep working.
 */
 :root {
-  /* Surfaces — deep navy-slate, not pure black: #000 on an OLED panel makes the border
-     hairlines used throughout the app disappear entirely. */
-  --bg: 11 15 25; /* #0B0F19 void black */
-  --surface: 19 27 46; /* #131B2E elevated slate */
-  --surface-2: 24 34 58; /* #18223A */
-  --surface-3: 30 42 70; /* #1E2A46 */
-  --border: 36 51 86; /* #243356 */
-  --border-strong: 53 71 112; /* #354770 */
+  /* Surfaces — white cards lifting off a grey page. That contrast *is* the layering here;
+     without it every panel edge would depend on a border alone. */
+  --bg: 243 244 246; /* #F3F4F6 */
+  --surface: 255 255 255;
+  --surface-2: 249 250 251; /* #F9FAFB inset panels */
+  --surface-3: 243 244 246; /* #F3F4F6 deepest inset, back to the page */
+  --border: 229 231 235; /* #E5E7EB */
+  --border-strong: 209 213 219; /* #D1D5DB */
 
   /* Text */
-  --text: 248 250 252; /* #F8FAFC crisp off-white */
-  --muted: 148 163 184; /* #94A3B8 muted slate — 5.8:1 on surface */
-  --faint: 135 151 176; /* #8797B0 — WCAG AA (4.9:1 on surface) */
+  --text: 31 41 55; /* #1F2937 — 12.6:1 on white */
+  --muted: 75 85 99; /* #4B5563 — 8.0:1 */
+  /* #6B7280 is 4.83:1 on a white card but only 4.39:1 on the #F3F4F6 page — i.e. AA on
+     `surface`, fractionally under on `bg`. Keep faint text inside cards; if you ever need it
+     directly on the page, step up to --muted. */
+  --faint: 107 114 128; /* #6B7280 */
 
-  /* Brand accent — electric indigo into violet */
-  --accent: 99 102 241; /* #6366F1 */
-  --accent-2: 139 92 246; /* #8B5CF6 violet, gradient partner */
-  --accent-soft: 165 180 252; /* #A5B4FC — the readable one for text on dark */
-  /* Filled surfaces that carry text. #6366F1 is only 4.47:1 against white, which the axe gate
-     rejects for button labels; indigo-600 takes it to 6.3:1 while reading as the same colour.
-     The orange this replaced was light enough to want near-black labels — indigo wants white,
-     so `--on-accent` exists rather than a hex repeated across eight files. */
-  --accent-strong: 79 70 229; /* #4F46E5 */
+  /* Accent = the ink. Filled controls are near-black with white on them. */
+  --accent: 31 41 55; /* #1F2937 */
+  --accent-2: 75 85 99; /* #4B5563 — hover, and the second stop of the wordmark */
+  --accent-soft: 75 85 99; /* #4B5563 for accent-coloured text */
+  --accent-strong: 31 41 55; /* filled surfaces; white on it is 12.6:1 */
   --on-accent: 255 255 255;
+  --glow: 75 85 99;
 
-  /* Action glow — reserved for live/running states, never decoration */
-  --glow: 6 182 212; /* #06B6D4 plasma cyan */
+  /* Status — the only saturated colour in the UI, darkened for light surfaces */
+  --success: 4 120 87; /* #047857 */
+  --warn: 180 83 9; /* #B45309 */
+  --error: 185 28 28; /* #B91C1C */
+  --info: 29 78 216; /* #1D4ED8 */
 
-  /* Semantic — retuned to the slate family, but still conventional: a status colour that
-     needs learning is a status colour nobody reads. */
-  --success: 16 185 129; /* #10B981 */
-  --warn: 245 158 11; /* #F59E0B */
-  --error: 239 68 68; /* #EF4444 */
-  --info: 56 189 248; /* #38BDF8 */
+  /* Shadows are tinted with the ink rather than pure black: black on a warm grey reads muddy */
+  --shadow: 31 41 55;
+  --shadow-1: 0.06;
+  --shadow-2: 0.1;
 
-  --ring: 99 102 241;
+  --ring: 31 41 55;
   --radius: 0.625rem;
 }
 
-.light {
-  --bg: 248 250 252; /* the off-white becomes the page */
-  --surface: 255 255 255;
-  --surface-2: 241 245 249;
-  --surface-3: 226 232 240;
-  --border: 226 232 240;
-  --border-strong: 203 213 225;
-  --text: 11 15 25; /* and the void black becomes the type */
-  --muted: 71 85 105; /* #475569 */
-  --faint: 100 116 139; /* #64748B — WCAG AA (4.8:1 on white) */
-  /* Darker steps of the same hues: #6366F1 on white is only 3.4:1. */
-  --accent: 79 70 229; /* #4F46E5 */
-  --accent-2: 124 58 237; /* #7C3AED */
-  --accent-soft: 79 70 229;
-  --accent-strong: 67 56 202; /* #4338CA — 8.3:1 against white */
-  --on-accent: 255 255 255;
-  --glow: 8 145 178; /* #0891B2 */
-  --success: 5 150 105;
-  --warn: 217 119 6;
-  --error: 220 38 38;
-  --info: 2 132 199;
-  --ring: 79 70 229;
+/* Dark is the same four greys inverted: #1F2937 becomes the card, #F3F4F6 the type. */
+.dark {
+  --bg: 17 24 39; /* #111827 — one step below the card so panels read as raised */
+  --surface: 31 41 55; /* #1F2937 */
+  --surface-2: 55 65 81; /* #374151 */
+  --surface-3: 75 85 99; /* #4B5563 */
+  --border: 55 65 81;
+  --border-strong: 75 85 99;
+  --text: 243 244 246; /* #F3F4F6 */
+  /* #6B7280 reaches only 2.97:1 on #1F2937, so the secondary greys lighten rather than invert.
+     Keeping the literal palette value here would have failed AA on every caption in the app. */
+  --muted: 209 213 219; /* #D1D5DB — 9.9:1 */
+  --faint: 156 163 175; /* #9CA3AF — 6.1:1 */
+  /* Inverted: on a dark surface the one action is the light one. */
+  --accent: 243 244 246;
+  --accent-2: 209 213 219;
+  --accent-soft: 229 231 235;
+  --accent-strong: 243 244 246;
+  --on-accent: 31 41 55;
+  --glow: 209 213 219;
+  --success: 52 211 153;
+  --warn: 251 191 36;
+  --error: 248 113 113;
+  --info: 96 165 250;
+  --shadow: 0 0 0;
+  --shadow-1: 0.3;
+  --shadow-2: 0.2;
+  --ring: 243 244 246;
 }
 
 @layer base {
@@ -100,7 +115,7 @@
   .text-balance {
     text-wrap: balance;
   }
-  /* Indigo→violet gradient text, for the signature moments only */
+  /* Ink→grey gradient text, for the wordmark and little else */
   .text-accent-gradient {
     background: linear-gradient(100deg, rgb(var(--accent)) 0%, rgb(var(--accent-2)) 100%);
     -webkit-background-clip: text;
@@ -114,12 +129,10 @@
       linear-gradient(to bottom, rgb(var(--border) / 0.35) 1px, transparent 1px);
     background-size: 44px 44px;
   }
-  /* Accent wash behind headers. Two stops rather than one: a single indigo radial on a navy
-     base is nearly invisible, so the cyan carries the far edge. */
+  /* A barely-there wash behind page headers. At 4% the ink reads as a change in paper rather
+     than a coloured panel — anything stronger on a greyscale page looks like a rendering fault. */
   .glow-accent {
-    background:
-      radial-gradient(60% 120% at 15% 0%, rgb(var(--accent) / 0.18), transparent 60%),
-      radial-gradient(40% 90% at 85% 0%, rgb(var(--glow) / 0.08), transparent 70%);
+    background: radial-gradient(70% 130% at 15% 0%, rgb(var(--accent) / 0.04), transparent 65%);
   }
   .no-scrollbar::-webkit-scrollbar {
     display: none;
