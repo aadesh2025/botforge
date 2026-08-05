@@ -26,11 +26,14 @@ const config: Config = {
         text: rgb("--text"),
         muted: rgb("--muted"),
         faint: rgb("--faint"),
-        ember: {
-          DEFAULT: rgb("--ember"),
-          2: rgb("--ember-2"),
-          soft: rgb("--ember-soft"),
+        accent: {
+          DEFAULT: rgb("--accent"),
+          2: rgb("--accent-2"),
+          soft: rgb("--accent-soft"),
+          strong: rgb("--accent-strong"),
         },
+        "on-accent": rgb("--on-accent"),
+        glow: rgb("--glow"),
         success: rgb("--success"),
         warn: rgb("--warn"),
         error: rgb("--error"),
@@ -50,7 +53,8 @@ const config: Config = {
       boxShadow: {
         card: "0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 0 rgb(0 0 0 / 0.2)",
         pop: "0 12px 32px -8px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.4)",
-        "ember-glow": "0 0 0 1px rgb(var(--ember) / 0.4), 0 8px 24px -8px rgb(var(--ember) / 0.35)",
+        "accent-glow": "0 0 0 1px rgb(var(--accent) / 0.45), 0 8px 24px -8px rgb(var(--accent) / 0.4)",
+        "glow-live": "0 0 0 1px rgb(var(--glow) / 0.45), 0 0 18px -4px rgb(var(--glow) / 0.5)",
       },
       keyframes: {
         "fade-up": {

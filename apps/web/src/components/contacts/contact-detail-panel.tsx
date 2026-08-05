@@ -59,7 +59,7 @@ export function ContactDetailPanel({ contactId, onClose }: { contactId: string; 
         aria-label="Contact details"
         className="flex w-[360px] shrink-0 items-center justify-center border-l border-border"
       >
-        <Loader2 className="size-5 animate-spin text-ember-soft" />
+        <Loader2 className="size-5 animate-spin text-accent-soft" />
       </aside>
     );
   }
@@ -229,7 +229,7 @@ export function ContactDetailPanel({ contactId, onClose }: { contactId: string; 
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={2}
-            className="w-full rounded-md border border-border bg-surface-2 p-2 text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
+            className="w-full rounded-md border border-border bg-surface-2 p-2 text-sm text-text placeholder:text-faint focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40"
           />
           <Button type="submit" variant="outline" size="sm" disabled={!note.trim() || addNote.isPending}>
             {addNote.isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}

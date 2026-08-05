@@ -131,7 +131,7 @@ export function ChannelsTab() {
                       key={s}
                       onClick={() => setW((x) => void (x.widgetStyle = s))}
                       className={`flex-1 rounded px-2 py-1.5 text-xs capitalize transition-colors ${
-                        w.widgetStyle === s ? "bg-ember text-[#0A0B0D]" : "text-muted hover:text-text"
+                        w.widgetStyle === s ? "bg-accent-strong text-on-accent" : "text-muted hover:text-text"
                       }`}
                     >
                       {s}
@@ -194,7 +194,7 @@ export function ChannelsTab() {
                       onClick={() => setW((x) => void (x.floatingButtonStyle = opt.value))}
                       title={opt.label}
                       className={`flex flex-col items-center gap-1.5 rounded-lg border p-2 transition-colors ${
-                        selected ? "border-ember bg-ember/[0.06]" : "border-border hover:border-border-strong"
+                        selected ? "border-accent bg-accent/[0.06]" : "border-border hover:border-border-strong"
                       }`}
                     >
                       <span
@@ -253,7 +253,7 @@ export function ChannelsTab() {
                             x.inputBarButtons = Array.from(set) as InputBarButton[];
                           })
                         }
-                        className="size-4 accent-ember"
+                        className="size-4 accent-accent"
                       />
                       <span className="capitalize">{b === "attachment" ? "File attachment" : "Emoji picker"}</span>
                     </label>
@@ -436,7 +436,7 @@ function LogoUpload({
 
 // A soft lavender-blue default, purely so you can eyeball contrast while designing.
 const DEFAULT_BACKDROP = "linear-gradient(135deg, #EEF1FF, #DCE6FF)";
-const BACKDROP_SWATCHES = ["linear-gradient(135deg, #EEF1FF, #DCE6FF)", "#FFFFFF", "#0A0B0D", "#F4F5F7", "#1E2530"];
+const BACKDROP_SWATCHES = ["linear-gradient(135deg, #EEF1FF, #DCE6FF)", "#FFFFFF", "#0B0F19", "#F4F5F7", "#1E2530"];
 
 function LivePreview({ draft }: { draft: AgentDraft }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -472,7 +472,7 @@ function LivePreview({ draft }: { draft: AgentDraft }) {
             type="button"
             title="Preview backdrop (not saved)"
             onClick={() => setBackdrop(bg)}
-            className={`size-5 rounded-full border ${backdrop === bg ? "border-ember ring-1 ring-ember" : "border-border"}`}
+            className={`size-5 rounded-full border ${backdrop === bg ? "border-accent ring-1 ring-accent" : "border-border"}`}
             style={{ background: bg }}
           />
         ))}
@@ -602,7 +602,7 @@ function MessagingChannels({ agentId }: { agentId: string }) {
           return (
             <li key={type} className="rounded-md border border-border bg-surface-2/50 p-3">
               <div className="flex items-center gap-3">
-                <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+                <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-accent-soft">
                   <Icon className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">

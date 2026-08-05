@@ -31,7 +31,7 @@ export function Topbar() {
       <div className="ml-auto flex items-center gap-1">
         <Button variant="ghost" size="icon" aria-label="Notifications" className="relative">
           <Bell className="size-[18px]" />
-          <span className="absolute right-2 top-2 size-1.5 rounded-full bg-ember ring-2 ring-bg" />
+          <span className="absolute right-2 top-2 size-1.5 rounded-full bg-accent ring-2 ring-bg" />
         </Button>
         <ThemeToggle />
         <div className="mx-1.5 h-6 w-px bg-border" />

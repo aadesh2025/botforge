@@ -59,9 +59,9 @@ export default function KnowledgePage() {
               href={`/knowledge/${kb.id}`}
               className="group relative overflow-hidden rounded-lg border border-border bg-surface p-5 transition-colors hover:border-border-strong"
             >
-              <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-ember/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+              <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
               <div className="flex items-start justify-between">
-                <span className="grid size-11 place-items-center rounded-lg border border-border bg-surface-2 text-ember-soft">
+                <span className="grid size-11 place-items-center rounded-lg border border-border bg-surface-2 text-accent-soft">
                   <BookOpen className="size-5" />
                 </span>
                 <span className="text-xs text-faint">{relativeTime(kb.updated_at)}</span>
@@ -85,7 +85,7 @@ export default function KnowledgePage() {
 
           <button
             onClick={() => setCreating(true)}
-            className="flex min-h-[164px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface/40 text-muted transition-colors hover:border-ember/40 hover:bg-ember/[0.03] hover:text-ember-soft"
+            className="flex min-h-[164px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface/40 text-muted transition-colors hover:border-accent/40 hover:bg-accent/[0.03] hover:text-accent-soft"
           >
             <span className="grid size-11 place-items-center rounded-lg border border-border bg-surface-2">
               <Database className="size-5" />

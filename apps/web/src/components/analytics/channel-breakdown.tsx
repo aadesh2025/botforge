@@ -62,7 +62,7 @@ export function ChannelBreakdown({
             <tr key={b.channel} className="transition-colors hover:bg-surface-2/40">
               <th scope="row" className="whitespace-nowrap px-5 py-2.5 text-left font-normal">
                 <span className="flex items-center gap-2">
-                  <span className="grid size-6 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+                  <span className="grid size-6 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-accent-soft">
                     <Icon className="size-3.5" aria-hidden />
                   </span>
                   <span className={idle ? "text-muted" : "text-text"}>{label}</span>
@@ -78,7 +78,7 @@ export function ChannelBreakdown({
                   {/* Proportional bar, so relative volume reads at a glance. */}
                   <span className="hidden h-1.5 w-16 overflow-hidden rounded-full bg-surface-3 sm:block">
                     <span
-                      className="block h-full rounded-full bg-gradient-to-r from-ember to-ember-2"
+                      className="block h-full rounded-full bg-gradient-to-r from-accent to-accent-2"
                       style={{ width: `${(b.conversations / busiest) * 100}%` }}
                     />
                   </span>

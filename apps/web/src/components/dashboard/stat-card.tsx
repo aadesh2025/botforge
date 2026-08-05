@@ -22,11 +22,11 @@ export function StatCard({
 
   return (
     <div className="group relative overflow-hidden rounded-lg border border-border bg-surface p-5 transition-colors hover:border-border-strong">
-      {/* ember top hairline reveals on hover */}
-      <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-ember/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+      {/* accent top hairline reveals on hover */}
+      <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
       <div className="flex items-center justify-between">
         <span className="text-sm text-muted">{label}</span>
-        <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-faint transition-colors group-hover:text-ember-soft">
+        <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-faint transition-colors group-hover:text-accent-soft">
           <Icon className="size-4" />
         </span>
       </div>

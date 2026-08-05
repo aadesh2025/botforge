@@ -190,7 +190,7 @@ export default function HelpCenterPage() {
               onChange={(e) => setBody(e.target.value)}
               rows={10}
               placeholder="## Refunds&#10;&#10;We refund within 30 days…"
-              className="w-full rounded-md border border-border bg-surface-2 p-3 font-mono text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
+              className="w-full rounded-md border border-border bg-surface-2 p-3 font-mono text-sm text-text placeholder:text-faint focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40"
             />
           </div>
 
@@ -239,7 +239,7 @@ export default function HelpCenterPage() {
                   {a.published ? "Published" : "Draft"}
                 </Badge>
                 {a.category && <Badge variant="default">{a.category}</Badge>}
-                {a.kb_document_id && <Badge variant="ember">In knowledge base</Badge>}
+                {a.kb_document_id && <Badge variant="accent">In knowledge base</Badge>}
               </div>
               <code className="text-xs text-faint">/{a.slug}</code>
             </div>

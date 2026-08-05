@@ -59,8 +59,8 @@ export const webhooks: WebhookEndpoint[] = [
   { id: "w2", url: "https://hooks.aurozen.ai/analytics", events: ["conversation.closed"], status: "failing", lastDelivery: "2026-07-17T03:10:00Z" },
 ];
 
-export const roleMeta: Record<Role, { label: string; variant: "ember" | "info" | "default" }> = {
-  owner: { label: "Owner", variant: "ember" },
+export const roleMeta: Record<Role, { label: string; variant: "accent" | "info" | "default" }> = {
+  owner: { label: "Owner", variant: "accent" },
   admin: { label: "Admin", variant: "info" },
   editor: { label: "Editor", variant: "default" },
   viewer: { label: "Viewer", variant: "default" },

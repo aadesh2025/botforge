@@ -62,7 +62,7 @@ export function versionToDraft(
       handoff: (feat.handoff_enabled as boolean) ?? false,
     },
     widget: {
-      primaryColor: (w.primaryColor as string) ?? "#E8590C",
+      primaryColor: (w.primaryColor as string) ?? "#6366F1",
       position: (w.position as "bottom-right" | "bottom-left") ?? "bottom-right",
       launcherText: (w.launcherText as string) ?? "Chat with us",
       branding: (w.branding as boolean) ?? true,

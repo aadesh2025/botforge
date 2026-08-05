@@ -112,7 +112,7 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
   if (isLoading || !draft) {
     return (
       <div className="flex h-[60vh] items-center justify-center text-muted">
-        <Loader2 className="mr-2 size-5 animate-spin text-ember-soft" /> Loading agent…
+        <Loader2 className="mr-2 size-5 animate-spin text-accent-soft" /> Loading agent…
       </div>
     );
   }

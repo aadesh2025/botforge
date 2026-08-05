@@ -164,29 +164,29 @@ export default function KnowledgeDetailPage() {
           <button
             onClick={() => fileInput.current?.click()}
             disabled={upload.isPending}
-            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong bg-surface-2/40 p-6 text-center transition-colors hover:border-ember/40 hover:bg-ember/[0.03] disabled:opacity-60"
+            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong bg-surface-2/40 p-6 text-center transition-colors hover:border-accent/40 hover:bg-accent/[0.03] disabled:opacity-60"
           >
             {upload.isPending ? (
-              <Loader2 className="size-6 animate-spin text-ember-soft" />
+              <Loader2 className="size-6 animate-spin text-accent-soft" />
             ) : (
-              <FileUp className="size-6 text-ember-soft" />
+              <FileUp className="size-6 text-accent-soft" />
             )}
             <div className="text-sm font-medium text-text">Upload a file</div>
             <div className="text-xs text-faint">PDF, DOCX, TXT, CSV, MD</div>
           </button>
           <button
             onClick={() => setUrlOpen(true)}
-            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong bg-surface-2/40 p-6 text-center transition-colors hover:border-ember/40 hover:bg-ember/[0.03]"
+            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong bg-surface-2/40 p-6 text-center transition-colors hover:border-accent/40 hover:bg-accent/[0.03]"
           >
-            <Link2 className="size-6 text-ember-soft" />
+            <Link2 className="size-6 text-accent-soft" />
             <div className="text-sm font-medium text-text">Add a URL</div>
             <div className="text-xs text-faint">Fetch a web page</div>
           </button>
           <button
             onClick={() => setTextOpen(true)}
-            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong bg-surface-2/40 p-6 text-center transition-colors hover:border-ember/40 hover:bg-ember/[0.03]"
+            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong bg-surface-2/40 p-6 text-center transition-colors hover:border-accent/40 hover:bg-accent/[0.03]"
           >
-            <Type className="size-6 text-ember-soft" />
+            <Type className="size-6 text-accent-soft" />
             <div className="text-sm font-medium text-text">Paste text</div>
             <div className="text-xs text-faint">Raw content</div>
           </button>

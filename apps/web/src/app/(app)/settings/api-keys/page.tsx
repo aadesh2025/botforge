@@ -61,7 +61,7 @@ export default function ApiKeysPage() {
           {(keys ?? []).length === 0 && <p className="p-4 text-sm text-muted">No API keys yet.</p>}
           {(keys ?? []).map((k) => (
             <div key={k.id} className="flex items-center gap-3 p-4">
-              <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+              <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-accent-soft">
                 <KeyRound className="size-4" />
               </span>
               <div className="min-w-0 flex-1">

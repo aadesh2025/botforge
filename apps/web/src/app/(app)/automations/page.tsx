@@ -84,7 +84,7 @@ export default function AutomationsPage() {
           <ul className="divide-y divide-border">
             {(workflows ?? []).map((wf) => (
               <li key={wf.id} className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-surface-2/40">
-                <span className="grid size-10 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+                <span className="grid size-10 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-accent-soft">
                   <Webhook className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">

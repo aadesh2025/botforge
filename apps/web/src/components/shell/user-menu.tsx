@@ -30,9 +30,9 @@ export function UserMenu() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="rounded-md outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-ember">
+      <DropdownMenuTrigger className="rounded-md outline-none ring-offset-2 focus-visible:ring-2 focus-visible:ring-accent">
         <Avatar className="size-8 border border-border">
-          <AvatarFallback className="bg-gradient-to-br from-ember to-ember-2 text-[#0A0B0D]">
+          <AvatarFallback className="bg-accent-strong text-on-accent">
             {initials(user.full_name, user.email)}
           </AvatarFallback>
         </Avatar>

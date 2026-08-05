@@ -98,12 +98,12 @@ export function UsageChart({ data }: { data: UsagePoint[] }) {
         >
           <defs>
             <linearGradient id="usage-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="rgb(255 106 61)" stopOpacity="0.28" />
-              <stop offset="100%" stopColor="rgb(255 106 61)" stopOpacity="0" />
+              <stop offset="0%" style={{ stopColor: "rgb(var(--accent))" }} stopOpacity="0.28" />
+              <stop offset="100%" style={{ stopColor: "rgb(var(--accent))" }} stopOpacity="0" />
             </linearGradient>
             <linearGradient id="usage-stroke" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#FF6A3D" />
-              <stop offset="100%" stopColor="#FFB020" />
+              <stop offset="0%" style={{ stopColor: "rgb(var(--accent))" }} />
+              <stop offset="100%" style={{ stopColor: "rgb(var(--glow))" }} />
             </linearGradient>
           </defs>
 
@@ -117,7 +117,7 @@ export function UsageChart({ data }: { data: UsagePoint[] }) {
                 x2={w - PAD.right}
                 y1={yy}
                 y2={yy}
-                stroke="rgb(36 40 50)"
+                stroke="rgb(var(--border))"
                 strokeDasharray="3 5"
               />
             );
@@ -132,10 +132,10 @@ export function UsageChart({ data }: { data: UsagePoint[] }) {
             x2={activePoint.x}
             y1={PAD.top}
             y2={H - PAD.bottom}
-            stroke="rgb(255 106 61)"
+            stroke="rgb(var(--accent))"
             strokeOpacity={0.35}
           />
-          <circle cx={activePoint.x} cy={activePoint.y} r={4.5} fill="#FF6A3D" stroke="#0A0B0D" strokeWidth={2} />
+          <circle cx={activePoint.x} cy={activePoint.y} r={4.5} className="fill-accent stroke-bg" strokeWidth={2} />
 
           {/* x labels: first, mid, last — de-duplicated, since a short series collapses
               them onto the same index (1 point => [0,0,0], which also duplicated React keys) */}

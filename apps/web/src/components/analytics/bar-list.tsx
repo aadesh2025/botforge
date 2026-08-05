@@ -18,7 +18,7 @@ export function BarList({
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-surface-3">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-ember to-ember-2"
+              className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2"
               style={{ width: `${(item.value / max) * 100}%` }}
             />
           </div>

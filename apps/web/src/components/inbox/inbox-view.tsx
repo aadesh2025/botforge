@@ -116,7 +116,7 @@ export function InboxView({ initialId }: { initialId?: string }) {
                 key={f.key}
                 onClick={() => setFilter(f.key)}
                 className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                  filter === f.key ? "bg-ember/15 text-ember-soft" : "text-muted hover:bg-surface-2"
+                  filter === f.key ? "bg-accent/15 text-accent-soft" : "text-muted hover:bg-surface-2"
                 }`}
               >
                 {f.label}
@@ -158,7 +158,7 @@ export function InboxView({ initialId }: { initialId?: string }) {
                   <div className="flex items-center gap-2 text-xs text-faint">
                     <span>{it.message_count} msgs</span>
                     {it.handoff && it.handoff.status !== "resolved" && (
-                      <Badge variant="ember" className="ml-auto">
+                      <Badge variant="accent" className="ml-auto">
                         {it.handoff.assigned_to ? "assigned" : "needs agent"}
                       </Badge>
                     )}
@@ -213,7 +213,7 @@ function ChannelTab({
       // Dimmed rather than disabled: "available, not set up yet", still reachable.
       className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
         active
-          ? "border-ember text-ember-soft"
+          ? "border-accent text-accent-soft"
           : connected
             ? "border-transparent text-muted hover:border-border-strong hover:text-text"
             : "border-transparent text-faint opacity-70 hover:border-border hover:text-muted hover:opacity-100"
@@ -226,7 +226,7 @@ function ChannelTab({
         <span aria-hidden className="ml-0.5 size-1.5 rounded-full border border-current opacity-70" />
       )}
       {badge && (
-        <Badge variant="ember" className="ml-0.5">
+        <Badge variant="accent" className="ml-0.5">
           {badge}
         </Badge>
       )}
@@ -275,7 +275,7 @@ function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
             {detail?.contact?.crm_contact_id ? (
               <Link
                 href={`/contacts/${detail.contact.crm_contact_id}`}
-                className="hover:text-ember-soft hover:underline"
+                className="hover:text-accent-soft hover:underline"
               >
                 {contactLabel(detail.contact, detail.channel_user_id)}
               </Link>
@@ -316,22 +316,22 @@ function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
                 {who === "user" ? (
                   <User className="size-3.5" />
                 ) : operator ? (
-                  <Headphones className="size-3.5 text-ember-soft" />
+                  <Headphones className="size-3.5 text-accent-soft" />
                 ) : (
-                  <Bot className="size-3.5 text-ember-soft" />
+                  <Bot className="size-3.5 text-accent-soft" />
                 )}
               </span>
               <div
                 className={`max-w-[80%] whitespace-pre-wrap rounded-lg border px-3 py-2 text-sm ${
                   who === "user"
-                    ? "border-ember/30 bg-ember/[0.06] text-text"
+                    ? "border-accent/30 bg-accent/[0.06] text-text"
                     : operator
-                      ? "border-ember/40 bg-ember/[0.1] text-text"
+                      ? "border-accent/40 bg-accent/[0.1] text-text"
                       : "border-border bg-surface-2/60 text-text"
                 }`}
               >
                 {operator && (
-                  <div className="mb-0.5 text-[10px] uppercase tracking-wide text-ember-soft">Operator</div>
+                  <div className="mb-0.5 text-[10px] uppercase tracking-wide text-accent-soft">Operator</div>
                 )}
                 {m.content}
               </div>

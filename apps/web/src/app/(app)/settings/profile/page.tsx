@@ -64,7 +64,7 @@ export default function ProfilePage() {
       <Section title="Profile" description="Your personal account details.">
         <div className="flex items-center gap-4">
           <Avatar className="size-14 border border-border">
-            <AvatarFallback className="bg-gradient-to-br from-ember to-ember-2 text-lg text-[#0A0B0D]">
+            <AvatarFallback className="bg-accent-strong text-lg text-on-accent">
               {user ? initials(user.full_name, user.email) : "—"}
             </AvatarFallback>
           </Avatar>

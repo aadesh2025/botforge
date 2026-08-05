@@ -57,7 +57,7 @@ export default function AgentsPage() {
                 href={`/agents/${agent.id}`}
                 className="group relative overflow-hidden rounded-lg border border-border bg-surface p-5 transition-colors hover:border-border-strong"
               >
-                <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-ember/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                 <div className="flex items-start justify-between">
                   <span className="grid size-11 place-items-center rounded-lg border border-border bg-surface-2 font-display text-lg font-semibold text-muted">
                     {agent.name[0]?.toUpperCase()}
@@ -81,7 +81,7 @@ export default function AgentsPage() {
 
           <button
             onClick={() => setCreating(true)}
-            className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface/40 text-muted transition-colors hover:border-ember/40 hover:bg-ember/[0.03] hover:text-ember-soft"
+            className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface/40 text-muted transition-colors hover:border-accent/40 hover:bg-accent/[0.03] hover:text-accent-soft"
           >
             <span className="grid size-11 place-items-center rounded-lg border border-border bg-surface-2">
               <Bot className="size-5" />

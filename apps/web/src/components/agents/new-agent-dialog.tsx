@@ -131,7 +131,7 @@ export function NewAgentDialog({
             <button
               type="button"
               onClick={() => pick(null, "")}
-              className="mt-4 flex w-full items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface/40 px-4 py-3 text-left transition-colors hover:border-ember/40 hover:bg-ember/[0.03]"
+              className="mt-4 flex w-full items-center gap-3 rounded-lg border border-dashed border-border-strong bg-surface/40 px-4 py-3 text-left transition-colors hover:border-accent/40 hover:bg-accent/[0.03]"
             >
               <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-surface-2 text-muted">
                 <PenLine className="size-4" />
@@ -192,9 +192,9 @@ function TemplateCard({
     <button
       type="button"
       onClick={onSelect}
-      className="group flex h-full flex-col gap-2 rounded-lg border border-border bg-surface-2/40 p-4 text-left transition-colors hover:border-ember/40 hover:bg-ember/[0.03]"
+      className="group flex h-full flex-col gap-2 rounded-lg border border-border bg-surface-2/40 p-4 text-left transition-colors hover:border-accent/40 hover:bg-accent/[0.03]"
     >
-      <span className="grid size-9 place-items-center rounded-lg border border-border bg-surface-2 text-muted transition-colors group-hover:text-ember-soft">
+      <span className="grid size-9 place-items-center rounded-lg border border-border bg-surface-2 text-muted transition-colors group-hover:text-accent-soft">
         <Icon className="size-4" />
       </span>
       <span className="text-sm font-medium text-text">{template.label}</span>

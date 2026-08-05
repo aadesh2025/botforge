@@ -84,7 +84,7 @@ export function ToolsTab() {
               const on = byName.has(b.name);
               return (
                 <li key={b.name} className="flex items-center gap-3 rounded-md border border-border bg-surface-2/50 p-3">
-                  <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+                  <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-accent-soft">
                     <Zap className="size-4" />
                   </span>
                   <div className="min-w-0 flex-1">
@@ -103,7 +103,7 @@ export function ToolsTab() {
         <ul className="space-y-2">
           {httpTools.map((t) => (
             <li key={t.id} className="flex items-center gap-3 rounded-md border border-border bg-surface-2/50 p-3">
-              <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+              <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-accent-soft">
                 <Globe className="size-4" />
               </span>
               <div className="min-w-0 flex-1">

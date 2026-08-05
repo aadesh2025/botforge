@@ -8,9 +8,9 @@ import { getAutomationsOverview, type AdminAutomation, type AutomationOwnerKind 
 
 /** How each owner kind reads. `untagged` and `unknown-org` are warnings, not states:
  *  under deny-by-default (ADR-040) both mean nobody can see or bind the workflow. */
-const OWNER_META: Record<AutomationOwnerKind, { label: string; variant: "success" | "warn" | "ember" | "default" }> = {
+const OWNER_META: Record<AutomationOwnerKind, { label: string; variant: "success" | "warn" | "accent" | "default" }> = {
   org: { label: "", variant: "success" },
-  "shared-template": { label: "shared template", variant: "ember" },
+  "shared-template": { label: "shared template", variant: "accent" },
   internal: { label: "internal", variant: "default" },
   untagged: { label: "untagged — hidden from everyone", variant: "warn" },
   "unknown-org": { label: "tag matches no org", variant: "warn" },

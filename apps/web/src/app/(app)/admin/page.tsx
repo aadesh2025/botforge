@@ -43,7 +43,7 @@ export default function AdminPage() {
   return (
     <div className="mx-auto max-w-[1400px] space-y-6">
       <PageHeader title="Platform admin" description="Cross-tenant operations. Visible to platform staff only.">
-        <Badge variant="ember">
+        <Badge variant="accent">
           <Server className="size-3" /> staff
         </Badge>
       </PageHeader>
@@ -93,7 +93,7 @@ function HealthPanel({ health }: { health: { database: boolean; redis: boolean }
   return (
     <section className="rounded-lg border border-border bg-surface p-5">
       <div className="mb-4 flex items-center gap-2">
-        <Activity className="size-4 text-ember-soft" />
+        <Activity className="size-4 text-accent-soft" />
         <h3 className="font-display text-base font-semibold text-text">System health</h3>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -249,7 +249,7 @@ function UsersTable({ users }: { users: { id: string; email: string; is_staff: b
                 <td className="px-5 py-3 text-text">
                   <span className="flex items-center gap-2">
                     {u.email}
-                    {u.is_staff && <Badge variant="ember">staff</Badge>}
+                    {u.is_staff && <Badge variant="accent">staff</Badge>}
                   </span>
                 </td>
                 <td className="px-5 py-3">

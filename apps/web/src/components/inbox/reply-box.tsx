@@ -135,7 +135,7 @@ export function ReplyBox({
                   i === selected ? "bg-surface-2" : ""
                 }`}
               >
-                <code className="shrink-0 font-mono text-xs text-ember-soft">/{c.shortcut}</code>
+                <code className="shrink-0 font-mono text-xs text-accent-soft">/{c.shortcut}</code>
                 <span className="min-w-0 flex-1 truncate text-xs text-muted">{c.content}</span>
               </button>
             </li>
@@ -158,7 +158,7 @@ export function ReplyBox({
           aria-expanded={matches.length > 0}
           aria-controls="canned-response-list"
           autoComplete="off"
-          className="h-10 flex-1 rounded-md border border-border bg-surface-2 px-3 text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
+          className="h-10 flex-1 rounded-md border border-border bg-surface-2 px-3 text-sm text-text placeholder:text-faint focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40"
         />
         <Button type="submit" variant="primary" disabled={!text.trim() || doReply.isPending} aria-label="Send reply">
           {doReply.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
@@ -253,7 +253,7 @@ function TemplateComposer({
             onChange={(e) => setParams(e.target.value)}
             placeholder="Template values, comma-separated"
             aria-label="Template values, comma-separated"
-            className="h-10 min-w-0 flex-1 rounded-md border border-border bg-surface-2 px-3 text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
+            className="h-10 min-w-0 flex-1 rounded-md border border-border bg-surface-2 px-3 text-sm text-text placeholder:text-faint focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40"
           />
           <Button type="submit" variant="primary" disabled={!template || send.isPending}>
             {send.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}

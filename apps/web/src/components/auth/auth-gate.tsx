@@ -79,7 +79,7 @@ function NoWorkspace() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-bg px-4">
-      <div className="glow-ember pointer-events-none absolute inset-0" />
+      <div className="glow-accent pointer-events-none absolute inset-0" />
       <div className="relative w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-pop">
         <h1 className="font-display text-xl font-semibold text-text">No workspace yet</h1>
         <p className="mt-2 text-sm text-muted">

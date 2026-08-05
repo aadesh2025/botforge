@@ -158,7 +158,7 @@ export default function ConversationsPage() {
                   activeCid === c.id && live === null ? "bg-surface-2/60" : ""
                 }`}
               >
-                <span className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+                <span className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-accent-soft">
                   <MessagesSquare className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
@@ -188,9 +188,9 @@ export default function ConversationsPage() {
             <>
               <div className="flex items-center justify-between border-b border-border p-4">
                 <div className="flex items-center gap-2">
-                  <Bot className="size-4 text-ember-soft" />
+                  <Bot className="size-4 text-accent-soft" />
                   <span className="text-sm font-medium text-text">{agentId ? agentName(agentId) : "Agent"}</span>
-                  {detail?.memory_summary && <Badge variant="ember">memory</Badge>}
+                  {detail?.memory_summary && <Badge variant="accent">memory</Badge>}
                 </div>
                 {activeCid && (
                   <button
@@ -207,16 +207,16 @@ export default function ConversationsPage() {
                 {threadMsgs.map((m, i) => (
                   <div key={i} className={`flex gap-3 ${m.role === "user" ? "flex-row-reverse" : ""}`}>
                     <span className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-faint">
-                      {m.role === "user" ? <User className="size-3.5" /> : <Bot className="size-3.5 text-ember-soft" />}
+                      {m.role === "user" ? <User className="size-3.5" /> : <Bot className="size-3.5 text-accent-soft" />}
                     </span>
                     <div
                       className={`max-w-[80%] whitespace-pre-wrap rounded-lg border px-3 py-2 text-sm ${
                         m.role === "user"
-                          ? "border-ember/30 bg-ember/[0.06] text-text"
+                          ? "border-accent/30 bg-accent/[0.06] text-text"
                           : "border-border bg-surface-2/60 text-text"
                       }`}
                     >
-                      {m.content || (m.streaming ? <Loader2 className="size-4 animate-spin text-ember-soft" /> : "")}
+                      {m.content || (m.streaming ? <Loader2 className="size-4 animate-spin text-accent-soft" /> : "")}
                     </div>
                   </div>
                 ))}
@@ -233,7 +233,7 @@ export default function ConversationsPage() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="Message the agent…"
-                  className="h-10 flex-1 rounded-md border border-border bg-surface-2 px-3 text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
+                  className="h-10 flex-1 rounded-md border border-border bg-surface-2 px-3 text-sm text-text placeholder:text-faint focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40"
                 />
                 <Button type="submit" variant="primary" disabled={!input.trim() || sending} aria-label="Send message">
                   {sending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
@@ -254,7 +254,7 @@ export default function ConversationsPage() {
               <button
                 key={a.id}
                 onClick={() => startNewChat(a.id)}
-                className="flex w-full items-center gap-3 rounded-md border border-border bg-surface-2/50 p-3 text-left transition-colors hover:border-ember/40"
+                className="flex w-full items-center gap-3 rounded-md border border-border bg-surface-2/50 p-3 text-left transition-colors hover:border-accent/40"
               >
                 <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 font-display text-sm font-semibold text-muted">
                   {a.name[0]?.toUpperCase()}

@@ -78,7 +78,7 @@ export function KnowledgeTab() {
         ) : (kbs ?? []).length === 0 ? (
           <div className="rounded-md border border-dashed border-border-strong bg-surface-2/40 p-6 text-center text-sm text-muted">
             No knowledge bases yet.{" "}
-            <Link href="/knowledge" className="text-ember-soft hover:underline">
+            <Link href="/knowledge" className="text-accent-soft hover:underline">
               Create one
             </Link>{" "}
             to attach it here.
@@ -92,7 +92,7 @@ export function KnowledgeTab() {
                   key={kb.id}
                   className="flex items-center gap-3 rounded-md border border-border bg-surface-2/50 p-3"
                 >
-                  <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+                  <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-accent-soft">
                     <BookOpen className="size-4" />
                   </span>
                   <div className="min-w-0 flex-1">
@@ -148,7 +148,7 @@ export function KnowledgeTab() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="e.g. What is the return window?"
-                className="h-9 w-full rounded-md border border-border bg-surface-2 pl-9 pr-3 text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
+                className="h-9 w-full rounded-md border border-border bg-surface-2 pl-9 pr-3 text-sm text-text placeholder:text-faint focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40"
               />
             </div>
             <Button
@@ -180,7 +180,7 @@ export function KnowledgeTab() {
                     <span className="max-w-[220px] truncate font-mono text-xs text-muted">
                       {source} · #{c.ordinal}
                     </span>
-                    <Badge variant="ember" className="ml-auto">
+                    <Badge variant="accent" className="ml-auto">
                       {c.score.toFixed(2)}
                     </Badge>
                   </div>

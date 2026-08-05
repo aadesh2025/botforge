@@ -17,7 +17,7 @@ import { relativeTime } from "@/lib/utils";
 
 const PAGE_SIZE = 25;
 
-const stageVariant: Record<string, "success" | "warn" | "ember" | "default"> = {
+const stageVariant: Record<string, "success" | "warn" | "accent" | "default"> = {
   new: "default",
   contacted: "default",
   qualified: "warn",

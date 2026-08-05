@@ -67,7 +67,7 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
             collapsed && "justify-center px-0",
           )}
         >
-          <span className="grid size-7 shrink-0 place-items-center rounded-md bg-gradient-to-br from-ember to-ember-2 text-[13px] font-bold text-[#0A0B0D]">
+          <span className="grid size-7 shrink-0 place-items-center rounded-md bg-accent-strong text-[13px] font-bold text-on-accent">
             {active.name[0]?.toUpperCase()}
           </span>
           {!collapsed && (
@@ -88,7 +88,7 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
                 {org.name[0]?.toUpperCase()}
               </span>
               <span className="flex-1 truncate text-text">{org.name}</span>
-              {org.id === active.id && <Check className="size-4 text-ember-soft" />}
+              {org.id === active.id && <Check className="size-4 text-accent-soft" />}
             </DropdownMenuItem>
           ))}
           {isStaff && (

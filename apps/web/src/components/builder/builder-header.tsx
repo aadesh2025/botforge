@@ -50,7 +50,7 @@ export function BuilderHeader() {
         >
           <ArrowLeft className="size-4" />
         </Link>
-        <span className="grid size-9 place-items-center rounded-md bg-gradient-to-br from-ember to-ember-2 font-display text-sm font-bold text-[#0A0B0D]">
+        <span className="grid size-9 place-items-center rounded-md bg-accent-strong font-display text-sm font-bold text-on-accent">
           {draft.name[0]}
         </span>
         <div className="min-w-0">
@@ -66,7 +66,7 @@ export function BuilderHeader() {
 
         <div className="ml-auto flex items-center gap-3">
           {branchedToDraft !== null && (
-            <Badge variant="ember" title="Your edit created a new editable draft; publish it when ready.">
+            <Badge variant="accent" title="Your edit created a new editable draft; publish it when ready.">
               Editing new draft v{branchedToDraft}
             </Badge>
           )}
@@ -109,7 +109,7 @@ function SaveIndicator({
   if (saving) {
     return (
       <span className="flex items-center gap-1.5 text-xs text-muted">
-        <Loader2 className="size-3.5 animate-spin text-ember-soft" /> Saving…
+        <Loader2 className="size-3.5 animate-spin text-accent-soft" /> Saving…
       </span>
     );
   }

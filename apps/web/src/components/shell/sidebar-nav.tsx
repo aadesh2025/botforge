@@ -55,17 +55,17 @@ export function SidebarNav({ collapsed }: { collapsed: boolean }) {
                 )}
               >
                 {active && (
-                  <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-ember shadow-[0_0_8px_0_rgb(255_106_61_/_0.6)]" />
+                  <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent shadow-[0_0_8px_0_rgb(255_106_61_/_0.6)]" />
                 )}
                 <Icon
                   className={cn(
                     "size-[18px] shrink-0 transition-colors",
-                    active ? "text-ember-soft" : "text-faint group-hover:text-muted",
+                    active ? "text-accent-soft" : "text-faint group-hover:text-muted",
                   )}
                 />
                 {!collapsed && <span className="flex-1">{item.label}</span>}
                 {!collapsed && item.href === "/inbox" && waiting ? (
-                  <span className="rounded-full bg-ember/15 px-1.5 py-0.5 text-[11px] font-semibold text-ember-soft">
+                  <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[11px] font-semibold text-accent-soft">
                     {waiting}
                   </span>
                 ) : null}

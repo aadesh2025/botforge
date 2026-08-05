@@ -13,7 +13,7 @@ export function ChipInput({
   values: string[];
   onChange: (next: string[]) => void;
   placeholder?: string;
-  variant?: "default" | "ember";
+  variant?: "default" | "accent";
 }) {
   const [text, setText] = useState("");
 
@@ -32,8 +32,8 @@ export function ChipInput({
             key={v}
             className={cn(
               "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs",
-              variant === "ember"
-                ? "border-ember/30 bg-ember/10 text-ember-soft"
+              variant === "accent"
+                ? "border-accent/30 bg-accent/10 text-accent-soft"
                 : "border-border bg-surface-2 text-muted",
             )}
           >
@@ -61,7 +61,7 @@ export function ChipInput({
             }
           }}
           placeholder={placeholder}
-          className="h-8 flex-1 rounded-md border border-border bg-surface-2 px-2.5 text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
+          className="h-8 flex-1 rounded-md border border-border bg-surface-2 px-2.5 text-sm text-text placeholder:text-faint focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40"
         />
         <button
           type="button"

@@ -98,9 +98,9 @@ function PlanCard() {
   const plan = org.plan.charAt(0).toUpperCase() + org.plan.slice(1);
 
   return (
-    <div className="mb-3 overflow-hidden rounded-lg border border-ember/20 bg-ember/[0.06] p-3">
+    <div className="mb-3 overflow-hidden rounded-lg border border-accent/20 bg-accent/[0.06] p-3">
       <div className="flex items-center gap-2 text-sm font-medium text-text">
-        <Sparkles className="size-4 text-ember-soft" /> {plan} plan
+        <Sparkles className="size-4 text-accent-soft" /> {plan} plan
       </div>
       <p className="mt-1 text-xs text-muted">
         {org.plan === "free"

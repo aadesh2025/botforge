@@ -77,7 +77,7 @@ export function TeamPerformance({
               <span className="flex items-center justify-end gap-2">
                 <span className="hidden h-1.5 w-16 overflow-hidden rounded-full bg-surface-3 sm:block">
                   <span
-                    className="block h-full rounded-full bg-gradient-to-r from-ember to-ember-2"
+                    className="block h-full rounded-full bg-gradient-to-r from-accent to-accent-2"
                     style={{ width: `${(b.handoffs / busiest) * 100}%` }}
                   />
                 </span>

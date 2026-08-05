@@ -83,7 +83,7 @@ export function VersionsTab({
                   className={
                     "z-10 mt-0.5 grid size-8 shrink-0 place-items-center rounded-full border " +
                     (isCurrent
-                      ? "border-ember/40 bg-ember/15 text-ember-soft"
+                      ? "border-accent/40 bg-accent/15 text-accent-soft"
                       : v.is_published
                         ? "border-border bg-surface-2 text-muted"
                         : "border-warn/40 bg-warn/10 text-warn")
@@ -94,7 +94,7 @@ export function VersionsTab({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-text">v{v.version}</span>
-                    {isCurrent && <Badge variant="ember">Current</Badge>}
+                    {isCurrent && <Badge variant="accent">Current</Badge>}
                     {!v.is_published && <Badge variant="warn">Draft</Badge>}
                   </div>
                   <p className="mt-0.5 line-clamp-1 text-sm text-muted">

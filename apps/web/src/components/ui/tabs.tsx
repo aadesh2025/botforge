@@ -26,7 +26,7 @@ const TabsTrigger = React.forwardRef<
     ref={ref}
     className={cn(
       "relative whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium text-muted transition-colors outline-none",
-      "hover:text-text focus-visible:ring-2 focus-visible:ring-ember/40",
+      "hover:text-text focus-visible:ring-2 focus-visible:ring-accent/40",
       "data-[state=active]:bg-surface-2 data-[state=active]:text-text",
       className,
     )}

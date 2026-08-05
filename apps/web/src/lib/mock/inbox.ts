@@ -83,7 +83,7 @@ export const inboxThreads: InboxThread[] = [
     updatedAt: "2026-07-17T06:12:00Z",
     messages: [
       { id: "m1", role: "visitor", text: "How do I reset the widget theme to default colors?", at: "2026-07-17T06:05:00Z" },
-      { id: "m2", role: "agent", text: "In the Channels tab, click 'Reset theme' next to the color pickers. That restores the default ember theme.", at: "2026-07-17T06:06:00Z" },
+      { id: "m2", role: "agent", text: "In the Channels tab, click 'Reset theme' next to the color pickers. That restores the default accent theme.", at: "2026-07-17T06:06:00Z" },
       { id: "m3", role: "visitor", text: "Perfect, thanks!", at: "2026-07-17T06:12:00Z" },
     ],
   },

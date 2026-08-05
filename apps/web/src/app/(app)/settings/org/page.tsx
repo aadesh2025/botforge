@@ -125,7 +125,7 @@ export default function OrgSettingsPage() {
           {(members ?? []).map((m) => (
             <li key={m.user_id} className="flex items-center gap-3 px-5 py-3.5">
               <Avatar className="size-9 border border-border">
-                <AvatarFallback className="bg-gradient-to-br from-ember to-ember-2 text-[#0A0B0D]">
+                <AvatarFallback className="bg-accent-strong text-on-accent">
                   {(m.full_name || m.email)[0]?.toUpperCase()}
                 </AvatarFallback>
               </Avatar>
@@ -146,7 +146,7 @@ export default function OrgSettingsPage() {
                   ))}
                 </select>
               ) : (
-                <Badge variant={m.role === "owner" ? "ember" : "default"}>{m.role}</Badge>
+                <Badge variant={m.role === "owner" ? "accent" : "default"}>{m.role}</Badge>
               )}
               {canManage && m.role !== "owner" && (
                 <button

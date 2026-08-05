@@ -8,7 +8,7 @@ const badgeVariants = cva(
     variants: {
       variant: {
         default: "border-border bg-surface-2 text-muted",
-        ember: "border-ember/30 bg-ember/10 text-ember-soft",
+        accent: "border-accent/30 bg-accent/10 text-accent-soft",
         success: "border-success/30 bg-success/10 text-success",
         warn: "border-warn/30 bg-warn/10 text-warn",
         error: "border-error/30 bg-error/10 text-error",

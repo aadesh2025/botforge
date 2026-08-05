@@ -110,7 +110,7 @@ function ProviderGrid({
             aria-label={`${p.label} provider key`}
             className="flex w-full items-start gap-3 rounded-lg border border-border bg-surface-2/50 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+            <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-md border border-border bg-surface-2 text-accent-soft">
               <Plug className="size-4" />
             </span>
             <div className="min-w-0 flex-1">
@@ -134,7 +134,7 @@ function ProviderGrid({
 }
 
 function ProviderStatusBadge({ provider }: { provider: ApiProviderInfo }) {
-  if (provider.key_source === "org") return <Badge variant="ember">key saved</Badge>;
+  if (provider.key_source === "org") return <Badge variant="accent">key saved</Badge>;
   // A deployment-wide key already makes this provider work; saving an org key overrides it.
   if (provider.key_source === "env") return <Badge variant="default">platform key</Badge>;
   if (provider.key_source === "not_required") return <Badge variant="default">no key needed</Badge>;
@@ -245,7 +245,7 @@ function ProviderKeyDialog({
               href={provider.api_key_url}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs text-ember-soft underline underline-offset-2"
+              className="inline-flex items-center gap-1.5 text-xs text-accent-soft underline underline-offset-2"
             >
               Get a {provider.label} key <ExternalLink className="size-3" />
             </a>

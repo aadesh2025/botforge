@@ -95,7 +95,7 @@ export default function CannedResponsesPage() {
               value={content}
               onChange={(e) => setContent(e.target.value)}
               rows={3}
-              className="w-full rounded-md border border-border bg-surface-2 p-3 text-sm text-text placeholder:text-faint focus-visible:border-ember/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ember/40"
+              className="w-full rounded-md border border-border bg-surface-2 p-3 text-sm text-text placeholder:text-faint focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40"
             />
             <div className="flex items-center gap-3">
               <Button
@@ -121,7 +121,7 @@ export default function CannedResponsesPage() {
           )}
           {(items ?? []).map((item) => (
             <div key={item.id} className="flex items-start gap-3 p-3">
-              <code className="mt-0.5 shrink-0 rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-ember-soft">
+              <code className="mt-0.5 shrink-0 rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-accent-soft">
                 /{item.shortcut}
               </code>
               <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm text-text">{item.content}</p>

@@ -56,7 +56,7 @@ export default function WebhooksPage() {
           {(hooks ?? []).length === 0 && <p className="p-4 text-sm text-muted">No webhooks yet.</p>}
           {(hooks ?? []).map((h) => (
             <div key={h.id} className="flex items-center gap-3 p-4">
-              <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-ember-soft">
+              <span className="grid size-8 place-items-center rounded-md border border-border bg-surface-2 text-accent-soft">
                 <WebhookIcon className="size-4" />
               </span>
               <div className="min-w-0 flex-1">
@@ -161,7 +161,7 @@ function CreateWebhookDialog({
                   onClick={() => toggleEvent(e)}
                   className={`rounded-full border px-2 py-1 text-[11px] ${
                     events.includes(e)
-                      ? "border-ember/40 bg-ember/[0.08] text-ember-soft"
+                      ? "border-accent/40 bg-accent/[0.08] text-accent-soft"
                       : "border-border bg-surface-2 text-muted"
                   }`}
                 >

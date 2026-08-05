@@ -24,10 +24,10 @@ export const agentStatusMeta: Record<
 
 export const convoStatusMeta: Record<
   "open" | "handoff" | "closed",
-  { label: string; variant: "info" | "ember" | "default" }
+  { label: string; variant: "info" | "accent" | "default" }
 > = {
   open: { label: "Open", variant: "info" },
-  handoff: { label: "Needs human", variant: "ember" },
+  handoff: { label: "Needs human", variant: "accent" },
   closed: { label: "Closed", variant: "default" },
 };
 
@@ -40,8 +40,8 @@ export const apiAgentStatusMeta: Record<string, { label: string; variant: "succe
 };
 
 /** Ditto for `conversations.status` (`active|handoff|closed`) — note `active`, not `open`. */
-export const apiConvoStatusMeta: Record<string, { label: string; variant: "info" | "ember" | "default" }> = {
+export const apiConvoStatusMeta: Record<string, { label: string; variant: "info" | "accent" | "default" }> = {
   active: { label: "Active", variant: "info" },
-  handoff: { label: "Needs human", variant: "ember" },
+  handoff: { label: "Needs human", variant: "accent" },
   closed: { label: "Closed", variant: "default" },
 };
