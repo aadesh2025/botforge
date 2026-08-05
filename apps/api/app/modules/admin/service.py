@@ -29,7 +29,19 @@ from app.modules.admin import schemas
 from app.tools.service import INTERNAL_TAGS, SHARED_TEMPLATE_TAG
 
 
-async def list_orgs(session: AsyncSession, limit: int = 100) -> list[schemas.OrgAdminOut]:
+async def list_orgs(
+    session: AsyncSession, limit: int = 100, *, include_deleted: bool = False
+) -> list[schemas.OrgAdminOut]:
+    """Every organization on the platform.
+
+    Soft-deleted orgs are **excluded by default**, matching `list_users` — which always had
+    `deleted_at IS NULL` while this did not. That inconsistency was the bug: a client who
+    deleted their workspace stayed in the staff console forever, indistinguishable at a glance
+    from a live tenant, and the roster slowly filled with things that no longer exist.
+
+    `include_deleted=True` keeps the audit view available, since "which client left, and when"
+    is a real question — it is just not what the default list should be answering.
+    """
     members = (
         select(Membership.organization_id, func.count().label("n"))
         .where(Membership.status == "active")
@@ -77,6 +89,8 @@ async def list_orgs(session: AsyncSession, limit: int = 100) -> list[schemas.Org
         .order_by(Organization.created_at.desc())
         .limit(limit)
     )
+    if not include_deleted:
+        stmt = stmt.where(Organization.deleted_at.is_(None))
     rows = (await session.execute(stmt)).all()
     return [
         schemas.OrgAdminOut(

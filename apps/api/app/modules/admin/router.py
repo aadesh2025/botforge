@@ -19,10 +19,12 @@ router = APIRouter(prefix="/v1/admin", tags=["admin"])
 
 @router.get("/orgs", response_model=list[schemas.OrgAdminOut])
 async def list_orgs(
+    include_deleted: bool = False,
     _staff: User = Depends(require_staff),
     session: AsyncSession = Depends(get_session),
 ) -> list[schemas.OrgAdminOut]:
-    return await service.list_orgs(session)
+    """Live organizations. `?include_deleted=true` for the audit view."""
+    return await service.list_orgs(session, include_deleted=include_deleted)
 
 
 @router.get("/users", response_model=list[schemas.UserAdminOut])

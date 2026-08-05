@@ -6,6 +6,7 @@ Non-staff (and unauthenticated) requests must be rejected with 403.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 
 import httpx
@@ -15,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.n8n_client import N8nClient
-from app.models import Tool, User
+from app.models import Organization, Tool, User
 from app.modules.admin import service as admin_service
 
 
@@ -255,3 +256,38 @@ async def test_automations_overview_reports_n8n_being_down(
     assert r.status_code == 200, r.text
     assert r.json()["workflows"] == []
     assert r.json()["error"]
+
+
+async def test_deleted_orgs_are_hidden_from_the_console_by_default(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """`list_users` always filtered `deleted_at`; `list_orgs` never did.
+
+    A client who deleted their workspace therefore stayed in the staff roster forever, sitting
+    next to live tenants and indistinguishable at a glance. The two endpoints now agree.
+    """
+    token = await _signup(client, "admin.softdel@example.com")
+    await _make_staff(db_session, "admin.softdel@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    live = await client.post("/v1/orgs", json={"name": "Still Trading"}, headers=headers)
+    gone = await client.post("/v1/orgs", json={"name": "Wound Up"}, headers=headers)
+    assert live.status_code == 201 and gone.status_code == 201
+
+    doomed = (
+        await db_session.execute(select(Organization).where(Organization.id == uuid.UUID(gone.json()["id"])))
+    ).scalar_one()
+    doomed.deleted_at = dt.datetime.now(tz=dt.UTC)
+    await db_session.flush()
+
+    names = [o["name"] for o in (await client.get("/v1/admin/orgs", headers=headers)).json()]
+    assert "Still Trading" in names
+    assert "Wound Up" not in names, "a soft-deleted org must not appear in the default roster"
+
+    # The audit view still reaches it — "which client left, and when" is a real question.
+    all_names = [
+        o["name"] for o in (await client.get("/v1/admin/orgs?include_deleted=true", headers=headers)).json()
+    ]
+    assert "Wound Up" in all_names
+    assert next(o for o in (await client.get("/v1/admin/orgs?include_deleted=true", headers=headers)).json()
+                if o["name"] == "Wound Up")["deleted"] is True

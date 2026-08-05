@@ -38,6 +38,33 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Admin console: soft-deleted orgs were never filtered, and two more fixture sources were
+  invisible to the sweep (2026-08-05).** Follow-up to the E2E sweep below, after the console
+  still showed `provision@botforge.dev`, `owner@botforge.local`, *Acme Co*, *Globex Inc* and
+  *Deny Default Probe*.
+
+  **The code bug:** `admin.service.list_orgs` had no `deleted_at` filter, while `list_users`
+  directly below it always had `.where(User.deleted_at.is_(None))`. A client who deleted their
+  workspace stayed in the staff roster permanently, sitting next to live tenants. Now excluded
+  by default, with `?include_deleted=true` keeping the audit view — "which client left, and
+  when" is a real question, just not what the default roster should answer. Regression test
+  asserts both directions.
+
+  **The data:** two fixture accounts predate the `%@example.com` rule. `owner@botforge.local`
+  is `seed.py`'s account and is now swept — its demo org is rebuilt in full by `make seed`, so
+  nothing is lost that one command cannot restore.
+
+  **`@botforge.dev` is deliberately NOT swept, and the docstring says why.** It is
+  `PROVISION_STAFF_EMAIL`, the account `scripts/provision-client.mjs` uses to stand up **real
+  clients** — every org it provisions carries `created_by = provision@botforge.dev`. A pattern
+  sweep on that domain would have deleted a real client workspace the first time one was
+  provisioned through the script. Its leftover test orgs are indistinguishable from a real
+  tenant at the schema level, so *Acme Co*, *Globex Inc* and *Deny Default Probe* were removed
+  **by slug, once**, rather than by a rule that would fire again later on real data.
+
+  Console now lists five real orgs and four real users; one soft-deleted org is correctly
+  hidden. 711 pytest.
+
 - **The Admin console was full of Playwright fixtures; the E2E run now sweeps after itself
   (2026-08-05).** Every "org" in the staff console — *A11y Widget Org*, *Bad Token Org*,
   *Sidebar Org*, *Somewhere Else* — was a **real row from a real signup**. The E2E suite tests
