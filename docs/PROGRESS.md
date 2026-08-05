@@ -38,7 +38,37 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
-- **New palette: indigo on slate, replacing ember on graphite (2026-08-05, ADR-059).** The
+- **Final palette: four greys, light-first (2026-08-05, ADR-060).** The indigo below was
+  rejected on sight and lasted one commit; this replaced it the same day. The interface is now
+  `#F3F4F6` page, `#1F2937` ink, `#6B7280` and `#4B5563` for the two levels of secondary text —
+  the "white and black premium SaaS" register the indigo attempt had missed.
+
+  **Light became the default rather than an override.** `:root` now holds the light values with
+  `.dark` overriding, and next-themes defaults to `light`; the structure was previously
+  inverted, so a light palette expressed as an override would have left every un-themed surface
+  dark. **The accent is the ink** — a primary button is `#1F2937` with white on it (12.6:1) —
+  which constrains its use: anything wearing the accent reads as the single action on screen.
+
+  **Status colours stay saturated**, and are now the only colour in the product. That is the
+  argument for keeping them: a greyscale error state is not a state anyone notices. They're
+  darkened to sit calmly against grey.
+
+  Dark mode inverts the same four greys with one necessary departure: `#6B7280` is **3.04:1** on
+  `#1F2937`, so the secondary greys lighten rather than mirror — the literal value would have
+  failed AA on every caption in the app. Shadows became themed (`--shadow` plus two alphas),
+  because black at dark-mode strength turns a white card into a smudge.
+
+  One caveat is pinned in the token block: `#6B7280` is 4.83:1 on a white card but **4.39:1 on
+  the page background**, so faint text belongs inside cards. axe confirms nothing currently
+  violates it. Measured range: light 4.83–14.7:1, dark 5.3–16.1:1.
+
+  The widget's default accent **and** mode moved together — `#1F2937` on a dark panel is
+  invisible, so changing one without the other would have shipped a broken default. The four
+  live agents had their current mode pinned alongside the colour pinned earlier, so their
+  widgets are unchanged. Suites: **710 pytest**, **150 vitest**, tsc + eslint clean, axe green.
+
+- **New palette: indigo on slate, replacing ember on graphite (2026-08-05, ADR-059 — superseded
+  the same day by ADR-060 above; kept because the accessibility work it forced still applies).** The
   orange read as loud rather than premium — the opposite of what ADR-010 set out to do. The page
   is now void black `#0B0F19`, cards elevated slate `#131B2E`, the accent electric indigo into
   violet `#6366F1`→`#8B5CF6`, type crisp off-white `#F8FAFC` over muted slate `#94A3B8`. A cyan

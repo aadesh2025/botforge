@@ -18,9 +18,38 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-060: Four greys, light-first (supersedes ADR-059)
+- **Date:** 2026-08-05
+- **Status:** accepted
+- **Context:** ADR-059's indigo was rejected immediately. The operator supplied four values —
+  `#F3F4F6`, `#1F2937`, `#6B7280`, `#4B5563` — which are a light monochrome set, and which match
+  the "white and black like premium SaaS" phrasing that preceded both palettes. Read together
+  with the indigo brief that followed it, the original request had been ambiguous; this one is
+  not.
+- **Decision:** those four greys, light as the **default** theme rather than an override.
+  `:root` now holds the light values and `.dark` overrides them (previously inverted), and
+  next-themes defaults to `light`. **The accent is the ink** — a filled control is `#1F2937`
+  with white on it — so the accent cannot decorate: anything wearing it reads as the single
+  action on that screen. Status colours stay saturated and are now the only colour in the
+  product, which is the argument for keeping them rather than against it.
+- **Alternatives considered:** a greyscale status palette, for purity — rejected because an
+  error state that reads as "slightly darker grey" is not a state anyone notices. Keeping dark
+  as the default with the greys applied to it — rejected because `#F3F4F6` is plainly a page
+  colour, not an accent.
+- **Consequences:** dark mode inverts the same four greys with one necessary departure —
+  `#6B7280` is 3.04:1 on `#1F2937`, so the secondary greys lighten rather than mirror; the
+  literal value would have failed AA on every caption. Shadows became themed (`--shadow` plus
+  two alphas) because black at dark-mode strength smudges a white card. One documented caveat:
+  `#6B7280` is 4.83:1 on a white card but 4.39:1 on the `#F3F4F6` page, so faint text belongs
+  inside cards — noted in the token block, and axe confirms nothing currently violates it.
+  The widget's default accent **and** mode moved together, since `#1F2937` on a dark panel is
+  invisible; live agents had both pinned first and are unchanged.
+
 ### ADR-059: Indigo on slate replaces the ember palette (supersedes ADR-010)
 - **Date:** 2026-08-05
-- **Status:** accepted — supersedes ADR-010's ember-over-graphite direction
+- **Status:** superseded by ADR-060 the same day — the accent hue was rejected on sight.
+  Its accessibility findings (the on-accent contrast trap, the gradient-under-small-text
+  problem) carried forward and are the reason those tokens exist.
 - **Context:** the orange read as loud rather than premium, which is the opposite of what
   ADR-010 set out to achieve. The operator supplied a specific palette: void black page,
   elevated slate cards, electric indigo→violet accent, plasma cyan for action, off-white and
