@@ -18,6 +18,33 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-059: Indigo on slate replaces the ember palette (supersedes ADR-010)
+- **Date:** 2026-08-05
+- **Status:** accepted — supersedes ADR-010's ember-over-graphite direction
+- **Context:** the orange read as loud rather than premium, which is the opposite of what
+  ADR-010 set out to achieve. The operator supplied a specific palette: void black page,
+  elevated slate cards, electric indigo→violet accent, plasma cyan for action, off-white and
+  muted-slate type.
+- **Decision:** those values, verbatim, as the token set. Gaps the brief didn't cover were
+  derived in the same family: borders from the card colour, semantics kept conventional
+  (red/amber/green) but retuned, and the light theme rebuilt as the inverse — off-white page,
+  void-black type, deeper indigo for contrast on white. `--glow` (cyan) is **rationed to
+  live/running states**; a status system where the "success" colour is cyan is one nobody reads
+  at a glance. The base is deliberately **not** `#000`: pure black makes the hairline borders
+  this UI is built from vanish on OLED.
+- **Alternatives considered:** a light-default theme, since the request opened with "white and
+  black" — but the supplied table names Void Black as the *primary background*, so the table
+  won and the light theme was restyled rather than promoted. Keeping the `--ember` token names
+  with new values was rejected: a token named after a colour it no longer is misleads every
+  future reader, and the rename is mechanical.
+- **Consequences:** `--ember*` became `--accent*` across 64 files. Two accessibility problems
+  surfaced that the orange had masked — it was light enough to carry near-black labels, so
+  eight files hardcoded `#0A0B0D` for text on the accent. Indigo wants white, but white on
+  `#6366F1` is 4.47:1 and the axe gate rejects that for button text; hence `--accent-strong`
+  (`#4F46E5`, 6.3:1) for filled surfaces plus `--on-accent`. Avatar initials moved from a
+  gradient to a solid fill, because contrast across two stops depends on where the glyph lands.
+  Measured: every text pair ≥ 4.56:1, axe clean on auth pages, dashboard, agents and the widget.
+
 ### ADR-058: An invitation is readable before it is redeemed
 - **Date:** 2026-08-04
 - **Status:** accepted
@@ -1109,7 +1136,8 @@ Format each entry as below. Newest at the top.
 
 ### ADR-010: Dark-first "forge" design system (ember accent over graphite)
 - **Date:** 2026-07-17
-- **Status:** accepted
+- **Status:** superseded by ADR-059 (2026-08-05) — the dark-first, token-driven structure
+  stands; the ember-over-graphite palette does not.
 - **Context:** The frontend spec (`05`) is functional, not visual — it defines screens/data
   but no identity. User asked for a clean, premium SaaS dashboard in a Linear/Vercel dark-first
   direction. That direction is also one of the common AI-default looks, so it needed a

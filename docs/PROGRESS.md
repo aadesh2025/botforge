@@ -38,6 +38,40 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **New palette: indigo on slate, replacing ember on graphite (2026-08-05, ADR-059).** The
+  orange read as loud rather than premium — the opposite of what ADR-010 set out to do. The page
+  is now void black `#0B0F19`, cards elevated slate `#131B2E`, the accent electric indigo into
+  violet `#6366F1`→`#8B5CF6`, type crisp off-white `#F8FAFC` over muted slate `#94A3B8`. A cyan
+  `--glow` (`#06B6D4`) is **rationed to live/running states** and nothing else; semantic
+  red/amber/green stay conventional, retuned to the family. The base is deliberately not pure
+  black — `#000` makes the hairline borders this UI is built from disappear on OLED. The light
+  theme is the exact inverse (off-white page, void-black type) rather than an afterthought.
+
+  `--ember*` became `--accent*` across **64 files**. A token named after a colour it no longer
+  is would mislead every future reader — and since `ember` is a substring of *members* and
+  *membership*, the replacement was anchored on a non-letter prefix rather than run as a bare
+  find/replace.
+
+  **The swap exposed two accessibility problems the orange had masked.** It was light enough to
+  carry near-black labels, so eight files hardcoded `#0A0B0D` for text sitting on the accent.
+  Indigo wants white — but white on `#6366F1` is **4.47:1**, which the repo's axe gate rejects
+  for button text. Hence `--accent-strong` (`#4F46E5`, **6.3:1**) for filled surfaces and
+  `--on-accent` for the label, rather than a hex repeated per file. Avatar initials moved from a
+  two-stop gradient to a solid fill: white over the violet end was 4.2:1, and a gradient makes
+  the contrast of 13px text depend on where the glyph happens to land. Measured across the whole
+  palette, the lowest text pair is now `error` at **4.56:1**; axe (serious+critical) passes on
+  the auth pages, dashboard, agents and the embedded widget.
+
+  The logo and the usage chart had literal brand hexes; both read the tokens now, so they can't
+  drift from the palette again. The invitation/verification email CTA did too.
+
+  **Live widgets were deliberately not repainted.** Every published agent relied on the widget's
+  default colour rather than setting one, so moving the default would have changed four client
+  sites without warning. `#E8590C` was written explicitly onto those four first; the new indigo
+  default applies only to agents created from now on, and each client can be restyled
+  deliberately. Test-org agents were left to take the new default. Suites: **710 pytest**,
+  **150 vitest**, tsc + eslint clean, axe + widget + shell E2E green.
+
 - **Inviting someone who already has an account works (2026-08-04, ADR-058).** It dead-ended
   before: the accept page opened in signup mode, so an existing user typed their own address,
   hit `auth.email_taken`, and got *"An account with this email already exists."* as a bare
