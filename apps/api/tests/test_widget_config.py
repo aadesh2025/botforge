@@ -125,7 +125,7 @@ async def test_an_agent_with_no_saved_config_serves_defaults(client: AsyncClient
     headers = await _headers(client, "wc-default@example.com")
     _agent_id, key = await _agent(client, headers)
     theme = (await client.get(f"/v1/public/agents/{key}/config")).json()["theme"]
-    assert theme["primary_color"] == "#6366F1"  # the shipped default
+    assert theme["primary_color"] == "#1F2937"  # the shipped default
 
 
 async def test_appearance_needs_write_but_not_publish(client: AsyncClient) -> None:

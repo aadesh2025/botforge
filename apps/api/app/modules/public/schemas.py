@@ -26,11 +26,11 @@ class WidgetTheme(BaseModel):
     """The widget's live config response. Every new field is optional/defaulted so an agent
     that never touches the new controls renders exactly as it does today."""
 
-    primary_color: str = "#6366F1"  # master accent (header, links, send, launcher bubble)
+    primary_color: str = "#1F2937"  # master accent (header, links, send, launcher bubble)
     position: str = "bottom-right"  # bottom-right | bottom-left
     launcher_text: str = "Chat with us"
     branding: bool = True
-    mode: str = "dark"  # dark | light
+    mode: str = "light"  # dark | light — matches the light-first dashboard palette
 
     # ── Extended customization (all optional; null → theme/legacy default) ──────────
     widget_style: str = "solid"  # solid | transparent
