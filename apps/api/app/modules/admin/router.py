@@ -29,10 +29,12 @@ async def list_orgs(
 
 @router.get("/users", response_model=list[schemas.UserAdminOut])
 async def list_users(
+    include_system: bool = False,
     _staff: User = Depends(require_staff),
     session: AsyncSession = Depends(get_session),
 ) -> list[schemas.UserAdminOut]:
-    return await service.list_users(session)
+    """Human accounts. `?include_system=true` also returns machine logins."""
+    return await service.list_users(session, include_system=include_system)
 
 
 @router.get("/usage", response_model=schemas.PlatformUsageOut)

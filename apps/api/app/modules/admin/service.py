@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -92,12 +93,36 @@ async def list_orgs(
     if not include_deleted:
         stmt = stmt.where(Organization.deleted_at.is_(None))
     rows = (await session.execute(stmt)).all()
+
+    # One query for every org's membership, then grouped in Python — a per-row query here
+    # would be N+1 across the whole platform roster.
+    org_ids = [org.id for org, *_ in rows]
+    by_org: dict[uuid.UUID, list[schemas.OrgMemberOut]] = {}
+    if org_ids:
+        member_rows = (
+            await session.execute(
+                select(Membership.organization_id, User.email, Membership.role, Membership.status, User.is_staff)
+                .join(User, User.id == Membership.user_id)
+                .where(
+                    Membership.organization_id.in_(org_ids),
+                    Membership.status == "active",
+                    User.deleted_at.is_(None),
+                )
+                .order_by(Membership.role, User.email)
+            )
+        ).all()
+        for oid, email, role, status, staff in member_rows:
+            by_org.setdefault(oid, []).append(
+                schemas.OrgMemberOut(email=email, role=role, status=status, is_staff=bool(staff))
+            )
+
     return [
         schemas.OrgAdminOut(
             id=org.id,
             name=org.name,
             slug=org.slug,
             members=int(m),
+            member_list=by_org.get(org.id, []),
             agents=int(a),
             agents_with_unpublished_changes=int(p),
             created_at=org.created_at,
@@ -107,7 +132,10 @@ async def list_orgs(
     ]
 
 
-async def list_users(session: AsyncSession, limit: int = 100) -> list[schemas.UserAdminOut]:
+async def list_users(
+    session: AsyncSession, limit: int = 100, *, include_system: bool = False
+) -> list[schemas.UserAdminOut]:
+    """Human accounts. Machine logins are hidden unless `include_system=True`."""
     orgs = (
         select(Membership.user_id, func.count().label("n"))
         .where(Membership.status == "active")
@@ -121,14 +149,40 @@ async def list_users(session: AsyncSession, limit: int = 100) -> list[schemas.Us
         .order_by(User.created_at.desc())
         .limit(limit)
     )
+    if not include_system:
+        # `provision@botforge.dev` is a working credential, not a person. Deleting it to tidy
+        # this list would break `make provision`; hiding it keeps the roster to actual humans.
+        stmt = stmt.where(User.is_system.is_(False))
     rows = (await session.execute(stmt)).all()
+
+    user_ids = [u.id for u, _ in rows]
+    memberships: dict[uuid.UUID, list[schemas.UserMembershipOut]] = {}
+    if user_ids:
+        mrows = (
+            await session.execute(
+                select(Membership.user_id, Organization.id, Organization.name, Membership.role)
+                .join(Organization, Organization.id == Membership.organization_id)
+                .where(
+                    Membership.user_id.in_(user_ids),
+                    Membership.status == "active",
+                    Organization.deleted_at.is_(None),
+                )
+                .order_by(Organization.name)
+            )
+        ).all()
+        for uid, oid, oname, role in mrows:
+            memberships.setdefault(uid, []).append(
+                schemas.UserMembershipOut(organization_id=oid, organization_name=oname, role=role)
+            )
     return [
         schemas.UserAdminOut(
             id=u.id,
             email=u.email,
             is_staff=u.is_staff,
+            is_system=u.is_system,
             is_active=u.is_active,
             orgs=int(n),
+            memberships=memberships.get(u.id, []),
             created_at=u.created_at,
         )
         for u, n in rows

@@ -164,6 +164,7 @@ function OrgsTable({
     name: string;
     slug: string | null;
     members: number;
+    member_list?: { email: string; role: string; status: string; is_staff: boolean }[];
     agents: number;
     agents_with_unpublished_changes?: number;
     deleted: boolean;
@@ -181,7 +182,7 @@ function OrgsTable({
             <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-faint">
               <th className="px-5 py-3 font-medium">Name</th>
               <th className="px-5 py-3 font-medium">Slug</th>
-              <th className="px-5 py-3 text-right font-medium">Members</th>
+              <th className="px-5 py-3 font-medium">Members &amp; access</th>
               <th className="px-5 py-3 text-right font-medium">Agents</th>
               <th className="px-5 py-3 text-right font-medium">Awaiting review</th>
               <th className="px-5 py-3 font-medium">Created</th>
@@ -202,7 +203,27 @@ function OrgsTable({
                   </span>
                 </td>
                 <td className="px-5 py-3 font-mono text-xs text-muted">{o.slug ?? "—"}</td>
-                <td className="px-5 py-3 text-right font-mono text-muted">{o.members}</td>
+                <td className="px-5 py-3">
+                  {/* Who can reach this client's agent, and at what level. A bare count
+                      answered "how many", which was never the question staff had. */}
+                  {(o.member_list ?? []).length === 0 ? (
+                    <span className="text-faint">{o.members || "no members"}</span>
+                  ) : (
+                    <ul className="space-y-1">
+                      {(o.member_list ?? []).map((m) => (
+                        <li key={`${o.id}-${m.email}`} className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-text">{m.email}</span>
+                          <RoleChip role={m.role} />
+                          {m.is_staff && (
+                            <span className="rounded border border-border px-1 py-0.5 text-[10px] text-faint">
+                              staff
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </td>
                 <td className="px-5 py-3 text-right font-mono text-muted">{o.agents}</td>
                 <td className="px-5 py-3 text-right">
                   {/* Clients can save but not publish — this is how staff notice work waiting. */}
@@ -222,7 +243,36 @@ function OrgsTable({
   );
 }
 
-function UsersTable({ users }: { users: { id: string; email: string; is_staff: boolean; is_active: boolean; orgs: number; created_at: string }[] }) {
+type AdminUser = {
+  id: string;
+  email: string;
+  is_staff: boolean;
+  is_active: boolean;
+  orgs: number;
+  memberships?: { organization_id: string; organization_name: string; role: string }[];
+  created_at: string;
+};
+
+/** Role colours, ordered by how much damage the role can do. `owner` and `admin` can publish
+ *  to a client's live agent; `viewer` cannot. Staff scanning this list are looking for the
+ *  first two, so those are the ones that carry colour. */
+const ROLE_STYLE: Record<string, string> = {
+  owner: "border-ember/40 bg-ember/10 text-ember-soft",
+  admin: "border-warn/40 bg-warn/10 text-warn",
+  editor: "border-info/30 bg-info/10 text-info",
+  operator: "border-border bg-surface-2 text-muted",
+  viewer: "border-border bg-surface-2 text-faint",
+};
+
+function RoleChip({ role }: { role: string }) {
+  return (
+    <span className={`rounded border px-1.5 py-0.5 text-[11px] font-medium ${ROLE_STYLE[role] ?? ROLE_STYLE.viewer}`}>
+      {role}
+    </span>
+  );
+}
+
+function UsersTable({ users }: { users: AdminUser[] }) {
   return (
     <section className="rounded-lg border border-border bg-surface">
       <div className="border-b border-border p-5">
@@ -234,7 +284,7 @@ function UsersTable({ users }: { users: { id: string; email: string; is_staff: b
             <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-faint">
               <th className="px-5 py-3 font-medium">Email</th>
               <th className="px-5 py-3 font-medium">Status</th>
-              <th className="px-5 py-3 text-right font-medium">Orgs</th>
+              <th className="px-5 py-3 font-medium">Organizations &amp; access</th>
               <th className="px-5 py-3 font-medium">Created</th>
             </tr>
           </thead>
@@ -255,7 +305,22 @@ function UsersTable({ users }: { users: { id: string; email: string; is_staff: b
                 <td className="px-5 py-3">
                   <Badge variant={u.is_active ? "success" : "outline"}>{u.is_active ? "active" : "disabled"}</Badge>
                 </td>
-                <td className="px-5 py-3 text-right font-mono text-muted">{u.orgs}</td>
+                <td className="px-5 py-3">
+                  {/* The same relationship from the other side: which client workspaces this
+                      address can reach, and at what level. */}
+                  {(u.memberships ?? []).length === 0 ? (
+                    <span className="text-faint">{u.orgs ? `${u.orgs} org(s)` : "none"}</span>
+                  ) : (
+                    <ul className="space-y-1">
+                      {(u.memberships ?? []).map((m) => (
+                        <li key={`${u.id}-${m.organization_id}`} className="flex items-center gap-2">
+                          <span className="text-xs text-text">{m.organization_name}</span>
+                          <RoleChip role={m.role} />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </td>
                 <td className="px-5 py-3 text-faint">{new Date(u.created_at).toLocaleDateString()}</td>
               </tr>
             ))}

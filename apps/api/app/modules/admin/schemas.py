@@ -8,11 +8,27 @@ import uuid
 from pydantic import BaseModel
 
 
+class OrgMemberOut(BaseModel):
+    """One person's access to an org — the thing staff actually need to see.
+
+    A member *count* answers "how many", which is never the question. "Who can publish to this
+    client's agent, and which address do they use" is.
+    """
+
+    email: str
+    role: str
+    status: str
+    is_staff: bool
+
+
 class OrgAdminOut(BaseModel):
     id: uuid.UUID
     name: str
     slug: str | None = None
     members: int
+    #: Every active member with their role. Populated on the admin roster so staff can see who
+    #: has access to which client without switching org.
+    member_list: list[OrgMemberOut] = []
     agents: int
     #: Agents whose newest draft is ahead of what's live. A client can edit but not publish,
     #: so this is how staff notice work waiting for review without opening every builder.
@@ -21,12 +37,22 @@ class OrgAdminOut(BaseModel):
     deleted: bool
 
 
+class UserMembershipOut(BaseModel):
+    organization_id: uuid.UUID
+    organization_name: str
+    role: str
+
+
 class UserAdminOut(BaseModel):
     id: uuid.UUID
     email: str
     is_staff: bool
+    #: A machine account (provisioning login), not a person. Hidden from the roster by default.
+    is_system: bool = False
     is_active: bool
     orgs: int
+    #: Which orgs this person belongs to, and as what.
+    memberships: list[UserMembershipOut] = []
     created_at: dt.datetime
 
 

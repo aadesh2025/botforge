@@ -25,6 +25,11 @@ class User(Base, UUIDPrimaryKey, TimestampMixin, SoftDeleteMixin):
     full_name: Mapped[str | None] = mapped_column(String(255))
     avatar_url: Mapped[str | None] = mapped_column(String(1024))
     is_staff: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    #: A machine account, not a person — e.g. `PROVISION_STAFF_EMAIL`, the login
+    #: `scripts/provision-client.mjs` signs in as. Hidden from the admin Users roster by
+    #: default: it is a working credential, so deleting it to tidy the list would break
+    #: provisioning, but it is also not a human anyone needs to see next to real operators.
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 

@@ -291,3 +291,75 @@ async def test_deleted_orgs_are_hidden_from_the_console_by_default(
     assert "Wound Up" in all_names
     assert next(o for o in (await client.get("/v1/admin/orgs?include_deleted=true", headers=headers)).json()
                 if o["name"] == "Wound Up")["deleted"] is True
+
+
+async def test_roster_shows_who_has_access_to_each_org_and_at_what_level(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """A member *count* answers "how many", which was never the question.
+
+    "Who can publish to this client's agent, and from which address" is.
+    """
+    token = await _signup(client, "admin.roster@example.com")
+    await _make_staff(db_session, "admin.roster@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    org = await client.post("/v1/orgs", json={"name": "Roster Co"}, headers=headers)
+    oid = org.json()["id"]
+
+    # A second person, invited as editor.
+    await _signup(client, "editor.roster@example.com")
+    invite = await client.post(
+        f"/v1/orgs/{oid}/invitations",
+        json={"email": "editor.roster@example.com", "role": "editor"},
+        headers=headers,
+    )
+    editor_token = (
+        await client.post(
+            "/v1/auth/login",
+            json={"email": "editor.roster@example.com", "password": "password123"},
+        )
+    ).json()["access_token"]
+    await client.post(
+        f"/v1/orgs/invitations/{invite.json()['accept_token']}/accept",
+        headers={"Authorization": f"Bearer {editor_token}"},
+    )
+
+    row = next(o for o in (await client.get("/v1/admin/orgs", headers=headers)).json() if o["id"] == oid)
+    by_email = {m["email"]: m["role"] for m in row["member_list"]}
+    assert by_email["admin.roster@example.com"] == "owner"
+    assert by_email["editor.roster@example.com"] == "editor"
+
+    # And the same relationship from the user side.
+    users = (await client.get("/v1/admin/users", headers=headers)).json()
+    editor = next(u for u in users if u["email"] == "editor.roster@example.com")
+    assert [(m["organization_name"], m["role"]) for m in editor["memberships"]] == [("Roster Co", "editor")]
+
+
+async def test_machine_accounts_are_hidden_from_the_roster(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """`provision@botforge.dev` is a working credential, not a person.
+
+    Deleting it to tidy the list would break `scripts/provision-client.mjs`, so it is flagged
+    and filtered instead — still reachable with `?include_system=true`.
+    """
+    token = await _signup(client, "admin.system@example.com")
+    await _make_staff(db_session, "admin.system@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    await _signup(client, "robot.system@example.com")
+    robot = (
+        await db_session.execute(select(User).where(User.email == "robot.system@example.com"))
+    ).scalar_one()
+    robot.is_system = True
+    await db_session.flush()
+
+    default = [u["email"] for u in (await client.get("/v1/admin/users", headers=headers)).json()]
+    assert "robot.system@example.com" not in default
+    assert "admin.system@example.com" in default, "real operators must still be listed"
+
+    with_system = [
+        u["email"]
+        for u in (await client.get("/v1/admin/users?include_system=true", headers=headers)).json()
+    ]
+    assert "robot.system@example.com" in with_system
