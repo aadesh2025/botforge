@@ -38,6 +38,35 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **A knowledge base can be deleted (2026-08-06).** Only the documents inside one could be
+  removed before. `DELETE /v1/knowledge/{id}` has existed since Phase 7 with **nothing in the UI
+  calling it** — the same shape of gap as the org-delete button and the invitation-accept page.
+  It is now a Danger zone on the KB's own page, matching the agent-delete pattern.
+
+  **The button is the small part.** Deleting a KB is quiet by design: `retrieve_for_version`
+  filters `deleted_at`, so an agent still pointing at it does not error — it silently retrieves
+  nothing. An agent with **no context block** is precisely the state that makes the model answer
+  from general knowledge and invent specifics, which this project has already shipped to a
+  customer once (`CLAUDE.md`, 2026-08-02). Deleting the KB a live agent depends on therefore has
+  to read as a decision, not a tidy-up.
+
+  `GET /v1/knowledge/{id}` now returns **`attached_agents`** — agents whose `rag_config`
+  references the KB, flagged `is_live` when it is their *published* version — resolved by JSONB
+  containment (`rag_config @> {"knowledge_base_ids": [id]}`) and grouped per agent, since a
+  draft and a published version both count as a reference. The **list** endpoint deliberately
+  leaves it empty: populating it there is one query per card for something no card acts on.
+
+  The confirmation names those agents and states plainly that they keep answering with nothing
+  to ground them. Their config is **not** rewritten on their behalf — the dialog points at the
+  Knowledge tab instead, because silently editing an agent someone else published is the kind of
+  thing this codebase has repeatedly decided against.
+
+  **A copy bug worth remembering:** the warning originally rendered "It keepsanswering". JSX
+  drops the whitespace around an expression in some positions, so text interleaved with ternaries
+  lost a space. The source looked correct and the screenshot was ambiguous; it was caught only by
+  asserting the rendered DOM text. The strings are now built whole.
+  6 backend tests, 6 web unit tests, 2 Playwright checks. Suites: **719 pytest**, **156 vitest**.
+
 - **Admin console: soft-deleted orgs were never filtered, and two more fixture sources were
   invisible to the sweep (2026-08-05).** Follow-up to the E2E sweep below, after the console
   still showed `provision@botforge.dev`, `owner@botforge.local`, *Acme Co*, *Globex Inc* and
