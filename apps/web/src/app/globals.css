@@ -63,34 +63,47 @@
   --radius: 0.625rem;
 }
 
-/* Dark is the same four greys inverted: #1F2937 becomes the card, #F3F4F6 the type. */
+/* Dark mode restores the original graphite + ember palette (the dark-first design this app
+   shipped with), rather than inverting the light greyscale.
+   The greyscale inversion made dark mode a flat wash: `--accent` became near-white, so every
+   primary action, focus ring and "live" glow rendered as another shade of grey on grey, and
+   the interface lost the one colour that told you where to look. Light mode is untouched —
+   only these values change.
+   Token *names* are the current ones; the values are the pre-`db3aa91` ember set. */
 .dark {
-  --bg: 17 24 39; /* #111827 — one step below the card so panels read as raised */
-  --surface: 31 41 55; /* #1F2937 */
-  --surface-2: 55 65 81; /* #374151 */
-  --surface-3: 75 85 99; /* #4B5563 */
-  --border: 55 65 81;
-  --border-strong: 75 85 99;
-  --text: 243 244 246; /* #F3F4F6 */
-  /* #6B7280 reaches only 2.97:1 on #1F2937, so the secondary greys lighten rather than invert.
-     Keeping the literal palette value here would have failed AA on every caption in the app. */
-  --muted: 209 213 219; /* #D1D5DB — 9.9:1 */
-  --faint: 156 163 175; /* #9CA3AF — 6.1:1 */
-  /* Inverted: on a dark surface the one action is the light one. */
-  --accent: 243 244 246;
-  --accent-2: 209 213 219;
-  --accent-soft: 229 231 235;
-  --accent-strong: 243 244 246;
-  --on-accent: 31 41 55;
-  --glow: 209 213 219;
-  --success: 52 211 153;
-  --warn: 251 191 36;
-  --error: 248 113 113;
-  --info: 96 165 250;
+  /* Surfaces (cool graphite) */
+  --bg: 10 11 13; /* #0A0B0D */
+  --surface: 19 21 25; /* #131519 */
+  --surface-2: 24 27 33; /* #181B21 */
+  --surface-3: 31 35 43; /* #1F232B */
+  --border: 36 40 50; /* #242832 */
+  --border-strong: 52 58 71; /* #343A47 */
+
+  /* Text */
+  --text: 237 238 240; /* #EDEEF0 */
+  --muted: 138 143 152; /* #8A8F98 */
+  --faint: 139 145 155; /* #8B919B — AA at 5.7:1 on --surface */
+
+  /* Signature ember accent */
+  --accent: 255 106 61; /* #FF6A3D */
+  --accent-2: 255 176 32; /* #FFB020 spark gold — second stop of the wordmark */
+  --accent-soft: 255 138 92; /* lighter ember, for accent-coloured text on dark */
+  --accent-strong: 255 106 61;
+  /* Near-black on ember is 7.2:1; white on it is 2.9:1 and fails AA, so filled ember
+     surfaces take dark type. */
+  --on-accent: 10 11 13;
+  --glow: 255 106 61;
+
+  /* Semantic */
+  --success: 63 185 80; /* #3FB950 */
+  --warn: 240 160 32; /* #F0A020 */
+  --error: 248 81 73; /* #F85149 */
+  --info: 88 166 255; /* #58A6FF */
+
   --shadow: 0 0 0;
   --shadow-1: 0.3;
   --shadow-2: 0.2;
-  --ring: 243 244 246;
+  --ring: 255 106 61;
 }
 
 @layer base {

@@ -32,6 +32,17 @@ const config: Config = {
           soft: rgb("--accent-soft"),
           strong: rgb("--accent-strong"),
         },
+        // `ember` is an alias for `accent`, not a second palette. The rename to `accent` left
+        // 42 `text-ember-soft` / `border-ember/40` usages across the app pointing at a colour
+        // Tailwind no longer generated, so those classes silently produced nothing — badges and
+        // chips rendered unstyled in *both* themes. Aliasing is safer than a find-and-replace
+        // here: it fixes every existing usage at once and cannot miss one.
+        ember: {
+          DEFAULT: rgb("--accent"),
+          2: rgb("--accent-2"),
+          soft: rgb("--accent-soft"),
+          strong: rgb("--accent-strong"),
+        },
         "on-accent": rgb("--on-accent"),
         glow: rgb("--glow"),
         success: rgb("--success"),
