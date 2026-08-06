@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { PiiBadge, PiiSummary } from "@/components/knowledge/pii-flags";
+import { DeleteKnowledgeBase } from "@/components/knowledge/delete-kb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -295,6 +296,15 @@ export default function KnowledgeDetailPage() {
           </table>
         </div>
       </div>
+
+      {kb && (
+        <DeleteKnowledgeBase
+          kbId={kb.id}
+          name={kb.name}
+          documentCount={kb.document_count}
+          attachedAgents={kb.attached_agents}
+        />
+      )}
 
       {/* URL dialog */}
       <Dialog open={urlOpen} onOpenChange={setUrlOpen}>

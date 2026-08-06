@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.llm.registry import build_embedding_provider
-from app.models import Chunk, Document, KnowledgeBase
+from app.models import Agent, AgentVersion, Chunk, Document, KnowledgeBase
 from app.modules.knowledge import schemas
 from app.modules.orgs.deps import OrgContext
 from app.rag import retrieval
@@ -36,7 +36,41 @@ async def _doc_count(session: AsyncSession, kb_id: uuid.UUID) -> int:
     return int((await session.execute(stmt)).scalar_one())
 
 
-async def _kb_out(session: AsyncSession, kb: KnowledgeBase) -> schemas.KBOut:
+async def _attached_agents(
+    session: AsyncSession, org_id: uuid.UUID, kb_id: uuid.UUID
+) -> list[schemas.AttachedAgent]:
+    """Agents whose RAG config references this knowledge base.
+
+    Deleting a KB is quiet by design — `retrieve_for_version` filters `deleted_at`, so an agent
+    still pointing at it simply retrieves nothing. That is the dangerous part: with no context
+    block the model answers from general knowledge and invents specifics (CLAUDE.md 2026-08-02).
+    So the operator is told which agents that would happen to, *before* confirming.
+
+    JSONB containment: `rag_config @> {"knowledge_base_ids": ["<id>"]}` matches an array holding
+    that id. Grouped per agent because draft and published versions both count as a reference.
+    """
+    stmt = (
+        select(
+            Agent.id,
+            Agent.name,
+            func.bool_or(AgentVersion.id == Agent.current_version_id).label("is_live"),
+        )
+        .join(AgentVersion, AgentVersion.agent_id == Agent.id)
+        .where(
+            Agent.organization_id == org_id,
+            Agent.deleted_at.is_(None),
+            AgentVersion.rag_config.contains({"knowledge_base_ids": [str(kb_id)]}),
+        )
+        .group_by(Agent.id, Agent.name)
+        .order_by(Agent.name)
+    )
+    rows = (await session.execute(stmt)).all()
+    return [schemas.AttachedAgent(id=r.id, name=r.name, is_live=bool(r.is_live)) for r in rows]
+
+
+async def _kb_out(
+    session: AsyncSession, kb: KnowledgeBase, *, with_usage: bool = False
+) -> schemas.KBOut:
     return schemas.KBOut(
         id=kb.id,
         name=kb.name,
@@ -46,6 +80,9 @@ async def _kb_out(session: AsyncSession, kb: KnowledgeBase) -> schemas.KBOut:
         chunk_size=kb.chunk_size,
         chunk_overlap=kb.chunk_overlap,
         document_count=await _doc_count(session, kb.id),
+        attached_agents=(
+            await _attached_agents(session, kb.organization_id, kb.id) if with_usage else []
+        ),
         created_at=kb.created_at,
         updated_at=kb.updated_at,
     )
@@ -81,7 +118,7 @@ async def list_kbs(session: AsyncSession, ctx: OrgContext) -> list[schemas.KBOut
 
 async def get_kb(session: AsyncSession, ctx: OrgContext, kb_id: uuid.UUID) -> schemas.KBOut:
     rbac.require_permission(ctx.role, rbac.READ)
-    return await _kb_out(session, await _get_kb(session, ctx, kb_id))
+    return await _kb_out(session, await _get_kb(session, ctx, kb_id), with_usage=True)
 
 
 async def update_kb(

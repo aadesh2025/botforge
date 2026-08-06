@@ -29,6 +29,16 @@ class UpdateKBRequest(BaseModel):
     chunk_overlap: int | None = Field(default=None, ge=0, le=2000)
 
 
+class AttachedAgent(BaseModel):
+    """An agent whose RAG config points at this knowledge base."""
+
+    id: uuid.UUID
+    name: str
+    #: True when the *published* version is one of the versions referencing it — i.e. deleting
+    #: the KB changes what real visitors are answered with, not just a draft.
+    is_live: bool
+
+
 class KBOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -38,6 +48,9 @@ class KBOut(BaseModel):
     chunk_size: int
     chunk_overlap: int
     document_count: int
+    #: Populated on the detail endpoint only — the list would need one query per card, and
+    #: nothing on the list acts on it.
+    attached_agents: list[AttachedAgent] = []
     created_at: dt.datetime
     updated_at: dt.datetime
 

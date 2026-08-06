@@ -151,6 +151,14 @@ export interface ApiCredential {
   created_at: string;
 }
 
+/** An agent whose RAG config points at a knowledge base. */
+export interface ApiAttachedAgent {
+  id: string;
+  name: string;
+  /** The agent's *published* version references it — deleting changes what visitors get. */
+  is_live: boolean;
+}
+
 export interface ApiKnowledgeBase {
   id: string;
   name: string;
@@ -160,6 +168,8 @@ export interface ApiKnowledgeBase {
   chunk_size: number;
   chunk_overlap: number;
   document_count: number;
+  /** Only populated by the detail endpoint; the list always returns an empty array. */
+  attached_agents: ApiAttachedAgent[];
   created_at: string;
   updated_at: string;
 }
