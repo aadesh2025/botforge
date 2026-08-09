@@ -61,7 +61,23 @@ describe("OrgSwitcher", () => {
 
     const trigger = screen.getByRole("button");
     expect(within(trigger).getByText("Acme")).toBeInTheDocument();
-    expect(within(trigger).getByText("Free plan")).toBeInTheDocument();
+  });
+
+  it("names the org without claiming it is on a plan", () => {
+    // The trigger used to render "Free plan" under the name. BotForge has no tiers — every
+    // org brings its own provider keys — so that advertised a distinction that does not
+    // exist and an upgrade that cannot be bought.
+    useSession.setState({
+      user: user(false),
+      orgs: [org("o1", "Acme")],
+      activeOrgId: "o1",
+      ready: true,
+    });
+    render(<OrgSwitcher collapsed={false} />);
+
+    const trigger = screen.getByRole("button");
+    expect(within(trigger).getByText("Acme")).toBeInTheDocument();
+    expect(within(trigger).queryByText(/plan/i)).toBeNull();
   });
 
   it("lets a client switch between orgs they were invited to", async () => {

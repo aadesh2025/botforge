@@ -19,7 +19,6 @@ import { setActiveOrgId } from "@/lib/api/tokens";
 import { activeOrg, useSession } from "@/lib/store/session";
 import { cn } from "@/lib/utils";
 
-const planLabel: Record<string, string> = { free: "Free", pro: "Pro", scale: "Scale", enterprise: "Enterprise" };
 
 export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
   const router = useRouter();
@@ -72,10 +71,10 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
           </span>
           {!collapsed && (
             <>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-medium text-text">{active.name}</span>
-                <span className="text-[11px] text-faint">{planLabel[active.plan] ?? active.plan} plan</span>
-              </span>
+              {/* Name only. The plan line under it ("Free plan") named a tier that does not
+                  exist — every org brings its own provider keys, so there is nothing to be
+                  on and nothing to upgrade to. */}
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-text">{active.name}</span>
               <ChevronsUpDown className="size-4 shrink-0 text-faint" />
             </>
           )}

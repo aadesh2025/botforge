@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { PanelLeftClose, PanelLeft, Sparkles, X } from "lucide-react";
+import { PanelLeftClose, PanelLeft, X } from "lucide-react";
 import { Logo, LogoMark } from "@/components/brand/logo";
 import { SidebarNav } from "./sidebar-nav";
 import { OrgSwitcher } from "./org-switcher";
 import { Button } from "@/components/ui/button";
 import { useUI } from "@/lib/store/ui";
 import { cn } from "@/lib/utils";
-import { activeOrg, useSession } from "@/lib/store/session";
 
 export function Sidebar() {
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useUI();
@@ -26,7 +25,7 @@ export function Sidebar() {
       <aside
         className={cn(
           // h-screen + sticky bounds the sidebar to the viewport so its <nav> (min-h-0) scrolls
-          // internally and the header + footer (Scale plan, Collapse) always stay in view.
+          // internally and the header + footer (Collapse) always stay in view.
           "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-surface/95 backdrop-blur transition-[width,transform] duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0",
           collapsed ? "w-[68px]" : "w-[248px]",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
@@ -68,9 +67,10 @@ export function Sidebar() {
 
         <SidebarNav collapsed={collapsed} />
 
-        {/* Upgrade nudge + collapse control */}
+        {/* Collapse control. There is no plan card here: BotForge has no free/paid tiers —
+            every org brings its own provider keys — so a "Free plan" badge advertised a
+            distinction that does not exist and implied an upgrade that cannot be bought. */}
         <div className={cn("border-t border-border p-3", collapsed && "px-2")}>
-          {!collapsed && <PlanCard />}
           <Button
             variant="ghost"
             size={collapsed ? "icon" : "sm"}
@@ -84,29 +84,5 @@ export function Sidebar() {
         </div>
       </aside>
     </>
-  );
-}
-
-/** The org's real plan.
- *
- * This card previously hardcoded "Scale plan" and "63% of monthly message credits used",
- * shown to every org regardless of plan — a Free-plan org saw Scale. There is no quota
- * endpoint, so no usage figure is displayed rather than an invented one. */
-function PlanCard() {
-  const org = useSession(activeOrg);
-  if (!org) return null;
-  const plan = org.plan.charAt(0).toUpperCase() + org.plan.slice(1);
-
-  return (
-    <div className="mb-3 overflow-hidden rounded-lg border border-accent/20 bg-accent/[0.06] p-3">
-      <div className="flex items-center gap-2 text-sm font-medium text-text">
-        <Sparkles className="size-4 text-accent-soft" /> {plan} plan
-      </div>
-      <p className="mt-1 text-xs text-muted">
-        {org.plan === "free"
-          ? "Free tier — bring your own provider keys for unlimited use."
-          : `${org.name} is on the ${plan} plan.`}
-      </p>
-    </div>
   );
 }
