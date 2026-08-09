@@ -33,12 +33,22 @@ export function Playground() {
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(0);
+  // The persisted playground conversation these turns belong to. A ref, not state: it's
+  // read inside `send` and never rendered, so storing it in state would re-render the
+  // transcript on the first turn for no visible change.
+  const conversationRef = useRef<string | null>(null);
 
   // Seed with the welcome message whenever the draft's welcome text changes.
   useEffect(() => {
     if (!draft) return;
     setMessages([{ id: idRef.current++, role: "assistant", text: draft.persona.welcomeMessage }]);
   }, [draft?.persona.welcomeMessage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Moving to another agent starts a new session. Without this the ref would survive the
+  // store re-pointing at a different agent and the next turn would 400 on agent_mismatch.
+  useEffect(() => {
+    conversationRef.current = null;
+  }, [agentId]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -60,9 +70,11 @@ export function Playground() {
     ]);
 
     try {
-      for await (const event of playgroundStream(agentId, text, history)) {
+      for await (const event of playgroundStream(agentId, text, history, conversationRef.current)) {
         const type = event.type as string;
-        if (type === "token" && typeof event.delta === "string") {
+        if (type === "conversation" && typeof event.conversation_id === "string") {
+          conversationRef.current = event.conversation_id;
+        } else if (type === "token" && typeof event.delta === "string") {
           const delta = event.delta;
           setMessages((m) => m.map((msg) => (msg.id === botId ? { ...msg, text: msg.text + delta } : msg)));
         } else if (type === "tool_call") {
@@ -88,8 +100,12 @@ export function Playground() {
     }
   };
 
-  const reset = () =>
+  const reset = () => {
+    // A reset starts a fresh session, so the next turn opens a new conversation rather than
+    // appending an unrelated transcript to the previous one.
+    conversationRef.current = null;
     setMessages(draft ? [{ id: idRef.current++, role: "assistant", text: draft.persona.welcomeMessage }] : []);
+  };
 
   if (!draft) return null;
   const providerLabel =

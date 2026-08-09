@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import secrets
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -23,7 +24,8 @@ from app.db.templates import AGENT_TEMPLATES, get_template
 from app.llm.base import ChatProvider
 from app.llm.registry import get_chat_provider, get_chat_provider_chain
 from app.llm.types import ChatRequest, Message
-from app.models import Agent, AgentVersion, WidgetConfig
+from app.models import Agent, AgentVersion, Conversation, WidgetConfig
+from app.models import Message as DBMessage
 from app.modules.agents import schemas
 from app.modules.orgs.deps import OrgContext
 from app.rag.agent_retrieval import retrieve_for_version
@@ -570,6 +572,86 @@ async def _resolve_playground_provider(
         raise
 
 
+#: The channel playground traffic is recorded under. Its own value, not `dashboard`, because
+#: these two are different things an operator needs to tell apart: `dashboard` is a real
+#: conversation held from the app, while this is the *draft* being exercised by whoever is
+#: building it. Reporting-only — it never becomes an Inbox tab.
+PLAYGROUND_CHANNEL = "playground"
+
+
+async def _playground_conversation(
+    session: AsyncSession, ctx: OrgContext, agent: Agent, conversation_id: uuid.UUID | None
+) -> Conversation:
+    """The conversation this playground turn belongs to, created on the first turn.
+
+    Playground turns are persisted (they spend real tokens against a real key, and an
+    operator asking "why is my bill that?" needs to see them) but tagged so they can be told
+    apart from customer traffic.
+    """
+    if conversation_id is not None:
+        conv = await session.get(Conversation, conversation_id)
+        if conv is None or conv.organization_id != ctx.org.id:
+            raise AppError("conversations.not_found", "Conversation not found.", 404)
+        if conv.agent_id != agent.id:
+            raise AppError(
+                "conversations.agent_mismatch", "Conversation belongs to another agent.", 400
+            )
+        return conv
+    conv = Conversation(
+        organization_id=ctx.org.id,
+        agent_id=agent.id,
+        channel=PLAYGROUND_CHANNEL,
+        status="active",
+        title="Playground session",
+    )
+    session.add(conv)
+    await session.flush()
+    return conv
+
+
+async def _persist_playground_turn(
+    session: AsyncSession,
+    conv: Conversation,
+    user_message: str,
+    result: TurnResult,
+    latency_ms: int,
+) -> None:
+    """Record both halves of the turn, with the usage that turn actually cost.
+
+    Deliberately mirrors `conversations.service._persist_assistant_message`'s columns so the
+    analytics queries — which read `messages` and know nothing about who produced them —
+    count a playground turn exactly like any other.
+    """
+    now = dt.datetime.now(tz=dt.UTC)
+    session.add(
+        DBMessage(
+            conversation_id=conv.id,
+            organization_id=conv.organization_id,
+            role="user",
+            content=user_message,
+        )
+    )
+    session.add(
+        DBMessage(
+            conversation_id=conv.id,
+            organization_id=conv.organization_id,
+            role="assistant",
+            content=(result.content or "").strip() or None,
+            citations=result.citations,
+            provider=result.provider or None,
+            model=result.model or None,
+            tokens_prompt=result.prompt_tokens,
+            tokens_completion=result.completion_tokens,
+            cost_micros=result.cost_micros,
+            latency_ms=latency_ms,
+            error=result.error,
+        )
+    )
+    conv.last_message_at = now
+    conv.last_inbound_at = now
+    await session.flush()
+
+
 async def _playground_tooling(
     session: AsyncSession, ctx: OrgContext, agent: Agent, version: AgentVersion, provider: ChatProvider
 ) -> tuple[list[Any], ToolExecutor | None]:
@@ -597,7 +679,12 @@ async def playground_stream(
     specs, executor = await _playground_tooling(session, ctx, agent, version, provider)
     if specs:
         req.tools = specs
+    conv = await _playground_conversation(session, ctx, agent, data.conversation_id)
+    # Emitted before the first token so the client can thread the *next* turn onto this
+    # conversation even if the stream is abandoned halfway.
+    yield f'data: {{"type": "conversation", "conversation_id": "{conv.id}"}}\n\n'
     result = TurnResult()
+    t0 = time.perf_counter()
     async for ev in run_turn(
         provider, req, [c.model_dump(mode="json") for c in citations], result,
         executor=executor, max_iters=settings.tool_max_iterations,
@@ -606,6 +693,9 @@ async def playground_stream(
         guard_output=False,
     ):
         yield f"data: {ev.model_dump_json()}\n\n"
+    await _persist_playground_turn(
+        session, conv, data.message, result, int((time.perf_counter() - t0) * 1000)
+    )
 
 
 async def playground_once(
@@ -626,7 +716,9 @@ async def playground_once(
     specs, executor = await _playground_tooling(session, ctx, agent, version, provider)
     if specs:
         req.tools = specs
+    conv = await _playground_conversation(session, ctx, agent, data.conversation_id)
     result = TurnResult()
+    t0 = time.perf_counter()
     async for _ev in run_turn(
         provider, req, [c.model_dump(mode="json") for c in citations], result,
         executor=executor, max_iters=settings.tool_max_iterations,
@@ -635,15 +727,25 @@ async def playground_once(
         guard_output=False,
     ):
         pass
+    latency_ms = int((time.perf_counter() - t0) * 1000)
     if result.error:
+        # Persisted before raising: a failed turn can still have burned prompt tokens, and a
+        # cost report that only counts successes understates the bill.
+        await _persist_playground_turn(session, conv, data.message, result, latency_ms)
         raise AppError("llm.provider_error", result.error, 502)
+    await _persist_playground_turn(session, conv, data.message, result, latency_ms)
     return {
+        "conversation_id": str(conv.id),
         "content": result.content.strip(),
         "citations": result.citations,
         "tool_runs": result.tool_runs,
         "provider": result.provider,
         "model": result.model,
-        "usage": {"prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens},
+        "usage": {
+            "prompt_tokens": result.prompt_tokens,
+            "completion_tokens": result.completion_tokens,
+            "cost_micros": result.cost_micros,
+        },
     }
 
 

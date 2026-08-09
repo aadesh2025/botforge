@@ -193,6 +193,96 @@ async def test_playground_non_stream(client: AsyncClient, monkeypatch: pytest.Mo
     assert resp.json()["content"] == "echo: hi"
 
 
+# ── Playground turns are real, reportable traffic ─────────────────────────────
+# The Playground used to persist nothing, so an operator testing an agent all afternoon saw
+# a dashboard that never moved — the single most common "my analytics are fake" report.
+async def test_playground_persists_the_turn_under_its_own_channel(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.modules.agents import service
+
+    async def _fake_provider(*_a: object, **_k: object) -> FakeChatProvider:
+        return FakeChatProvider()
+
+    monkeypatch.setattr(service, "get_chat_provider", _fake_provider)
+
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    resp = await client.post(
+        f"/v1/agents/{agent['id']}/playground/chat",
+        json={"message": "hi", "stream": False},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    cid = resp.json()["conversation_id"]
+
+    convs = await client.get("/v1/conversations", headers=headers)
+    assert convs.status_code == 200
+    mine = [c for c in convs.json() if c["id"] == cid]
+    assert len(mine) == 1, "the playground turn did not create a conversation"
+    assert mine[0]["channel"] == "playground", "must be distinguishable from customer traffic"
+
+    detail = await client.get(f"/v1/conversations/{cid}", headers=headers)
+    roles = [m["role"] for m in detail.json()["messages"]]
+    assert roles == ["user", "assistant"], "both halves of the turn must be recorded"
+
+
+async def test_playground_threads_turns_onto_one_conversation(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a threaded id every turn would open its own conversation, so a ten-message
+    test session would report as ten conversations and wreck the headline number."""
+    from app.modules.agents import service
+
+    async def _fake_provider(*_a: object, **_k: object) -> FakeChatProvider:
+        return FakeChatProvider()
+
+    monkeypatch.setattr(service, "get_chat_provider", _fake_provider)
+
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+
+    first = await client.post(
+        f"/v1/agents/{agent['id']}/playground/chat",
+        json={"message": "one", "stream": False},
+        headers=headers,
+    )
+    cid = first.json()["conversation_id"]
+    second = await client.post(
+        f"/v1/agents/{agent['id']}/playground/chat",
+        json={"message": "two", "stream": False, "conversation_id": cid},
+        headers=headers,
+    )
+    assert second.json()["conversation_id"] == cid
+
+    detail = await client.get(f"/v1/conversations/{cid}", headers=headers)
+    assert len(detail.json()["messages"]) == 4
+
+
+async def test_playground_stream_announces_its_conversation_first(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The id is emitted ahead of the first token so a stream the operator navigates away
+    from still leaves the client able to thread the next turn."""
+    from app.modules.agents import service
+
+    async def _fake_provider(*_a: object, **_k: object) -> FakeChatProvider:
+        return FakeChatProvider()
+
+    monkeypatch.setattr(service, "get_chat_provider", _fake_provider)
+
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    resp = await client.post(
+        f"/v1/agents/{agent['id']}/playground/chat",
+        json={"message": "hello", "stream": True},
+        headers=headers,
+    )
+    body = resp.text
+    assert '"type": "conversation"' in body
+    assert body.index("conversation_id") < body.index('"type":"token"')
+
+
 # ── Creation-time role templates ──────────────────────────────────────────────
 async def test_list_agent_templates(client: AsyncClient) -> None:
     headers, _ = await _headers(client)

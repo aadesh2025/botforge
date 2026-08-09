@@ -73,15 +73,23 @@ export interface PlaygroundTurn {
   content: string;
 }
 
+/**
+ * Stream a playground turn.
+ *
+ * `conversationId` threads this turn onto an existing playground conversation. Omit it on
+ * the first turn; the stream's opening `conversation` event carries the id to send back,
+ * so the whole session lands in analytics as one conversation rather than N of them.
+ */
 export function playgroundStream(
   id: string,
   message: string,
   history: PlaygroundTurn[],
+  conversationId?: string | null,
   signal?: AbortSignal,
 ) {
   return apiStream(
     `/v1/agents/${id}/playground/chat`,
-    { message, history, stream: true },
+    { message, history, stream: true, conversation_id: conversationId ?? null },
     signal,
   );
 }

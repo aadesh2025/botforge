@@ -80,6 +80,15 @@ describe("channelMeta", () => {
     expect(inboxChannelTabs()).not.toContain("api");
   });
 
+  it("names playground traffic distinctly from a dashboard conversation", () => {
+    // Playground turns are persisted so an operator's testing shows up in analytics. They
+    // need their own label: a client reading their numbers has to be able to tell their own
+    // testing apart from traffic a real customer generated.
+    expect(channelMeta("playground").label).toBe("Playground");
+    expect(channelMeta("playground").label).not.toBe(channelMeta("dashboard").label);
+    expect(inboxChannelTabs()).not.toContain("playground");
+  });
+
   it("falls back for a channel value it has never seen, rather than rendering undefined", () => {
     expect(channelMeta("carrier-pigeon").label).toBe("Other");
     expect(channelMeta("carrier-pigeon").Icon).toBeTruthy();

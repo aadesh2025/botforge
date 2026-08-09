@@ -9,6 +9,7 @@
 import {
   Camera,
   Code2,
+  FlaskConical,
   Globe,
   Hash,
   LayoutDashboard,
@@ -51,12 +52,17 @@ export const INBOX_CHANNEL_ORDER: InboxChannel[] = [
 
 /** Channel values a conversation can carry that are never inbox *tabs*.
  *
- * `dashboard` is the in-app playground, `api`/`web` are legacy values from before the
- * channel registry, and `manual` is a contact an operator typed into the CRM. None of them
- * can receive a message, so none of them gets a tab — `manual` especially, since it has no
- * webhook and no conversations at all.
+ * `playground` is the builder's test chat, `dashboard` is a conversation held from the app,
+ * `api`/`web` are legacy values from before the channel registry, and `manual` is a contact
+ * an operator typed into the CRM. None of them can receive a message, so none of them gets
+ * a tab — `manual` especially, since it has no webhook and no conversations at all.
+ *
+ * `playground` is listed separately from `dashboard` on purpose: it is the operator testing
+ * their own draft, and a client reading their numbers needs to be able to tell that apart
+ * from traffic a real customer generated.
  */
 const REPORTING_ONLY: Record<string, ChannelMeta> = {
+  playground: { label: "Playground", Icon: FlaskConical },
   dashboard: { label: "Dashboard", Icon: LayoutDashboard },
   api: { label: "API", Icon: Code2 },
   web: { label: "Web", Icon: Globe },

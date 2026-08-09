@@ -100,3 +100,9 @@ class PlaygroundRequest(BaseModel):
     message: str = Field(min_length=1)
     history: list[PlaygroundMessage] | None = None
     stream: bool = True
+    #: Thread this turn onto an existing playground conversation. Omit on the first turn —
+    #: the server creates one and returns its id, which the client sends back thereafter.
+    #: Playground turns spend real tokens against a real key, so they are persisted like any
+    #: other channel; without an id every turn would open a new one-message conversation and
+    #: inflate the conversation count.
+    conversation_id: uuid.UUID | None = None
