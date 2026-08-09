@@ -24,7 +24,7 @@ from app.db.templates import AGENT_TEMPLATES, get_template
 from app.llm.base import ChatProvider
 from app.llm.registry import get_chat_provider, get_chat_provider_chain
 from app.llm.types import ChatRequest, Message
-from app.models import Agent, AgentVersion, Conversation, WidgetConfig
+from app.models import PLAYGROUND_CHANNEL, Agent, AgentVersion, Conversation, WidgetConfig
 from app.models import Message as DBMessage
 from app.modules.agents import schemas
 from app.modules.orgs.deps import OrgContext
@@ -570,13 +570,6 @@ async def _resolve_playground_provider(
         # provider is still reachable by configuring `provider: "fake"` explicitly.)
         log.warning("playground_provider_unavailable", provider=provider, agent_id=str(agent.id))
         raise
-
-
-#: The channel playground traffic is recorded under. Its own value, not `dashboard`, because
-#: these two are different things an operator needs to tell apart: `dashboard` is a real
-#: conversation held from the app, while this is the *draft* being exercised by whoever is
-#: building it. Reporting-only — it never becomes an Inbox tab.
-PLAYGROUND_CHANNEL = "playground"
 
 
 async def _playground_conversation(

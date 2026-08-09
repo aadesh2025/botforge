@@ -195,3 +195,71 @@ async def test_operator_reply_accepts_message_or_text(client: AsyncClient) -> No
 
     empty = await client.post(f"/v1/inbox/conversations/{cid}/messages", json={}, headers=headers)
     assert empty.status_code == 422
+
+
+# ── Playground sessions are readable in the inbox ─────────────────────────────
+# The queue is "conversations with a handoff record", which a test chat can never satisfy —
+# it is never escalated. So playground threads were invisible in the Inbox while showing up
+# under Conversations, which reads as the Inbox silently dropping them.
+async def _playground_agent(client: AsyncClient, headers: dict[str, str]) -> str:
+    agent = await client.post("/v1/agents", json={"name": "PG Bot"}, headers=headers)
+    aid = agent.json()["id"]
+    await client.patch(
+        f"/v1/agents/{aid}/versions/1",
+        json={"model_config": {"provider": "fake", "model": "fake-1"}},
+        headers=headers,
+    )
+    return aid
+
+
+async def test_playground_conversation_reaches_the_inbox(client: AsyncClient) -> None:
+    headers = await _headers(client, "pg-inbox@example.com")
+    aid = await _playground_agent(client, headers)
+
+    r = await client.post(
+        f"/v1/agents/{aid}/playground/chat",
+        json={"message": "testing my draft", "stream": False},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    cid = r.json()["conversation_id"]
+
+    # All messages
+    items = (await client.get("/v1/inbox/conversations", headers=headers)).json()
+    assert [i["id"] for i in items] == [cid], "playground thread missing from the inbox"
+    assert items[0]["channel"] == "playground"
+
+    # And under its own tab.
+    tab = (await client.get("/v1/inbox/conversations?channel=playground", headers=headers)).json()
+    assert [i["id"] for i in tab] == [cid]
+
+    # It is openable, with both halves of the turn.
+    detail = await client.get(f"/v1/inbox/conversations/{cid}", headers=headers)
+    assert detail.status_code == 200
+    assert [m["role"] for m in detail.json()["messages"]] == ["user", "assistant"]
+
+
+async def test_playground_does_not_leak_into_a_customer_channel_tab(client: AsyncClient) -> None:
+    """It gets its own tab precisely so it never inflates Web Chat, which is the number a
+    client reads as their real traffic."""
+    headers = await _headers(client, "pg-tab@example.com")
+    aid = await _playground_agent(client, headers)
+    await client.post(
+        f"/v1/agents/{aid}/playground/chat",
+        json={"message": "hello", "stream": False},
+        headers=headers,
+    )
+
+    widget = (await client.get("/v1/inbox/conversations?channel=widget", headers=headers)).json()
+    assert widget == []
+
+
+async def test_a_non_escalated_customer_chat_still_stays_out_of_the_inbox(client: AsyncClient) -> None:
+    """The exception is playground only. Widening it to every conversation would turn the
+    handoff queue into a firehose and bury the threads a human is actually needed on."""
+    headers = await _headers(client, "pg-scope@example.com")
+    _aid, key = await _handoff_agent(client, headers)
+    await _public_chat(client, key, "just a normal question")
+
+    items = (await client.get("/v1/inbox/conversations", headers=headers)).json()
+    assert items == []

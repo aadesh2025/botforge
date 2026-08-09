@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels import get_channel, whatsapp
@@ -16,6 +16,7 @@ from app.core import rbac
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.models import (
+    PLAYGROUND_CHANNEL,
     Channel,
     Contact,
     Conversation,
@@ -138,11 +139,23 @@ async def list_conversations(
     channel_filter: str | None = None,
 ) -> list[schemas.InboxItemOut]:
     rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
-    # Conversations that have at least one handoff record form the inbox queue.
+    # The queue is conversations that have at least one handoff record — i.e. where the bot
+    # is paused and a human is expected — **plus** playground sessions.
+    #
+    # Playground is the exception because it can never satisfy the handoff rule: a test chat
+    # is never escalated, so it would be permanently invisible here while showing up under
+    # Conversations, which reads as the inbox dropping messages. It is the operator's own
+    # transcript and nobody is waiting on it, so it is listed for reading, not for triage.
     handoff_ids = select(Handoff.conversation_id).where(Handoff.organization_id == ctx.org.id)
     stmt = (
         select(Conversation)
-        .where(Conversation.organization_id == ctx.org.id, Conversation.id.in_(handoff_ids))
+        .where(
+            Conversation.organization_id == ctx.org.id,
+            or_(
+                Conversation.id.in_(handoff_ids),
+                Conversation.channel == PLAYGROUND_CHANNEL,
+            ),
+        )
         .order_by(func.coalesce(Conversation.last_message_at, Conversation.created_at).desc())
     )
     if status_filter:

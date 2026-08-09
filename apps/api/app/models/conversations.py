@@ -12,6 +12,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKey
 
+#: `Conversation.channel` for a turn taken in the builder's Playground.
+#:
+#: Lives beside the column rather than in either module that uses it: the agents service
+#: writes it and the inbox service reads it, and a literal in both would be one rename away
+#: from the inbox quietly listing nothing.
+PLAYGROUND_CHANNEL = "playground"
+
 
 class Conversation(Base, UUIDPrimaryKey, TimestampMixin):
     __tablename__ = "conversations"

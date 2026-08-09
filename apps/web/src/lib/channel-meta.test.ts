@@ -15,9 +15,20 @@ describe("inboxChannelTabs", () => {
   it("returns every channel regardless of what's connected", () => {
     // The tab bar is how an operator discovers a platform they haven't set up, so the
     // set never depends on connection state.
-    const all = ["widget", "facebook", "instagram", "whatsapp", "telegram", "slack", "discord"];
+    // Playground is last: operator testing must never push a channel a real customer is
+    // waiting on further from the eye.
+    const all = [
+      "widget",
+      "facebook",
+      "instagram",
+      "whatsapp",
+      "telegram",
+      "slack",
+      "discord",
+      "playground",
+    ];
     expect(inboxChannelTabs()).toEqual(all);
-    expect(inboxChannelTabs()).toHaveLength(7);
+    expect(inboxChannelTabs()).toHaveLength(8);
   });
 
   it("stays in a fixed order", () => {
@@ -86,7 +97,21 @@ describe("channelMeta", () => {
     // testing apart from traffic a real customer generated.
     expect(channelMeta("playground").label).toBe("Playground");
     expect(channelMeta("playground").label).not.toBe(channelMeta("dashboard").label);
-    expect(inboxChannelTabs()).not.toContain("playground");
+  });
+
+  it("gives playground a tab, since it is a transcript someone reads", () => {
+    // Unlike the other non-connectable values it produces a conversation a person opens.
+    // Leaving it out made the inbox look like it was dropping threads that Conversations
+    // listed fine.
+    expect(inboxChannelTabs()).toContain("playground");
+    expect(inboxChannelTabs()).not.toContain("dashboard");
+  });
+
+  it("treats playground as always connected — there is nothing to set up", () => {
+    // Otherwise the tab renders a connect prompt for something with no webhook and no
+    // credential behind it.
+    expect(isChannelConnected([], "playground")).toBe(true);
+    expect(isNewChannel([], "playground")).toBe(false);
   });
 
   it("falls back for a channel value it has never seen, rather than rendering undefined", () => {

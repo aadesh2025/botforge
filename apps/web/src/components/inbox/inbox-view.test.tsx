@@ -44,7 +44,7 @@ beforeEach(() => {
 });
 
 describe("channel tab bar", () => {
-  it("renders all 7 channel tabs even when nothing is connected", async () => {
+  it("renders all 8 channel tabs even when nothing is connected", async () => {
     renderInbox();
     await waitFor(() => expect(within(tabs()).getByRole("tab", { name: /Web Chat/ })).toBeInTheDocument());
 
@@ -52,13 +52,13 @@ describe("channel tab bar", () => {
       expect(within(tabs()).getByRole("tab", { name: new RegExp(label) })).toBeInTheDocument();
     }
     // Plus the "All messages" tab.
-    expect(within(tabs()).getAllByRole("tab")).toHaveLength(8);
+    expect(within(tabs()).getAllByRole("tab")).toHaveLength(9);
   });
 
-  it("renders the same 7 tabs when channels are connected", async () => {
+  it("renders the same 8 tabs when channels are connected", async () => {
     listChannels.mockResolvedValue([{ type: "whatsapp", enabled: true, created_at: new Date().toISOString() }]);
     renderInbox();
-    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(8));
+    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(9));
   });
 
   it("marks unconnected channels for screen readers, and connected ones not", async () => {
@@ -85,7 +85,7 @@ describe("channel tab bar", () => {
 describe("not-connected channel state", () => {
   it("shows the connect prompt in both panels for an unconnected channel", async () => {
     renderInbox();
-    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(8));
+    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(9));
 
     fireEvent.click(within(tabs()).getByRole("tab", { name: /Instagram/ }));
 
@@ -102,7 +102,7 @@ describe("not-connected channel state", () => {
   it("keeps 'Nothing in the inbox yet.' for a connected channel with no messages", async () => {
     listChannels.mockResolvedValue([{ type: "whatsapp", enabled: true }]);
     renderInbox();
-    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(8));
+    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(9));
 
     fireEvent.click(within(tabs()).getByRole("tab", { name: /WhatsApp/ }));
 
@@ -114,7 +114,7 @@ describe("not-connected channel state", () => {
 
   it("never shows the prompt on All messages or Web Chat", async () => {
     renderInbox();
-    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(8));
+    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(9));
 
     // "All messages" is the default selection.
     expect(screen.queryByText(/isn’t connected yet/)).toBeNull();
@@ -128,7 +128,7 @@ describe("not-connected channel state", () => {
 describe("connect flow", () => {
   it("deep-links straight to the only agent's Channels tab with the type pre-selected", async () => {
     renderInbox();
-    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(8));
+    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(9));
 
     fireEvent.click(within(tabs()).getByRole("tab", { name: /WhatsApp/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Connect WhatsApp/ }));
@@ -142,7 +142,7 @@ describe("connect flow", () => {
       { id: "agent-2", name: "Sales Bot" },
     ]);
     renderInbox();
-    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(8));
+    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(9));
 
     fireEvent.click(within(tabs()).getByRole("tab", { name: /WhatsApp/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Connect WhatsApp/ }));
@@ -156,7 +156,7 @@ describe("connect flow", () => {
   it("points at agent creation when the org has none to attach a channel to", async () => {
     listAgents.mockResolvedValue([]);
     renderInbox();
-    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(8));
+    await waitFor(() => expect(within(tabs()).getAllByRole("tab")).toHaveLength(9));
 
     fireEvent.click(within(tabs()).getByRole("tab", { name: /WhatsApp/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Create an agent/ }));

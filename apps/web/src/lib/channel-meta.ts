@@ -21,8 +21,15 @@ import {
 } from "lucide-react";
 import type { ChannelType } from "./api/channels";
 
-/** Channels a conversation can arrive on — the connectable ones plus the built-in widget. */
-export type InboxChannel = ChannelType | "widget";
+/**
+ * Channels a conversation can arrive on — the connectable ones, the built-in widget, and
+ * the builder's Playground.
+ *
+ * Playground is here rather than in `REPORTING_ONLY` because it is the one non-connectable
+ * value that produces a transcript a person reads. It has no webhook and nothing to set up,
+ * so it behaves like `widget`: always "connected", never "new".
+ */
+export type InboxChannel = ChannelType | "widget" | "playground";
 
 export interface ChannelMeta {
   label: string;
@@ -37,9 +44,13 @@ export const CHANNEL_META: Record<InboxChannel, ChannelMeta> = {
   telegram: { label: "Telegram", Icon: Send },
   slack: { label: "Slack", Icon: Hash },
   discord: { label: "Discord", Icon: MessageSquare },
+  playground: { label: "Playground", Icon: FlaskConical },
 };
 
-/** Tab order follows the reference: the always-on web chat, then the Meta surfaces. */
+/** Tab order follows the reference: the always-on web chat, then the Meta surfaces.
+ *
+ * Playground sits last: it is the operator's own testing, so it should never push a channel
+ * a real customer is waiting on further from the eye. */
 export const INBOX_CHANNEL_ORDER: InboxChannel[] = [
   "widget",
   "facebook",
@@ -48,21 +59,21 @@ export const INBOX_CHANNEL_ORDER: InboxChannel[] = [
   "telegram",
   "slack",
   "discord",
+  "playground",
 ];
 
 /** Channel values a conversation can carry that are never inbox *tabs*.
  *
- * `playground` is the builder's test chat, `dashboard` is a conversation held from the app,
- * `api`/`web` are legacy values from before the channel registry, and `manual` is a contact
- * an operator typed into the CRM. None of them can receive a message, so none of them gets
- * a tab — `manual` especially, since it has no webhook and no conversations at all.
+ * `dashboard` is a conversation held from the app, `api`/`web` are legacy values from before
+ * the channel registry, and `manual` is a contact an operator typed into the CRM. None of
+ * them can receive a message, so none of them gets a tab — `manual` especially, since it has
+ * no webhook and no conversations at all.
  *
- * `playground` is listed separately from `dashboard` on purpose: it is the operator testing
- * their own draft, and a client reading their numbers needs to be able to tell that apart
- * from traffic a real customer generated.
+ * `playground` used to live here and is now a real tab (see `CHANNEL_META`): unlike these,
+ * it produces a transcript someone actually reads, and hiding it made the inbox look like it
+ * was dropping conversations that Conversations listed fine.
  */
 const REPORTING_ONLY: Record<string, ChannelMeta> = {
-  playground: { label: "Playground", Icon: FlaskConical },
   dashboard: { label: "Dashboard", Icon: LayoutDashboard },
   api: { label: "API", Icon: Code2 },
   web: { label: "Web", Icon: Globe },
@@ -92,12 +103,16 @@ export function inboxChannelTabs(): InboxChannel[] {
   return INBOX_CHANNEL_ORDER;
 }
 
-/** Whether messages can actually arrive on this channel right now. */
+/** Whether messages can actually arrive on this channel right now.
+ *
+ * `widget` and `playground` are inherent to every agent — there is no row to enable and no
+ * credential to paste — so neither can ever be "not connected". Returning false for
+ * playground would render the connect prompt for something with nothing to connect. */
 export function isChannelConnected(
   channels: ConnectedChannel[] | undefined,
   type: InboxChannel,
 ): boolean {
-  if (type === "widget") return true; // always on, nothing to connect
+  if (type === "widget" || type === "playground") return true;
   return (channels ?? []).some((c) => c.type === type && c.enabled);
 }
 
@@ -105,7 +120,7 @@ const NEW_CHANNEL_DAYS = 7;
 
 /** Freshly connected channels get the reference's "New" badge for a week. */
 export function isNewChannel(channels: ConnectedChannel[] | undefined, type: InboxChannel): boolean {
-  if (type === "widget") return false;
+  if (type === "widget" || type === "playground") return false;
   const cutoff = Date.now() - NEW_CHANNEL_DAYS * 24 * 60 * 60 * 1000;
   return (channels ?? []).some(
     (c) => c.type === type && c.enabled && c.created_at !== undefined && Date.parse(c.created_at) > cutoff,
