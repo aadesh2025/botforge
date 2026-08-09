@@ -34,6 +34,42 @@ export interface UsageBucket {
   cost_micros: number;
 }
 
+/**
+ * One calendar day of activity — the chart's data source.
+ *
+ * Every day in the range is present, including quiet ones. `UsageBucket` with
+ * `group_by: "day"` is sparse, and plotting a sparse series by array index is what drew a
+ * straight line through a month with three busy days.
+ */
+export interface DayPoint {
+  /** ISO date, `YYYY-MM-DD`. */
+  date: string;
+  /** Conversations *started* that day — not assistant message count. */
+  conversations: number;
+  messages: number;
+  tokens_prompt: number;
+  tokens_completion: number;
+  cost_micros: number;
+}
+
+/** One agent's traffic. Distinct from `AgentPerformanceBucket`, which is one teammate's. */
+export interface AgentBucket {
+  agent_id: string;
+  name: string;
+  status: string;
+  /** Deleted agents keep their history so the rows still sum to the overview. */
+  deleted: boolean;
+  conversations: number;
+  messages: number;
+  tokens_prompt: number;
+  tokens_completion: number;
+  cost_micros: number;
+  handoff_rate: number;
+  resolution_rate: number;
+  /** Null when the agent has never been messaged. */
+  last_active_at: string | null;
+}
+
 export interface LatencyStats {
   count: number;
   avg_ms: number;
@@ -76,6 +112,16 @@ export function getOverview(p: AnalyticsParams = {}) {
 
 export function getUsage(p: AnalyticsParams & { group_by?: "day" | "provider" | "model" | "channel" } = {}) {
   return api<UsageBucket[]>(`/v1/analytics/usage${qs(p)}`, { orgScoped: true });
+}
+
+/** Daily activity for charting: one point per day in range, quiet days included. */
+export function getSeries(p: AnalyticsParams = {}) {
+  return api<DayPoint[]>(`/v1/analytics/series${qs(p)}`, { orgScoped: true });
+}
+
+/** Per-*bot* traffic. `getAgentPerformance` below is per-*teammate* — a different report. */
+export function getByAgent(p: AnalyticsParams = {}) {
+  return api<AgentBucket[]>(`/v1/analytics/by-agent${qs(p)}`, { orgScoped: true });
 }
 
 /** Per-teammate inbox workload. Reports on people, not channels. */

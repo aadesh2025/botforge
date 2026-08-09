@@ -5,6 +5,7 @@ import { CircleDollarSign, Download, MessagesSquare, ShieldCheck, Timer, Users, 
 import { PageHeader } from "@/components/dashboard/page-header";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { UsageChart } from "@/components/dashboard/usage-chart";
+import { AgentBreakdown } from "@/components/analytics/agent-breakdown";
 import { BarList } from "@/components/analytics/bar-list";
 import { ChannelBreakdown } from "@/components/analytics/channel-breakdown";
 import { TeamPerformance } from "@/components/analytics/team-performance";
@@ -13,8 +14,10 @@ import { Badge } from "@/components/ui/badge";
 import { channelMeta } from "@/lib/channel-meta";
 import {
   getAgentPerformance,
+  getByAgent,
   getLatency,
   getOverview,
+  getSeries,
   getTopQuestions,
   getUnanswered,
   getUsage,
@@ -49,9 +52,14 @@ export default function AnalyticsPage() {
     enabled,
   });
   const { data: latency } = useQuery({ queryKey: ["an-latency", activeOrgId], queryFn: () => getLatency(), enabled });
-  const { data: usageDay } = useQuery({
-    queryKey: ["an-usage-day", activeOrgId],
-    queryFn: () => getUsage({ group_by: "day" }),
+  const { data: series, isLoading: seriesLoading } = useQuery({
+    queryKey: ["an-series", activeOrgId],
+    queryFn: () => getSeries(),
+    enabled,
+  });
+  const { data: byAgent, isLoading: byAgentLoading } = useQuery({
+    queryKey: ["an-by-agent", activeOrgId],
+    queryFn: () => getByAgent(),
     enabled,
   });
   const { data: usageProvider } = useQuery({
@@ -72,13 +80,6 @@ export default function AnalyticsPage() {
   const { data: top } = useQuery({ queryKey: ["an-top", activeOrgId], queryFn: () => getTopQuestions(), enabled });
   const { data: unanswered } = useQuery({ queryKey: ["an-un", activeOrgId], queryFn: () => getUnanswered(), enabled });
 
-  const series = (usageDay ?? []).map((b) => ({
-    date: b.key,
-    tokens: b.tokens_prompt + b.tokens_completion,
-    cost: b.cost_micros / 1_000_000,
-    conversations: b.requests,
-  }));
-
   return (
     <div className="mx-auto max-w-[1400px] space-y-6">
       <PageHeader title="Analytics" description="How your agents are performing across channels.">
@@ -97,7 +98,8 @@ export default function AnalyticsPage() {
         <StatCard label="Conversations" value={compact(overview?.conversations ?? 0)} icon={MessagesSquare} hint="last 30d" />
         <StatCard
           label="Resolution rate"
-          value={`${Math.round((overview?.resolution_rate ?? 0) * 100)}%`}
+          // An em dash, not 0%: nothing has happened yet is not a total failure to resolve.
+          value={overview?.conversations ? `${Math.round((overview.resolution_rate ?? 0) * 100)}%` : "—"}
           icon={ShieldCheck}
           hint="no human needed"
         />
@@ -122,7 +124,24 @@ export default function AnalyticsPage() {
         />
       </div>
 
-      <UsageChart data={series} />
+      <UsageChart data={series} isLoading={seriesLoading} />
+
+      <section
+        aria-labelledby="an-by-agent"
+        className="overflow-hidden rounded-lg border border-border bg-surface"
+      >
+        <div className="border-b border-border p-5">
+          <h3 id="an-by-agent" className="font-display text-base font-semibold text-text">
+            By agent
+          </h3>
+          <p className="text-sm text-muted">
+            Every agent in this workspace. Open one for its own analytics.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <AgentBreakdown buckets={byAgent} isLoading={byAgentLoading} />
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section

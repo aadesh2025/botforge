@@ -11,6 +11,7 @@ import { ModelTab } from "@/components/builder/tabs/model-tab";
 import { KnowledgeTab } from "@/components/builder/tabs/knowledge-tab";
 import { ToolsTab } from "@/components/builder/tabs/tools-tab";
 import { ChannelsTab } from "@/components/builder/tabs/channels-tab";
+import { AnalyticsTab } from "@/components/builder/tabs/analytics-tab";
 import { VersionsTab } from "@/components/builder/tabs/versions-tab";
 import { SettingsTab } from "@/components/builder/tabs/settings-tab";
 import { useBuilder } from "@/lib/store/builder";
@@ -19,8 +20,24 @@ import { ApiError } from "@/lib/api/client";
 import { draftToPatch, draftToWidgetConfig, versionToDraft } from "@/lib/api/agent-mapping";
 import { useSession } from "@/lib/store/session";
 
-const TABS = ["persona", "model", "knowledge", "tools", "channels", "versions", "settings"] as const;
+const TABS = [
+  "persona",
+  "model",
+  "knowledge",
+  "tools",
+  "channels",
+  "analytics",
+  "versions",
+  "settings",
+] as const;
 type Tab = (typeof TABS)[number];
+
+/** Tabs that own the full width and drop the Playground column.
+ *
+ * Channels has its own visual preview; Analytics is a dashboard of charts and wide tables
+ * that would be clipped to illegibility in the 2:1 split. Neither needs a chat-testing pane
+ * beside it. */
+const FULL_WIDTH_TABS: readonly string[] = ["channels", "analytics"];
 
 /** Validation failures name the offending field — surface it, since that's what to fix. */
 function describeSaveError(e: unknown): string {
@@ -124,10 +141,10 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
     <div className="mx-auto max-w-[1500px]">
       <BuilderHeader />
 
-      {/* Channels has its own full-width visual preview and needs no chat-testing pane, so it
-          renders full width and drops the Playground column. Other tabs keep the 2:1 split. */}
-      <div className={`grid gap-6 pt-6 ${tab === "channels" ? "" : "xl:grid-cols-3"}`}>
-        <div className={tab === "channels" ? "min-w-0" : "min-w-0 xl:col-span-2"}>
+      {/* Full-width tabs (see FULL_WIDTH_TABS) drop the Playground column; the rest keep the
+          2:1 split. */}
+      <div className={`grid gap-6 pt-6 ${FULL_WIDTH_TABS.includes(tab) ? "" : "xl:grid-cols-3"}`}>
+        <div className={FULL_WIDTH_TABS.includes(tab) ? "min-w-0" : "min-w-0 xl:col-span-2"}>
           <Tabs value={tab} onValueChange={onTabChange}>
             <TabsList className="mb-5 rounded-lg border border-border bg-surface p-1">
               {TABS.map((t) => (
@@ -151,6 +168,9 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
             </TabsContent>
             <TabsContent value="channels">
               <ChannelsTab />
+            </TabsContent>
+            <TabsContent value="analytics">
+              <AnalyticsTab agentId={id} />
             </TabsContent>
             <TabsContent value="versions">
               <VersionsTab agentId={id} currentVersionId={data?.agent.current_version_id ?? null} />
