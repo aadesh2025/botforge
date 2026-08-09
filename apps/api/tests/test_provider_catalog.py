@@ -80,6 +80,36 @@ def test_a_paid_model_never_silently_prices_at_zero() -> None:
             assert known == (rate != (0, 0)), f"{spec.name}/{model.id} prices at 0 but claims to be known"
 
 
+def test_every_paid_provider_publishes_a_rate() -> None:
+    """The other direction of the test above, and the one that actually bites.
+
+    The test above passes when a paid model has *no* rate, because absent and zero agree.
+    This one says the catalogue must not be in that state: an operator who switches an agent
+    onto a paid provider has to see the cost change, and `None` there reads as $0 in the
+    dashboard — indistinguishable from the free tier they just left.
+    """
+    missing = [
+        f"{spec.name}/{model.id}"
+        for spec in catalog.PROVIDERS
+        if not spec.free
+        for model in spec.models
+        if model.prompt_micros is None or model.completion_micros is None
+    ]
+    assert not missing, f"paid models with no published rate: {missing}"
+
+
+def test_a_paid_model_on_a_free_tier_provider_is_still_billed() -> None:
+    """The provider `free` flag is a default, not a guarantee.
+
+    OpenRouter is free-tier-first but routes some ids to billed upstreams. Consulting the
+    flag before the model rate made every one of them cost $0, so moving an agent from
+    `:free` to Claude showed no cost change. The per-model rate has to win.
+    """
+    assert "openrouter" in FREE_PROVIDERS
+    assert price_for("openrouter", "meta-llama/llama-3.3-70b-instruct:free") == (0, 0)
+    assert price_for("openrouter", "anthropic/claude-sonnet-4.5") == (3000, 15000)
+
+
 def test_free_providers_are_derived_from_the_catalog() -> None:
     assert {"groq", "gemini", "ollama", "openrouter", "fake"} <= FREE_PROVIDERS
     assert "openai" not in FREE_PROVIDERS and "anthropic" not in FREE_PROVIDERS

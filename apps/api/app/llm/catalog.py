@@ -126,9 +126,17 @@ _OPENROUTER = ProviderSpec(
         ModelSpec("meta-llama/llama-3.3-70b-instruct:free", "Llama 3.3 70B (free)", 128_000),
         ModelSpec("meta-llama/llama-3.1-70b-instruct:free", "Llama 3.1 70B (free)", 128_000),
         ModelSpec("google/gemini-2.0-flash-exp:free", "Gemini 2.0 Flash (free)", 1_000_000),
-        ModelSpec("deepseek/deepseek-chat", "DeepSeek Chat"),
-        ModelSpec("anthropic/claude-sonnet-4.5", "Claude Sonnet 4.5"),
-        ModelSpec("openai/gpt-4o-mini", "GPT-4o mini"),
+        # OpenRouter is free-tier *first*, not free-only: the `:free` ids above cost nothing,
+        # but these route to paid upstreams and are billed. Rates live per model so
+        # `price_for()` charges them correctly without the provider losing its free flag.
+        ModelSpec("deepseek/deepseek-chat", "DeepSeek Chat", prompt_micros=270, completion_micros=1100),
+        ModelSpec(
+            "anthropic/claude-sonnet-4.5",
+            "Claude Sonnet 4.5",
+            prompt_micros=3000,
+            completion_micros=15000,
+        ),
+        ModelSpec("openai/gpt-4o-mini", "GPT-4o mini", prompt_micros=150, completion_micros=600),
     ),
 )
 
@@ -191,8 +199,11 @@ _ANTHROPIC = ProviderSpec(
 )
 
 # --- OpenAI-compatible: no adapter needed, just an endpoint. ----------------------------
-# Pricing is deliberately unset for these (see the module docstring): publishing a rate we
-# have not verified puts a wrong number in a client's cost report.
+# These carry each provider's published list price, so switching an agent onto a paid model
+# produces a real cost figure instead of a silent $0 (which reads as "free", not "unknown").
+# Rates are list prices captured 2026-08-09 and are an *estimate*: they don't know about
+# negotiated discounts, batch/cached-input tiers, or a provider changing its price. Anything
+# left `None` still costs 0 and logs `pricing_unknown` — see `llm/pricing.py`.
 
 _MISTRAL = ProviderSpec(
     name="mistral",
@@ -203,9 +214,9 @@ _MISTRAL = ProviderSpec(
     base_url="https://api.mistral.ai/v1",
     api_key_url="https://console.mistral.ai/api-keys",
     models=(
-        ModelSpec("mistral-large-latest", "Mistral Large"),
-        ModelSpec("mistral-small-latest", "Mistral Small"),
-        ModelSpec("open-mistral-nemo", "Mistral Nemo"),
+        ModelSpec("mistral-large-latest", "Mistral Large", prompt_micros=2000, completion_micros=6000),
+        ModelSpec("mistral-small-latest", "Mistral Small", prompt_micros=200, completion_micros=600),
+        ModelSpec("open-mistral-nemo", "Mistral Nemo", prompt_micros=150, completion_micros=150),
     ),
 )
 
@@ -218,8 +229,8 @@ _DEEPSEEK = ProviderSpec(
     base_url="https://api.deepseek.com/v1",
     api_key_url="https://platform.deepseek.com/api_keys",
     models=(
-        ModelSpec("deepseek-chat", "DeepSeek Chat"),
-        ModelSpec("deepseek-reasoner", "DeepSeek Reasoner"),
+        ModelSpec("deepseek-chat", "DeepSeek Chat", prompt_micros=270, completion_micros=1100),
+        ModelSpec("deepseek-reasoner", "DeepSeek Reasoner", prompt_micros=550, completion_micros=2190),
     ),
 )
 
@@ -233,9 +244,9 @@ _XAI = ProviderSpec(
     api_key_url="https://console.x.ai",
     key_hint="xai-…",
     models=(
-        ModelSpec("grok-4", "Grok 4"),
-        ModelSpec("grok-3", "Grok 3"),
-        ModelSpec("grok-3-mini", "Grok 3 mini"),
+        ModelSpec("grok-4", "Grok 4", prompt_micros=3000, completion_micros=15000),
+        ModelSpec("grok-3", "Grok 3", prompt_micros=3000, completion_micros=15000),
+        ModelSpec("grok-3-mini", "Grok 3 mini", prompt_micros=300, completion_micros=500),
     ),
 )
 
@@ -248,8 +259,18 @@ _TOGETHER = ProviderSpec(
     base_url="https://api.together.xyz/v1",
     api_key_url="https://api.together.ai/settings/api-keys",
     models=(
-        ModelSpec("meta-llama/Llama-3.3-70B-Instruct-Turbo", "Llama 3.3 70B Turbo"),
-        ModelSpec("Qwen/Qwen2.5-72B-Instruct-Turbo", "Qwen 2.5 72B Turbo"),
+        ModelSpec(
+            "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            "Llama 3.3 70B Turbo",
+            prompt_micros=880,
+            completion_micros=880,
+        ),
+        ModelSpec(
+            "Qwen/Qwen2.5-72B-Instruct-Turbo",
+            "Qwen 2.5 72B Turbo",
+            prompt_micros=1200,
+            completion_micros=1200,
+        ),
     ),
 )
 
@@ -262,8 +283,18 @@ _FIREWORKS = ProviderSpec(
     base_url="https://api.fireworks.ai/inference/v1",
     api_key_url="https://fireworks.ai/account/api-keys",
     models=(
-        ModelSpec("accounts/fireworks/models/llama-v3p3-70b-instruct", "Llama 3.3 70B"),
-        ModelSpec("accounts/fireworks/models/qwen3-235b-a22b", "Qwen 3 235B"),
+        ModelSpec(
+            "accounts/fireworks/models/llama-v3p3-70b-instruct",
+            "Llama 3.3 70B",
+            prompt_micros=900,
+            completion_micros=900,
+        ),
+        ModelSpec(
+            "accounts/fireworks/models/qwen3-235b-a22b",
+            "Qwen 3 235B",
+            prompt_micros=220,
+            completion_micros=880,
+        ),
     ),
 )
 

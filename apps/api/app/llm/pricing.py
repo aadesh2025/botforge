@@ -28,8 +28,14 @@ PRICING: dict[tuple[str, str], tuple[int, int]] = {
 
 
 def price_for(provider: str, model: str) -> tuple[int, int]:
-    if provider in FREE_PROVIDERS:
-        return (0, 0)
+    """Micros per 1K tokens for (provider, model), as (prompt, completion).
+
+    A *model* rate outranks the provider's `free` flag, which is a default rather than a
+    guarantee: OpenRouter is free-tier-first yet routes `anthropic/claude-sonnet-4.5` to a
+    billed upstream. Checking the free flag first (as this did) made every model on such a
+    provider report $0, so switching an agent onto a paid model showed no cost change at
+    all. Groq and Gemini's free models publish no rate, so they still come back (0, 0).
+    """
     override = PRICING.get((provider, model))
     if override is not None:
         return override
