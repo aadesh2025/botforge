@@ -46,6 +46,31 @@ async def usage(
     return await service.usage(session, ctx, agent_id, from_date, to_date, group_by, channel)
 
 
+@router.get("/series", response_model=list[schemas.DayPoint])
+async def series(
+    agent_id: uuid.UUID | None = Query(default=None),
+    from_date: dt.date | None = Query(default=None, alias="from"),
+    to_date: dt.date | None = Query(default=None, alias="to"),
+    channel: str | None = _channel_q,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> list[schemas.DayPoint]:
+    """Daily activity for charting: one point per day in range, quiet days included."""
+    return await service.series(session, ctx, agent_id, from_date, to_date, channel)
+
+
+@router.get("/by-agent", response_model=list[schemas.AgentBucket])
+async def by_agent(
+    from_date: dt.date | None = Query(default=None, alias="from"),
+    to_date: dt.date | None = Query(default=None, alias="to"),
+    channel: str | None = _channel_q,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> list[schemas.AgentBucket]:
+    """Per-*bot* traffic breakdown. `/agents` below is per-*teammate* — different report."""
+    return await service.by_agent(session, ctx, from_date, to_date, channel)
+
+
 @router.get("/agents", response_model=list[schemas.AgentPerformanceBucket])
 async def agent_performance(
     from_date: dt.date | None = Query(default=None, alias="from"),

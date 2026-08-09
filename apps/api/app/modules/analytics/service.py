@@ -6,12 +6,12 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import Date, String, case, cast, distinct, func, select
+from sqlalchemy import Date, String, case, cast, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import Select
 
 from app.core import rbac
-from app.models import Channel, Conversation, Handoff, Message, User
+from app.models import Agent, Channel, Conversation, Handoff, Message, User
 from app.modules.analytics import schemas
 from app.modules.orgs.deps import OrgContext
 
@@ -325,6 +325,185 @@ async def usage(
             for c in sorted(connected - seen)
         )
         buckets.sort(key=lambda b: b.key)
+    return buckets
+
+
+async def series(
+    session: AsyncSession,
+    ctx: OrgContext,
+    agent_id: uuid.UUID | None,
+    from_date: dt.date | None,
+    to_date: dt.date | None,
+    channel: str | None = None,
+) -> list[schemas.DayPoint]:
+    """Daily activity across the whole range, including days with nothing on them.
+
+    Two things `usage(group_by="day")` cannot give a chart:
+
+    1. **Gap filling.** `GROUP BY date` returns only days that have rows. A caller plotting
+       those by array index draws Jul 30 → Aug 2 → Aug 6 as three evenly-spaced points, so a
+       month with three busy days looks like a straight line. Zeros have to be real points.
+    2. **Conversations.** `usage` counts assistant *messages* (`requests`). Conversations
+       started per day is a different number and the one a "conversations" axis should show.
+    """
+    rbac.require_permission(ctx.role, rbac.ANALYTICS_VIEW)
+    start, end = _range(from_date, to_date)
+
+    conv_rows = {
+        r[0]: int(r[1])
+        for r in (
+            await session.execute(
+                select(cast(Conversation.created_at, Date), func.count())
+                .where(*_conv_filter(ctx, start, end, agent_id, channel))
+                .group_by(cast(Conversation.created_at, Date))
+            )
+        ).all()
+    }
+
+    msg_sub = _msg_query(ctx, start, end, agent_id, channel).subquery()
+    msg_rows = {
+        r[0]: (int(r[1]), int(r[2]), int(r[3]), int(r[4]))
+        for r in (
+            await session.execute(
+                select(
+                    cast(msg_sub.c.created_at, Date),
+                    func.count(),
+                    func.coalesce(func.sum(msg_sub.c.tokens_prompt), 0),
+                    func.coalesce(func.sum(msg_sub.c.tokens_completion), 0),
+                    func.coalesce(func.sum(msg_sub.c.cost_micros), 0),
+                )
+                .select_from(msg_sub)
+                .group_by(cast(msg_sub.c.created_at, Date))
+            )
+        ).all()
+    }
+
+    points: list[schemas.DayPoint] = []
+    day = start.date()
+    last = end.date()
+    while day <= last:
+        messages, tok_p, tok_c, cost = msg_rows.get(day, (0, 0, 0, 0))
+        points.append(
+            schemas.DayPoint(
+                date=day,
+                conversations=conv_rows.get(day, 0),
+                messages=messages,
+                tokens_prompt=tok_p,
+                tokens_completion=tok_c,
+                cost_micros=cost,
+            )
+        )
+        day += dt.timedelta(days=1)
+    return points
+
+
+async def by_agent(
+    session: AsyncSession,
+    ctx: OrgContext,
+    from_date: dt.date | None,
+    to_date: dt.date | None,
+    channel: str | None = None,
+) -> list[schemas.AgentBucket]:
+    """Every agent in the org with its own traffic, so the combined view can be broken down.
+
+    Two inclusion rules, and both are load-bearing:
+
+    * **Live agents with no traffic are kept** as real zeros — the same rule `_by_channel`
+      follows. A published agent nobody has messaged is a fact the operator needs (it
+      usually means the embed was never installed), not a row to hide.
+    * **Deleted agents that have traffic in range are kept too**, flagged. Filtering on
+      `deleted_at IS NULL` alone made this table under-report: measured against the live
+      `aurozenai` org, all 9 of its conversations belong to a soft-deleted agent, so the
+      overview said 9 while every per-agent row said 0. Deleting an agent does not un-spend
+      its tokens, and a breakdown that cannot account for the headline number is worse than
+      no breakdown — the operator has no way to tell which of the two is lying.
+
+    A deleted agent with *no* traffic is still excluded: there is nothing to attribute.
+    """
+    rbac.require_permission(ctx.role, rbac.ANALYTICS_VIEW)
+    start, end = _range(from_date, to_date)
+    conv_conds = _conv_filter(ctx, start, end, None, channel)
+
+    agents_with_traffic = select(Conversation.agent_id).where(*conv_conds).distinct()
+    agents = (
+        await session.execute(
+            select(Agent).where(
+                Agent.organization_id == ctx.org.id,
+                or_(Agent.deleted_at.is_(None), Agent.id.in_(agents_with_traffic)),
+            )
+        )
+    ).scalars().all()
+
+    conv_counts = {
+        r[0]: int(r[1])
+        for r in (
+            await session.execute(
+                select(Conversation.agent_id, func.count()).where(*conv_conds).group_by(Conversation.agent_id)
+            )
+        ).all()
+    }
+
+    msg_stmt = (
+        select(
+            Conversation.agent_id,
+            func.count(),
+            func.coalesce(func.sum(Message.tokens_prompt), 0),
+            func.coalesce(func.sum(Message.tokens_completion), 0),
+            func.coalesce(func.sum(Message.cost_micros), 0),
+            func.max(Message.created_at),
+        )
+        .select_from(Message)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(
+            Message.organization_id == ctx.org.id,
+            Message.created_at >= start,
+            Message.created_at <= end,
+        )
+        .group_by(Conversation.agent_id)
+    )
+    if channel is not None:
+        msg_stmt = msg_stmt.where(Conversation.channel == channel)
+    msg_rows = {
+        r[0]: (int(r[1]), int(r[2]), int(r[3]), int(r[4]), r[5])
+        for r in (await session.execute(msg_stmt)).all()
+    }
+
+    handoff_counts = {
+        r[0]: int(r[1])
+        for r in (
+            await session.execute(
+                select(Conversation.agent_id, func.count(distinct(Handoff.conversation_id)))
+                .select_from(Handoff)
+                .join(Conversation, Conversation.id == Handoff.conversation_id)
+                .where(*conv_conds, Handoff.organization_id == ctx.org.id)
+                .group_by(Conversation.agent_id)
+            )
+        ).all()
+    }
+
+    buckets: list[schemas.AgentBucket] = []
+    for agent in agents:
+        conversations = conv_counts.get(agent.id, 0)
+        messages, tok_p, tok_c, cost, last_at = msg_rows.get(agent.id, (0, 0, 0, 0, None))
+        handoff_rate, resolution_rate = _rates(handoff_counts.get(agent.id, 0), conversations)
+        buckets.append(
+            schemas.AgentBucket(
+                agent_id=agent.id,
+                name=agent.name,
+                status=agent.status,
+                deleted=agent.deleted_at is not None,
+                conversations=conversations,
+                messages=messages,
+                tokens_prompt=tok_p,
+                tokens_completion=tok_c,
+                cost_micros=cost,
+                handoff_rate=handoff_rate,
+                resolution_rate=resolution_rate,
+                last_active_at=last_at,
+            )
+        )
+    # Busiest first; quiet agents fall back to name so the order is stable between polls.
+    buckets.sort(key=lambda b: (-b.conversations, -b.messages, b.name))
     return buckets
 
 

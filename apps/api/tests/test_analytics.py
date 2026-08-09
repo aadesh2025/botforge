@@ -271,3 +271,165 @@ async def test_overview_counts_dashboard_conversations_as_users(client: AsyncCli
     ov = (await client.get("/v1/analytics/overview", headers=headers)).json()
     assert ov["conversations"] == 2
     assert ov["users"] == ov["conversations"]
+
+
+# ── Daily series: the chart's data source ─────────────────────────────────────
+async def test_series_fills_quiet_days_with_zeros(client: AsyncClient) -> None:
+    """The straight-line bug.
+
+    `usage(group_by="day")` returns only days that saw traffic, so a caller plotting them by
+    index draws three scattered days as three evenly-spaced points — a straight line through
+    a month of silence. Every day in the range has to be a real point.
+    """
+    headers, _ = await _headers(client, "series@example.com")
+    aid = await _fake_agent(client, headers)
+    await client.post(f"/v1/agents/{aid}/chat", json={"message": "hi", "stream": False}, headers=headers)
+
+    today = dt.datetime.now(tz=dt.UTC).date()
+    start = today - dt.timedelta(days=6)
+    r = await client.get(
+        f"/v1/analytics/series?from={start.isoformat()}&to={today.isoformat()}", headers=headers
+    )
+    assert r.status_code == 200, r.text
+    points = r.json()
+
+    assert len(points) == 7, "one point per calendar day, not one per day with traffic"
+    assert [p["date"] for p in points] == [
+        (start + dt.timedelta(days=i)).isoformat() for i in range(7)
+    ]
+    assert points[-1]["conversations"] == 1
+    assert all(p["conversations"] == 0 for p in points[:-1])
+
+
+async def test_series_counts_conversations_not_assistant_messages(client: AsyncClient) -> None:
+    """The chart's `conversations` axis plotted `usage.requests`, which is the assistant
+    message count. Three replies in one thread is one conversation, not three."""
+    headers, _ = await _headers(client, "series2@example.com")
+    aid = await _fake_agent(client, headers)
+    first = await client.post(
+        f"/v1/agents/{aid}/chat", json={"message": "one", "stream": False}, headers=headers
+    )
+    cid = first.json()["conversation_id"]
+    for text in ("two", "three"):
+        await client.post(
+            f"/v1/agents/{aid}/chat",
+            json={"message": text, "conversation_id": cid, "stream": False},
+            headers=headers,
+        )
+
+    points = (await client.get("/v1/analytics/series", headers=headers)).json()
+    today = next(p for p in points if p["date"] == dt.datetime.now(tz=dt.UTC).date().isoformat())
+    assert today["conversations"] == 1
+    assert today["messages"] == 6  # 3 user + 3 assistant
+
+
+# ── Per-agent breakdown ───────────────────────────────────────────────────────
+async def test_by_agent_splits_traffic_and_keeps_silent_agents(client: AsyncClient) -> None:
+    """A published agent nobody has messaged is a fact worth surfacing (it usually means the
+    embed was never installed), so it stays in the list as a real zero."""
+    headers, _ = await _headers(client, "byagent@example.com")
+    busy = await _fake_agent(client, headers)
+    quiet = await _fake_agent(client, headers)
+
+    for text in ("a", "b"):
+        await client.post(
+            f"/v1/agents/{busy}/chat", json={"message": text, "stream": False}, headers=headers
+        )
+
+    rows = (await client.get("/v1/analytics/by-agent", headers=headers)).json()
+    by_id = {r["agent_id"]: r for r in rows}
+    assert set(by_id) == {busy, quiet}
+
+    assert by_id[busy]["conversations"] == 2
+    assert by_id[busy]["messages"] == 4
+    assert by_id[busy]["tokens_prompt"] == 20
+    assert by_id[busy]["last_active_at"] is not None
+
+    assert by_id[quiet]["conversations"] == 0
+    assert by_id[quiet]["last_active_at"] is None, "never messaged is None, not an epoch"
+
+    assert rows[0]["agent_id"] == busy, "busiest agent sorts first"
+
+
+async def test_by_agent_totals_reconcile_with_the_overview(client: AsyncClient) -> None:
+    """The per-agent view and the combined view are two readings of one dataset. If they
+    disagree, one of them is lying and the operator has no way to tell which."""
+    headers, _ = await _headers(client, "reconcile@example.com")
+    one = await _fake_agent(client, headers)
+    two = await _fake_agent(client, headers)
+    await client.post(f"/v1/agents/{one}/chat", json={"message": "x", "stream": False}, headers=headers)
+    await client.post(f"/v1/agents/{two}/chat", json={"message": "y", "stream": False}, headers=headers)
+
+    overview = (await client.get("/v1/analytics/overview", headers=headers)).json()
+    rows = (await client.get("/v1/analytics/by-agent", headers=headers)).json()
+
+    assert sum(r["conversations"] for r in rows) == overview["conversations"]
+    assert sum(r["messages"] for r in rows) == overview["messages"]
+    assert sum(r["tokens_prompt"] for r in rows) == overview["tokens_prompt"]
+    assert sum(r["cost_micros"] for r in rows) == overview["cost_micros"]
+
+
+async def test_series_totals_reconcile_with_the_overview(client: AsyncClient) -> None:
+    headers, _ = await _headers(client, "reconcile2@example.com")
+    aid = await _fake_agent(client, headers)
+    for text in ("p", "q"):
+        await client.post(
+            f"/v1/agents/{aid}/chat", json={"message": text, "stream": False}, headers=headers
+        )
+
+    overview = (await client.get("/v1/analytics/overview", headers=headers)).json()
+    points = (await client.get("/v1/analytics/series", headers=headers)).json()
+
+    assert sum(p["conversations"] for p in points) == overview["conversations"]
+    assert sum(p["messages"] for p in points) == overview["messages"]
+    assert sum(p["cost_micros"] for p in points) == overview["cost_micros"]
+
+
+async def test_series_can_be_scoped_to_one_agent(client: AsyncClient) -> None:
+    """What the per-agent analytics tab renders."""
+    headers, _ = await _headers(client, "series-agent@example.com")
+    mine = await _fake_agent(client, headers)
+    other = await _fake_agent(client, headers)
+    await client.post(f"/v1/agents/{mine}/chat", json={"message": "m", "stream": False}, headers=headers)
+    await client.post(f"/v1/agents/{other}/chat", json={"message": "o", "stream": False}, headers=headers)
+
+    points = (await client.get(f"/v1/analytics/series?agent_id={mine}", headers=headers)).json()
+    assert sum(p["conversations"] for p in points) == 1
+
+
+async def test_by_agent_still_accounts_for_a_deleted_agents_traffic(client: AsyncClient) -> None:
+    """Found against live data, not invented.
+
+    The `aurozenai` org's entire history — all 9 conversations — belongs to a soft-deleted
+    agent. Filtering the breakdown on `deleted_at IS NULL` made the overview say 9 while
+    every per-agent row said 0, which is exactly the "my dashboard is fake" symptom. Deleting
+    an agent does not un-spend its tokens.
+    """
+    headers, _ = await _headers(client, "deleted-agent@example.com")
+    aid = await _fake_agent(client, headers)
+    await client.post(f"/v1/agents/{aid}/chat", json={"message": "hi", "stream": False}, headers=headers)
+
+    gone = await client.delete(f"/v1/agents/{aid}", headers=headers)
+    assert gone.status_code == 204
+
+    overview = (await client.get("/v1/analytics/overview", headers=headers)).json()
+    rows = (await client.get("/v1/analytics/by-agent", headers=headers)).json()
+
+    assert overview["conversations"] == 1, "deleting an agent must not erase its history"
+    assert sum(r["conversations"] for r in rows) == overview["conversations"]
+
+    row = next(r for r in rows if r["agent_id"] == aid)
+    assert row["deleted"] is True, "flagged, so the UI can explain a name that isn't in the list"
+
+
+async def test_by_agent_omits_a_deleted_agent_that_never_had_traffic(client: AsyncClient) -> None:
+    """The other half of the rule: nothing to attribute means nothing to show."""
+    headers, _ = await _headers(client, "deleted-empty@example.com")
+    kept = await _fake_agent(client, headers)
+    scrapped = await _fake_agent(client, headers)
+    await client.delete(f"/v1/agents/{scrapped}", headers=headers)
+
+    rows = (await client.get("/v1/analytics/by-agent", headers=headers)).json()
+    ids = {r["agent_id"] for r in rows}
+    assert kept in ids, "a live agent with no traffic is a real zero, not a hidden row"
+    assert scrapped not in ids

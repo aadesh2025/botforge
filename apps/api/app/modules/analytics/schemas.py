@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 
 from pydantic import BaseModel
@@ -44,6 +45,54 @@ class UsageBucket(BaseModel):
     tokens_completion: int
     requests: int
     cost_micros: int
+
+
+class DayPoint(BaseModel):
+    """One calendar day of activity.
+
+    Distinct from `UsageBucket` because a chart and a usage table want different things.
+    `UsageBucket` is sparse — it only has rows for days that saw traffic — which is correct
+    for a table and wrong for a time series: plotting sparse points by array index spaces
+    Jul 30, Aug 2 and Aug 6 evenly and draws a straight line through a month of silence.
+    Every day in the range gets a point here, zeros included.
+
+    `conversations` counts conversations *started* that day, which is what "conversations
+    per day" means to an operator. The chart previously plotted assistant message count,
+    since that was the only per-day number the API had.
+    """
+
+    date: dt.date
+    conversations: int
+    messages: int
+    tokens_prompt: int
+    tokens_completion: int
+    cost_micros: int
+
+
+class AgentBucket(BaseModel):
+    """One agent's slice of the org's traffic.
+
+    Named for agents-as-bots. Not to be confused with `AgentPerformanceBucket`, which is one
+    human teammate's inbox workload — the two words collide in this product and the
+    endpoints (`/by-agent` vs `/agents`) are deliberately spelled differently because of it.
+    """
+
+    agent_id: uuid.UUID
+    name: str
+    status: str
+    #: A deleted agent still appears while it has traffic in range — its tokens were really
+    #: spent, and dropping it stops the rows summing to the overview. Flagged so the UI can
+    #: say why a name here isn't in the agent list.
+    deleted: bool = False
+    conversations: int
+    messages: int
+    tokens_prompt: int
+    tokens_completion: int
+    cost_micros: int
+    handoff_rate: float  # 0..1
+    resolution_rate: float  # 0..1
+    #: None when the agent has never been messaged — not an epoch timestamp.
+    last_active_at: dt.datetime | None
 
 
 class LatencyStats(BaseModel):
