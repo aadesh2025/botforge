@@ -214,7 +214,18 @@ async def public_chat_once(
     resolved: tuple[Agent, AgentVersion, Conversation],
     data: schemas.PublicChatRequest,
 ) -> dict[str, Any]:
+    """The non-streaming reply. Must end up with the **guarded** text, not the raw stream.
+
+    L5 runs on the accumulated reply after the provider has finished, so a streaming client has
+    already painted the unguarded version and is told to discard it via a `replace` event
+    (ADR-049). Summing `token` events alone therefore reproduces exactly what the guard removed
+    — unredacted PII, an unrepaired persona break, a replaced prompt leak — while the message
+    written to the database is the corrected one, so nothing afterwards shows that it happened.
+    `{"stream": false}` is public and unauthenticated; the shipped widget streams, but anything
+    built against this endpoint next would have inherited a silent hole.
+    """
     content = ""
+    replaced: str | None = None
     conversation_id = ""
     citations: list[Any] = []
     async for ev in public_chat_events(session, resolved, data):
@@ -222,9 +233,14 @@ async def public_chat_once(
             conversation_id = ev.conversation_id
         elif ev.type == "token" and ev.delta:
             content += ev.delta
+        elif ev.type == "replace":
+            # Supersedes everything accumulated so far — the guard rewrites the whole reply,
+            # it never patches a span. `delta` may legitimately be empty.
+            replaced = ev.delta or ""
         elif ev.type == "citations" and ev.citations:
             citations = ev.citations
-    return {"conversation_id": conversation_id, "content": content.strip(), "citations": citations}
+    final = content if replaced is None else replaced
+    return {"conversation_id": conversation_id, "content": final.strip(), "citations": citations}
 
 
 def visitor_id_for(data: schemas.PublicChatRequest) -> str:
