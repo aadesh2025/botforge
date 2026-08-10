@@ -57,9 +57,17 @@ async def test_public_chat_stream_no_auth(client: AsyncClient) -> None:
 
 
 async def test_public_chat_persists_and_continues(client: AsyncClient) -> None:
+    """Resuming carries the visitor id, exactly as the shipped widget does.
+
+    Both turns used to omit `visitor` entirely, so each request minted its own throwaway
+    `anon-…` id and the second one resumed the first one's conversation anyway. That only
+    worked because nothing checked ownership — see `test_public_chat_hijack.py`.
+    """
     public_key, headers = await _agent_with_key(client, "pub3@example.com")
+    visitor = {"id": "w-continues"}
     first = await client.post(
-        f"/v1/public/agents/{public_key}/chat", json={"message": "one", "stream": False}
+        f"/v1/public/agents/{public_key}/chat",
+        json={"message": "one", "stream": False, "visitor": visitor},
     )
     data = first.json()
     assert data["content"] == "echo: one"
@@ -67,7 +75,7 @@ async def test_public_chat_persists_and_continues(client: AsyncClient) -> None:
 
     second = await client.post(
         f"/v1/public/agents/{public_key}/chat",
-        json={"message": "two", "conversation_id": cid, "stream": False},
+        json={"message": "two", "conversation_id": cid, "stream": False, "visitor": visitor},
     )
     assert second.json()["conversation_id"] == cid
 

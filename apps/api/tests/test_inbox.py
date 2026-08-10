@@ -36,8 +36,12 @@ async def _handoff_agent(client: AsyncClient, headers: dict[str, str]) -> tuple[
     return aid, agent.json()["public_key"]
 
 
-async def _public_chat(client: AsyncClient, key: str, msg: str, cid: str | None = None) -> dict:
-    body = {"message": msg, "stream": False}
+async def _public_chat(
+    client: AsyncClient, key: str, msg: str, cid: str | None = None, visitor: str = "w-inbox"
+) -> dict:
+    """One widget turn. The visitor id is stable across turns because resuming a conversation
+    requires owning it (`test_public_chat_hijack.py`) — the same thing the widget now does."""
+    body: dict = {"message": msg, "stream": False, "visitor": {"id": visitor}}
     if cid:
         body["conversation_id"] = cid
     r = await client.post(f"/v1/public/agents/{key}/chat", json=body)

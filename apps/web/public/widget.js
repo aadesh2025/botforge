@@ -32,17 +32,53 @@
   }
 
   var STORE_KEY = "botforge:conv:" + PUBLIC_KEY;
+  var VISITOR_KEY = "botforge:vid:" + PUBLIC_KEY;
+
+  function stored(key) {
+    try {
+      return localStorage.getItem(key) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function store(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      /* private mode / storage disabled — the widget still works, just doesn't resume */
+    }
+  }
+  function forget(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  // A stable id for this browser, stored beside the conversation id and sent on every turn.
+  // The server resumes a conversation only for the visitor that started it, so without this
+  // the API would mint a fresh anonymous id per request and no anonymous chat could continue
+  // past its first message. Not a credential — it is a continuity key, and the server treats
+  // it as one: the worst it can do is resume a conversation on the device that created it.
+  function visitorId() {
+    var id = stored(VISITOR_KEY);
+    if (!id) {
+      id =
+        "w-" +
+        Date.now().toString(36) +
+        "-" +
+        Math.random().toString(36).slice(2, 10);
+      store(VISITOR_KEY, id);
+    }
+    return id;
+  }
+
   var listeners = {};
   var state = {
     open: false,
     config: null,
-    conversationId: (function () {
-      try {
-        return localStorage.getItem(STORE_KEY) || null;
-      } catch (e) {
-        return null;
-      }
-    })(),
+    conversationId: stored(STORE_KEY),
     visitor: {},
     sending: false,
     hasConversation: false,
@@ -598,17 +634,41 @@
     var cites = null;
     emit("message", { role: "user", content: text });
 
-    try {
-      var resp = await fetch(API + "/v1/public/agents/" + PUBLIC_KEY + "/chat", {
+    // `id` is always sent so the server can tell this visitor's conversation from anyone
+    // else's; anything the host page passed to `setUser()` rides alongside it.
+    function chatBody(conversationId) {
+      var visitor = { id: visitorId() };
+      for (var k in state.visitor) {
+        if (Object.prototype.hasOwnProperty.call(state.visitor, k)) visitor[k] = state.visitor[k];
+      }
+      if (!visitor.id) visitor.id = visitorId();
+      return JSON.stringify({
+        message: full,
+        conversation_id: conversationId,
+        stream: true,
+        visitor: visitor,
+      });
+    }
+
+    function post(conversationId) {
+      return fetch(API + "/v1/public/agents/" + PUBLIC_KEY + "/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: full,
-          conversation_id: state.conversationId,
-          stream: true,
-          visitor: Object.keys(state.visitor).length ? state.visitor : undefined,
-        }),
+        body: chatBody(conversationId),
       });
+    }
+
+    try {
+      var resp = await post(state.conversationId);
+      // The stored conversation is gone, or belongs to someone else on a shared device.
+      // Drop it and start a fresh thread rather than dead-ending the visitor on an error —
+      // this is also the path that retires conversations created before ownership was
+      // enforced, whose anonymous id no browser can present.
+      if (resp.status === 404 && state.conversationId) {
+        forget(STORE_KEY);
+        state.conversationId = null;
+        resp = await post(null);
+      }
       if (!resp.ok || !resp.body) throw new Error("chat request failed (" + resp.status + ")");
       var reader = resp.body.getReader();
       var decoder = new TextDecoder();
@@ -632,9 +692,7 @@
           }
           if (ev.type === "conversation" && ev.conversation_id) {
             state.conversationId = ev.conversation_id;
-            try {
-              localStorage.setItem(STORE_KEY, ev.conversation_id);
-            } catch (e2) {}
+            store(STORE_KEY, ev.conversation_id);
             ensureSubscription(ev.conversation_id);
           } else if (ev.type === "citations" && ev.citations) {
             // Emitted once, before the provider stream. Held until the reply finishes so

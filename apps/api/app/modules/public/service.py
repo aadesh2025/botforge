@@ -121,6 +121,18 @@ def _visitor_profile(visitor: schemas.Visitor | None) -> ContactProfile:
 async def _get_or_create_conversation(
     session: AsyncSession, agent: Agent, data: schemas.PublicChatRequest, visitor_id: str
 ) -> Conversation:
+    """Resume the visitor's own conversation, or start a new one.
+
+    **Resuming requires owning it.** A `conversation_id` is not a secret: it lives in the
+    embedding page's `localStorage`, and leaks through browser history, a screenshot, a pasted
+    support link or a referrer. Without the `channel_user_id` check below, presenting one was
+    enough to read *and* post into a stranger's entire thread with a 200 — the whole transcript
+    is then handed to the model as history, so "summarise what we discussed" reads it back out.
+
+    A mismatch returns the same 404 as a conversation that does not exist. Distinguishing
+    "exists but is not yours" would confirm an id is live, which is an enumeration oracle on a
+    public, unauthenticated route.
+    """
     if data.conversation_id is not None:
         conv = await session.get(Conversation, data.conversation_id)
         if (
@@ -128,6 +140,7 @@ async def _get_or_create_conversation(
             or conv.agent_id != agent.id
             or conv.organization_id != agent.organization_id
             or conv.channel != "widget"
+            or conv.channel_user_id != visitor_id
         ):
             raise AppError("public.conversation_not_found", "Conversation not found.", 404)
         return conv
@@ -157,11 +170,29 @@ async def _get_or_create_conversation(
     return conv
 
 
-async def public_chat_events(
+async def resolve_turn(
     session: AsyncSession, public_key: str, data: schemas.PublicChatRequest, visitor_id: str
-) -> AsyncIterator[StreamEvent]:
+) -> tuple[Agent, AgentVersion, Conversation]:
+    """Everything that can legitimately 4xx, done **before** any response has started.
+
+    Both rejections here — unknown agent, and a conversation that is missing or not this
+    visitor's — have to reach the client as an ordinary typed error. Resolving them inside the
+    streaming generator instead means the status line and headers are already on the wire when
+    the error is raised, so Starlette can only abort mid-body: the caller sees a truncated 200
+    and the widget's 404 recovery never fires. Caught by
+    `test_public_chat_hijack.py::test_the_streaming_path_is_guarded_too`.
+    """
     agent, version = await _resolve_agent(session, public_key)
     conv = await _get_or_create_conversation(session, agent, data, visitor_id)
+    return agent, version, conv
+
+
+async def public_chat_events(
+    session: AsyncSession,
+    resolved: tuple[Agent, AgentVersion, Conversation],
+    data: schemas.PublicChatRequest,
+) -> AsyncIterator[StreamEvent]:
+    agent, version, conv = resolved
 
     yield StreamEvent(type="conversation", conversation_id=str(conv.id))
     turn = InboundTurn(session, agent, version, conv, data.message)
@@ -170,19 +201,23 @@ async def public_chat_events(
 
 
 async def public_chat_sse(
-    session: AsyncSession, public_key: str, data: schemas.PublicChatRequest, visitor_id: str
+    session: AsyncSession,
+    resolved: tuple[Agent, AgentVersion, Conversation],
+    data: schemas.PublicChatRequest,
 ) -> AsyncIterator[str]:
-    async for ev in public_chat_events(session, public_key, data, visitor_id):
+    async for ev in public_chat_events(session, resolved, data):
         yield f"data: {ev.model_dump_json()}\n\n"
 
 
 async def public_chat_once(
-    session: AsyncSession, public_key: str, data: schemas.PublicChatRequest, visitor_id: str
+    session: AsyncSession,
+    resolved: tuple[Agent, AgentVersion, Conversation],
+    data: schemas.PublicChatRequest,
 ) -> dict[str, Any]:
     content = ""
     conversation_id = ""
     citations: list[Any] = []
-    async for ev in public_chat_events(session, public_key, data, visitor_id):
+    async for ev in public_chat_events(session, resolved, data):
         if ev.type == "conversation" and ev.conversation_id:
             conversation_id = ev.conversation_id
         elif ev.type == "token" and ev.delta:

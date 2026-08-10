@@ -76,12 +76,16 @@ async def public_chat(
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse | dict[str, Any]:
     visitor_id = service.visitor_id_for(data)
+    # Resolved here rather than inside the generator so an unknown agent or a conversation that
+    # is not this visitor's returns a normal typed 404 — once a StreamingResponse has begun,
+    # the status is already sent and the error can only truncate the body.
+    resolved = await service.resolve_turn(session, public_key, data, visitor_id)
     if data.stream:
         return StreamingResponse(
-            service.public_chat_sse(session, public_key, data, visitor_id),
+            service.public_chat_sse(session, resolved, data),
             media_type="text/event-stream",
         )
-    return await service.public_chat_once(session, public_key, data, visitor_id)
+    return await service.public_chat_once(session, resolved, data)
 
 
 @router.websocket("/agents/{public_key}/ws")
@@ -97,7 +101,15 @@ async def public_chat_ws(websocket: WebSocket, public_key: str) -> None:
                     await websocket.send_json({"type": "error", "error": f"bad request: {exc}"})
                     continue
                 visitor_id = service.visitor_id_for(data)
-                async for ev in service.public_chat_events(session, public_key, data, visitor_id):
+                try:
+                    resolved = await service.resolve_turn(session, public_key, data, visitor_id)
+                except AppError as exc:
+                    # An unknown agent or someone else's conversation. A rejected frame is not
+                    # a broken socket — report it and keep listening, the same way a malformed
+                    # frame is handled above.
+                    await websocket.send_json({"type": "error", "error": exc.code})
+                    continue
+                async for ev in service.public_chat_events(session, resolved, data):
                     await websocket.send_text(ev.model_dump_json())
                 await session.commit()
         except WebSocketDisconnect:
