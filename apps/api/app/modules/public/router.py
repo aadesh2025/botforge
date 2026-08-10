@@ -95,6 +95,16 @@ async def public_chat_ws(websocket: WebSocket, public_key: str) -> None:
         try:
             while True:
                 payload = await websocket.receive_json()
+                # One session serves the whole socket, and `SessionFactory` sets
+                # `expire_on_commit=False`, so without this every row this connection has ever
+                # loaded stays in the identity map at its first-read values for the life of the
+                # socket. `session.get()` then answers from cache and never re-queries. That
+                # silently pins the org's `public_contacts` (the PII allowlist), its guard
+                # toggles, and the agent's published version to whatever they were when the
+                # socket opened — an operator publishing a support address mid-chat would see
+                # it ignored until the visitor reconnected. Each HTTP request gets a fresh
+                # session and so never had this problem; the socket has to ask for it.
+                session.expire_all()
                 try:
                     data = schemas.PublicChatRequest(**payload)
                 except Exception as exc:  # malformed client frame
