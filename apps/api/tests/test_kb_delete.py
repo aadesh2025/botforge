@@ -105,7 +105,7 @@ async def test_deleting_leaves_the_attached_agent_answering_without_context(
 
     from sqlalchemy import select
 
-    from app.models import Agent, AgentVersion
+    from app.models import AgentVersion
     from app.rag.agent_retrieval import retrieve_for_version
 
     headers = await _headers(client)
