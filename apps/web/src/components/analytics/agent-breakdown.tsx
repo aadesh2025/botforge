@@ -146,7 +146,12 @@ export function AgentBreakdown({
               <td className="px-3 py-2.5 text-right font-mono text-xs text-muted">
                 {formatRate(b.resolution_rate, b.conversations)}
               </td>
-              <td className="px-3 py-2.5 text-right font-mono text-xs text-muted">
+              {/* The split is what makes the total checkable: these are the provider's own
+                  per-reply `usage` numbers summed, not an estimate from the text. */}
+              <td
+                className="px-3 py-2.5 text-right font-mono text-xs text-muted"
+                title={`${b.tokens_prompt.toLocaleString()} prompt + ${b.tokens_completion.toLocaleString()} completion`}
+              >
                 {compact(b.tokens_prompt + b.tokens_completion)}
               </td>
               <td className="px-3 py-2.5 text-right font-mono text-xs text-muted">

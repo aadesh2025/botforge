@@ -184,6 +184,32 @@ export default function AnalyticsPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section className="rounded-lg border border-border bg-surface">
           <div className="border-b border-border p-5">
+            <h3 className="font-display text-base font-semibold text-text">Tokens by agent</h3>
+            <p className="text-sm text-muted">
+              Prompt + completion, as reported by the provider for each reply.
+            </p>
+          </div>
+          <div className="p-5">
+            {(byAgent ?? []).every((b) => b.tokens_prompt + b.tokens_completion === 0) ? (
+              <p className="text-sm text-muted">No usage yet.</p>
+            ) : (
+              <BarList
+                items={(byAgent ?? [])
+                  .map((b) => ({
+                    label: b.deleted ? `${b.name} (deleted)` : b.name,
+                    value: b.tokens_prompt + b.tokens_completion,
+                  }))
+                  // Agents that never ran would otherwise render a row of zero-width bars.
+                  .filter((i) => i.value > 0)
+                  .sort((a, b) => b.value - a.value)}
+                format={(n) => compact(n)}
+              />
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-border bg-surface">
+          <div className="border-b border-border p-5">
             <h3 className="font-display text-base font-semibold text-text">Tokens by provider</h3>
           </div>
           <div className="p-5">

@@ -75,6 +75,15 @@ describe("AgentBreakdown", () => {
     expect(within(row).queryByRole("link")).not.toBeInTheDocument();
   });
 
+  it("totals tokens from the provider's own prompt/completion split, and shows it", () => {
+    // The number has to be checkable: it is the sum of the `usage` each provider reported
+    // per reply, not an estimate from the message text. Exposing the split is what lets
+    // someone reconcile the headline against the messages table.
+    render(<AgentBreakdown buckets={[bucket({ tokens_prompt: 9000, tokens_completion: 1200 })]} />);
+    const cell = screen.getByTitle("9,000 prompt + 1,200 completion");
+    expect(cell).toHaveTextContent("10.2K");
+  });
+
   it("prompts a brand-new org instead of rendering an empty table", () => {
     render(<AgentBreakdown buckets={[]} />);
     expect(screen.getByText("No agents yet")).toBeInTheDocument();
