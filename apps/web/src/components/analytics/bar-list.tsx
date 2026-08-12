@@ -4,14 +4,19 @@ export function BarList({
   items,
   format = (n) => compact(n),
 }: {
-  items: { label: string; value: number }[];
+  /**
+   * `label` is display text and is NOT unique — two agents may share a name, and
+   * two channel keys may map to one label. Pass `id` wherever the source row has
+   * a stable identifier; it is what keys the row.
+   */
+  items: { id?: string; label: string; value: number }[];
   format?: (n: number) => string;
 }) {
   const max = Math.max(...items.map((i) => i.value), 1);
   return (
     <div className="space-y-3">
-      {items.map((item) => (
-        <div key={item.label} className="space-y-1.5">
+      {items.map((item, i) => (
+        <div key={item.id ?? `${item.label}:${i}`} className="space-y-1.5">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted">{item.label}</span>
             <span className="font-mono text-xs text-text">{format(item.value)}</span>

@@ -171,6 +171,7 @@ export default function AnalyticsPage() {
             ) : (
               <BarList
                 items={(usageChannel ?? []).map((b) => ({
+                  id: b.key,
                   label: channelMeta(b.key).label,
                   value: b.tokens_prompt + b.tokens_completion,
                 }))}
@@ -196,6 +197,7 @@ export default function AnalyticsPage() {
               <BarList
                 items={(byAgent ?? [])
                   .map((b) => ({
+                    id: b.agent_id,
                     label: b.deleted ? `${b.name} (deleted)` : b.name,
                     value: b.tokens_prompt + b.tokens_completion,
                   }))
@@ -218,6 +220,7 @@ export default function AnalyticsPage() {
             ) : (
               <BarList
                 items={(usageProvider ?? []).map((b) => ({
+                  id: b.key,
                   label: b.key,
                   value: b.tokens_prompt + b.tokens_completion,
                 }))}
