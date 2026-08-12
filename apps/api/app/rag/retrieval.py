@@ -6,11 +6,12 @@ import uuid
 from typing import Any
 
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.base import EmbeddingProvider
 from app.models import Chunk
+from app.rag import fts
 
 # Reciprocal-rank-fusion constant (standard default).
 _RRF_K = 60
@@ -61,17 +62,28 @@ async def _vector_hits(
     return [(row[0], 1.0 - float(row[1])) for row in rows]
 
 
-async def _fts_hits(
-    session: AsyncSession,
+def fts_statement(
     org_id: uuid.UUID,
     kb_ids: list[uuid.UUID],
     query: str,
     limit: int,
-) -> list[tuple[Chunk, float]]:
-    tsvector = func.to_tsvector("english", Chunk.content)
-    tsquery = func.plainto_tsquery("english", query)
+    fts_config: str | None = None,
+) -> Select[tuple[Chunk, float]]:
+    """The keyword-half SELECT. Split out from `_fts_hits` so a test can compile it.
+
+    Whether this statement reaches `ix_chunks_content_fts` is the whole of task P0-1, and a
+    test that needs a live session to find out would not have run in CI at all.
+    """
+    # The regconfig is a LITERAL, never a bind parameter: `ix_chunks_content_fts` is an
+    # expression index on `to_tsvector('english', content)`, and the planner can only use it
+    # when the expressions match exactly. See `rag/fts.py` for the measured EXPLAIN.
+    config = fts.regconfig(fts_config)
+    tsvector = func.to_tsvector(config, Chunk.content)
+    # The *query* side takes a bind parameter for the text, which is correct and must stay
+    # that way — only the config has to be constant for the index to match.
+    tsquery = func.plainto_tsquery(config, query)
     rank = func.ts_rank(tsvector, tsquery).label("rank")
-    stmt = (
+    return (
         select(Chunk, rank)
         .where(
             Chunk.organization_id == org_id,
@@ -81,6 +93,17 @@ async def _fts_hits(
         .order_by(rank.desc())
         .limit(limit)
     )
+
+
+async def _fts_hits(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    kb_ids: list[uuid.UUID],
+    query: str,
+    limit: int,
+    fts_config: str | None = None,
+) -> list[tuple[Chunk, float]]:
+    stmt = fts_statement(org_id, kb_ids, query, limit, fts_config)
     rows = (await session.execute(stmt)).all()
     return [(row[0], float(row[1])) for row in rows]
 
@@ -95,8 +118,13 @@ async def search(
     top_k: int = 5,
     score_threshold: float = 0.0,
     hybrid: bool = True,
+    fts_config: str | None = None,
 ) -> list[Citation]:
-    """Return the top-k most relevant chunks for `query`, filtered by `organization_id`."""
+    """Return the top-k most relevant chunks for `query`, filtered by `organization_id`.
+
+    `fts_config` is the Postgres text-search configuration for the keyword half — the owning
+    knowledge base's `fts_config`. `None` means English.
+    """
     if not kb_ids or not query.strip():
         return []
 
@@ -108,7 +136,7 @@ async def search(
     if not hybrid:
         return [_to_citation(c, s) for c, s in vector_hits[:top_k]]
 
-    fts_hits = await _fts_hits(session, org_id, kb_ids, query, fetch)
+    fts_hits = await _fts_hits(session, org_id, kb_ids, query, fetch, fts_config)
 
     # Reciprocal rank fusion across the two ranked lists.
     fused: dict[uuid.UUID, float] = {}

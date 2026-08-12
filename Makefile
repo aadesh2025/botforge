@@ -3,7 +3,7 @@ COMPOSE := docker compose -f infra/docker-compose.yml
 API := apps/api
 WEB := apps/web
 
-.PHONY: help up down logs dev-api dev-web install lint fmt typecheck test test-api test-web test-e2e migrate seed clean-devdata
+.PHONY: help up down logs dev-api dev-web install lint fmt typecheck test test-api test-web test-e2e migrate seed clean-devdata explain-fts eval-retrieval
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -57,6 +57,9 @@ test-e2e: ## Playwright suite, then sweep the @example.com fixtures it created
 
 clean-devdata: ## Remove ephemeral @example.com test users/orgs + the live_demo flag (dev only)
 	cd $(API) && uv run python -m app.db.cleanup_devdata
+
+explain-fts: ## EXPLAIN the hybrid-retrieval keyword query — proves it uses the GIN index (P0-1)
+	cd $(API) && uv run python ../../scripts/explain_fts.py
 
 provision: ## Provision a client end-to-end: make provision NAME="Acme Co" EMAIL=owner@acme.com
 	node scripts/provision-client.mjs --name "$(NAME)" --email "$(EMAIL)" --plan "$(or $(PLAN),starter)"
