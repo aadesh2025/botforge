@@ -30,16 +30,15 @@ to the default, so only a name from the frozenset below can ever reach the f-str
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, get_args
 
-from sqlalchemy import literal_column
+from sqlalchemy import Text, cast, func, literal_column
+from sqlalchemy.dialects.postgresql import TSQUERY
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.logging import get_logger
 
 log = get_logger("rag.fts")
-
-DEFAULT_CONFIG = "english"
 
 #: The text-search configurations PostgreSQL 16 ships (``select cfgname from pg_ts_config``),
 #: read off the running database rather than a changelog.
@@ -50,39 +49,46 @@ DEFAULT_CONFIG = "english"
 #: language (docs/11 §9.2a) that is the difference between the keyword half of hybrid retrieval
 #: being degraded and it being genuinely useful, so the correction is worth more than the fix.
 #: `simple` (tokenise, never stem) stays the right answer for a language with no entry here.
-SUPPORTED_CONFIGS: frozenset[str] = frozenset(
-    {
-        "simple",
-        "arabic",
-        "armenian",
-        "basque",
-        "catalan",
-        "danish",
-        "dutch",
-        "english",
-        "finnish",
-        "french",
-        "german",
-        "greek",
-        "hindi",
-        "hungarian",
-        "indonesian",
-        "irish",
-        "italian",
-        "lithuanian",
-        "nepali",
-        "norwegian",
-        "portuguese",
-        "romanian",
-        "russian",
-        "serbian",
-        "spanish",
-        "swedish",
-        "tamil",
-        "turkish",
-        "yiddish",
-    }
-)
+#:
+#: Declared as a `Literal` and the frozenset derived from it, not the other way round: the API
+#: schema needs a static type (mypy rejects `Literal[*sorted(some_set)]`, and a dynamic one
+#: produces no enum in the OpenAPI document), while the query path needs cheap membership
+#: checks. One declaration, both uses, nothing to drift.
+FtsConfigName = Literal[
+    "simple",
+    "arabic",
+    "armenian",
+    "basque",
+    "catalan",
+    "danish",
+    "dutch",
+    "english",
+    "finnish",
+    "french",
+    "german",
+    "greek",
+    "hindi",
+    "hungarian",
+    "indonesian",
+    "irish",
+    "italian",
+    "lithuanian",
+    "nepali",
+    "norwegian",
+    "portuguese",
+    "romanian",
+    "russian",
+    "serbian",
+    "spanish",
+    "swedish",
+    "tamil",
+    "turkish",
+    "yiddish",
+]
+
+SUPPORTED_CONFIGS: frozenset[str] = frozenset(get_args(FtsConfigName))
+
+DEFAULT_CONFIG: FtsConfigName = "english"
 
 
 def normalize_config(name: str | None) -> str:
@@ -118,3 +124,41 @@ def regconfig(name: str | None = None) -> ColumnElement[Any]:
     config = normalize_config(name)
     # Safe: `config` is a member of SUPPORTED_CONFIGS, which contains only `[a-z]+` names.
     return literal_column(f"'{config}'::regconfig")
+
+
+def any_term_tsquery(config: ColumnElement[Any], query: str | ColumnElement[Any]) -> ColumnElement[Any]:
+    """A tsquery matching **any** of the query's terms, ranked — not all of them.
+
+    `plainto_tsquery` joins every lexeme with `&`, so it only matches a chunk containing all of
+    them. That is right for a search box and wrong for a support bot, because a customer types a
+    sentence::
+
+        plainto_tsquery('english', "ordered a kurta to delhi last week and it doesn't
+                                    suit me, how long have i got")
+        -> 'order' & 'kurta' & 'delhi' & 'last' & 'week' & 'doesnt' & 'suit' & 'long' & 'got'
+
+    No chunk contains all nine, so the keyword half returned nothing. Measured on the frozen
+    eval corpus it scored **NDCG@10 0.0278 — one query in thirty-six** — and because RRF then
+    had a single list to fuse, `hybrid` came out byte-identical to `dense`. The hybrid retrieval
+    this product advertises was dense-only in production.
+
+    ORing the terms turns the keyword half into what it was supposed to be: a recall stage whose
+    *ranking* discriminates. `ts_rank` already accounts for how many query terms a chunk matches
+    and how often, so a chunk hitting six terms outranks one hitting two, and RRF fuses two
+    genuinely independent orderings.
+
+    **Why `replace(...::text, '&', '|')` and not something tidier.** `plainto_tsquery` has
+    already done the work that matters — stemming under the right dictionary, stopword removal,
+    and correct quoting of each lexeme — and its output is only ever `&`-joined lexemes (phrase
+    operators come from `phraseto_tsquery`, which we do not use). Rebuilding the query from
+    `tsvector_to_array` would have to re-quote lexemes by hand and get it wrong on the first
+    apostrophe. Checked against the cases that would break a naive substitution:
+
+        'R&D budget & cost' -> 'r' | 'd' | 'budget' | 'cost'   (& is a separator, never a lexeme)
+        'the and of'        -> <empty>                          (matches nothing, no error)
+        ''                  -> <empty>
+
+    ADR-062.
+    """
+    plain = func.plainto_tsquery(config, query)
+    return cast(func.replace(cast(plain, Text), "&", "|"), TSQUERY)

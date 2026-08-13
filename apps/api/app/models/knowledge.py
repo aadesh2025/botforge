@@ -30,6 +30,16 @@ class KnowledgeBase(Base, UUIDPrimaryKey, TimestampMixin, SoftDeleteMixin):
     embedding_model: Mapped[str] = mapped_column(String(128), default="nomic-embed-text", nullable=False)
     chunk_size: Mapped[int] = mapped_column(Integer, default=1000, nullable=False)
     chunk_overlap: Mapped[int] = mapped_column(Integer, default=150, nullable=False)
+    #: Postgres text-search configuration for the keyword half of hybrid retrieval. Per-KB
+    #: rather than per-org: a client can legitimately keep an English product manual and a
+    #: Tamil FAQ side by side, and one setting for both makes one of them worse.
+    #:
+    #: A stemmer is language-specific and applying the wrong one is not a small error —
+    #: `to_tsvector('english', <Tamil>)` produces tokens that stem nothing and match nothing,
+    #: which is why docs/11 §9.2a's "L1 is English-first" gap has a retrieval-side twin. Only
+    #: names in `rag.fts.SUPPORTED_CONFIGS` are accepted; `simple` (tokenise, never stem) is
+    #: the honest fallback for a language Postgres has no dictionary for.
+    fts_config: Mapped[str] = mapped_column(String(32), default="english", nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
 
 

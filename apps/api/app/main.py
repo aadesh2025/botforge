@@ -35,6 +35,7 @@ from app.modules.macros.router import inbox_router as macros_inbox_router
 from app.modules.macros.router import router as macros_router
 from app.modules.orgs.router import router as orgs_router
 from app.modules.public.router import router as public_router
+from app.rag import rerank
 from app.realtime.hub import hub
 from app.tools.router import router as tools_router
 from app.webhooks.router import router as webhooks_router
@@ -77,6 +78,7 @@ def _warn_missing_secrets() -> None:
         log.warning("missing_key", service="n8n", effect="disabled; set N8N_API_KEY")
     _warn_malformed_keys()
     guard_models.warn_if_unconfigured()
+    rerank.warn_if_misconfigured()
 
 
 # A credential can't contain these and still be valid, so their presence means a typo or a

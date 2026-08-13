@@ -186,6 +186,49 @@ Two standing rules from that spec, repeated here because they are easy to violat
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-13 — docs/13 executed: the eval harness went first and immediately found two bugs
+- **`docs/13-AI-COOKBOOK-REVIEW.md` implemented in its own §5 priority order.** R2 (eval harness),
+  P0-1 (FTS index), R1 (reranker), R4b (per-KB FTS language) shipped. **R3 (Docling) and R5
+  (tool-call approval) deliberately not started** — see docs/13 §8 for why each was sequenced out
+  rather than narrowed away.
+- **⚠️ The hybrid retrieval this product advertises was dense-only in production.** `_fts_hits`
+  built its query with `plainto_tsquery`, which joins every lexeme with `&`. A customer types a
+  sentence, so "ordered a kurta to delhi last week and it doesn't suit me, how long have i got"
+  became nine ANDed stems and matched no chunk: **NDCG@10 0.0278, one query in thirty-six.** With
+  one non-empty list, RRF had nothing to fuse and `hybrid` scored **byte-identically to `dense`**.
+  docs/13 §1 called that stage "done". Fixed to an any-term tsquery (ADR-062) → **0.6604**.
+- **⚠️ Fixing it then made `hybrid` regress below `dense`** (0.8977 → 0.8162) — textbook RRF
+  weights both lists equally and these two are not comparable. Now weighted (ADR-058, default
+  **0.05**). **That default is a floor chosen to avoid shipping a measured regression, not a fitted
+  optimum**, and the ADR says so: per-query, fusion beat *both* retrievers where the keyword list
+  had signal (q001 0.37/0.52 → 0.92). A relative `ts_rank` floor was built and then **deleted** —
+  the noise is at the top of the keyword list, not its tail, and it moved NDCG by ≤0.01.
+- **⚠️ The corpus had a hole and the first weight sweep found it.** Every query was written with
+  deliberately low lexical overlap, which is a fair test of dense retrieval and a **rigged one
+  against keyword search** — so the sweep "proved" hybrid was worthless at every weight. Ten
+  exact-identifier queries (order refs, decline codes, style codes, form numbers) were added
+  before any constant was tuned. **Do not fit a production constant to a benchmark you have not
+  checked for blind spots.**
+- **P0-1 is measured, not asserted**, which is what docs/14 §0 asked for. PostgreSQL 16.14, with
+  `enable_seqscan=off`: literal regconfig → `Bitmap Index Scan on ix_chunks_content_fts`; bind
+  parameter under `force_generic_plan` → `Seq Scan (cost=10000000000.00..)`. The custom-plan
+  escape hatch only covers a prepared statement's first ~5 executions, and asyncpg pools
+  connections — so production graduates to the generic plan and scans the whole table.
+  `make explain-fts` prints both and exits 1 if the literal form stops matching.
+- **⚠️ docs/13 R4b and docs/14 §5.4 are both wrong that Postgres ships no Tamil/Hindi dictionary.**
+  PostgreSQL 16 ships both, and `tamil` genuinely stems (`கொள்கைகள்` → `கொள்கை`) rather than
+  aliasing `simple`. Corrected in code with a test pinning it. Migration 0019 adds
+  `knowledge_bases.fts_config` **plus a per-config GIN index** — changing the regconfig without one
+  is P0-1 reintroduced through the front door.
+- **The reranker is built and enabled nowhere** (ADR-063). Platform key never `resolve_credential()`
+  (the ADR-055 rule), off platform-wide *and* per agent, fails open to RRF order, own metrics
+  bucket. docs/14 K4-4 wants a measured p50/p95 delta on a real deployment first.
+- **⚠️ The seed eval corpus was hand-authored in the same session as the code** — the exact
+  unfalsifiability docs/11 Phase D exists to remove. Stated in `app/rag/evaluate.py` §2 rather than
+  implied away. Generating one from a real client KB is the outstanding follow-up.
+- ADR-058/061/062/063. Migration 0019. Suites: **pytest**, **181 vitest**, ruff + mypy + tsc +
+  eslint clean. CI gains two retrieval steps, separate from the main suite for Phase D's reason.
+
 ### 2026-08-10 — first live run of docs/12; four fixes, two of which needed a second half
 - **`docs/12-AGENT-TEST-CHECKLIST.md` run end to end against the published `aurozenai` agent**
   over the real widget endpoint: 61 items, **45 pass · 6 partial · 8 fail · 2 N/A**. Results and

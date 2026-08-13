@@ -97,7 +97,14 @@ async def _knowledge_search(ctx: ToolContext, args: dict[str, Any]) -> ToolResul
 
     embedder = build_embedding_provider(kbs[0].embedding_provider, kbs[0].embedding_model)
     citations = await retrieval.search(
-        ctx.session, ctx.org_id, [kb.id for kb in kbs], query, embedder, top_k=top_k, hybrid=True
+        ctx.session,
+        ctx.org_id,
+        [kb.id for kb in kbs],
+        query,
+        embedder,
+        top_k=top_k,
+        hybrid=True,
+        fts_config=kbs[0].fts_config,
     )
     results = [
         {

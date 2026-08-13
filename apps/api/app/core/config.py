@@ -57,6 +57,39 @@ class Settings(BaseSettings):
     upload_dir: str = "./var/uploads"
     # Ceiling on characters of retrieved context injected into a prompt (token budgeting).
     rag_context_char_budget: int = 8000
+    # Weight of the keyword (Postgres FTS) list in the hybrid RRF fusion; the dense list is
+    # always 1.0. Textbook RRF weights every list equally, which assumes the two retrievers are
+    # comparable. Measured on the frozen eval corpus they are not — dense NDCG@10 0.898 against
+    # keyword 0.660 — and equal weighting dragged hybrid to 0.816, i.e. *below* dense-only.
+    #
+    # 0.05 is the highest weight at which hybrid does not regress against dense-only on the
+    # only evidence there is (ADR-058 records the full sweep, including what it does NOT
+    # establish). Deliberately conservative rather than tuned until it looked good: the seed
+    # corpus is 36 short documents and cannot show where keyword search earns its keep. Re-fit
+    # it with `make eval-retrieval-full` against a real client KB before raising it.
+    rag_rrf_fts_weight: float = 0.05
+
+    # --- Reranking (docs/13 R1, docs/14 K4) ---
+    # Stage 4: a cross-encoder reorders the fused RRF candidates. OFF platform-wide and off per
+    # agent, because it costs a network round trip *before* generation starts — straight out of
+    # the NFR-1 p50 417 ms first-token budget. Enabling it is a latency decision, not a default
+    # anyone should inherit. Fails open to RRF ordering (ADR-051's rule, restated in ADR-063).
+    rerank_enabled: bool = False
+    # A `/rerank` endpoint. Self-hosted text-embeddings-inference is the recommended shape
+    # (docs/14 §5.3): client KB text never leaves the deployment, and bge-reranker-v2-m3 is
+    # trained multilingual, which matters where Tamil is a first language (docs/11 §9.2a).
+    # Empty with rerank_enabled=true is a misconfiguration and warns at startup.
+    rerank_endpoint: str = ""
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    # PLATFORM credential, never the org's (ADR-063). A self-hosted TEI container needs none.
+    rerank_api_key: str | None = None
+    # How many fused candidates to rerank. The cookbook uses 50; more candidates is more recall
+    # for the cross-encoder to rescue, at a linear cost in the reranker.
+    rerank_candidate_k: int = 50
+    # Availability budget. Wider than L2's 300ms because a cross-encoder over 50 passages is
+    # real work, but still bounded: on timeout the turn proceeds on RRF ordering.
+    rerank_timeout_ms: int = 800
+
     # Run Celery tasks inline (no broker/worker) — handy in dev/tests. Off in prod.
     celery_task_always_eager: bool = False
     # Force every chat + embedding call onto the deterministic Fake provider,

@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.llm.registry import build_embedding_provider
 from app.models import AgentVersion, KnowledgeBase
-from app.rag import retrieval
+from app.rag import rerank, retrieval
 from app.rag.context import build_context_block
 from app.rag.retrieval import Citation
 
@@ -39,6 +39,10 @@ async def retrieve_for_version(
         return "", []
     # KBs bound to one agent are expected to share an embedding model; use the first.
     embedder = build_embedding_provider(kbs[0].embedding_provider, kbs[0].embedding_model)
+    # Stage 4 is opt-in per agent AND platform-wide, and defaults off in both places: it spends
+    # a network round trip before the first token, straight out of the NFR-1 p50 417 ms budget.
+    # An agent that has not asked for it gets `NoOpReranker`, i.e. today's behaviour exactly.
+    reranker = rerank.build_reranker() if rag.get("rerank") else None
     try:
         citations = await retrieval.search(
             session,
@@ -49,6 +53,10 @@ async def retrieve_for_version(
             top_k=int(rag.get("top_k", 5)),
             score_threshold=float(rag.get("score_threshold", 0.0)),
             hybrid=bool(rag.get("hybrid", True)),
+            # KBs bound to one agent share an embedding model; the same assumption applies to
+            # the text-search dictionary, so the first KB's config drives the keyword half.
+            fts_config=kbs[0].fts_config,
+            reranker=reranker,
         )
     except Exception as exc:  # retrieval failure shouldn't break the chat
         log.warning("rag_retrieval_failed", agent_version=version.version, error=str(exc))

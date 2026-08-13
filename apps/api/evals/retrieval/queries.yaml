@@ -126,3 +126,42 @@
 
 - id: q036
   text: "what should i bring with me to a fitting"
+
+# ── exact-identifier queries ─────────────────────────────────────────────────────────────
+#
+# The half of the threat model q001-q036 could not see. These deliberately DO reuse the
+# document's own tokens, because that is how a customer actually writes them: nobody
+# paraphrases an order reference. This is where dense retrieval degrades (an embedding of
+# `AZ-2026-004417` carries almost no signal) and keyword search is exact, and without them the
+# weight sweep was measuring only the case that favours embeddings.
+
+- id: q037
+  text: "my order AZ-2026-004417 still hasn't shipped"
+  note: "exact identifier; an embedding of a reference number carries almost no signal"
+
+- id: q038
+  text: "what does decline code E51 mean"
+
+- id: q039
+  text: "card came back as E91, should i try again"
+
+- id: q040
+  text: "is style WC-KUR-2201 still in stock"
+
+- id: q041
+  text: "what does SHR mean in the code on the label"
+
+- id: q042
+  text: "do you ship with bluedart or delhivery"
+
+- id: q043
+  text: "where do i get form QF-12"
+
+- id: q044
+  text: "i still have a QF-08, is that alright"
+
+- id: q045
+  text: "is there a store in coimbatore"
+
+- id: q046
+  text: "what is the AZ number on my invoice for"

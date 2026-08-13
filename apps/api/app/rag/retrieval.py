@@ -9,9 +9,10 @@ from pydantic import BaseModel
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.llm.base import EmbeddingProvider
 from app.models import Chunk
-from app.rag import fts
+from app.rag import fts, rerank
 
 # Reciprocal-rank-fusion constant (standard default).
 _RRF_K = 60
@@ -79,9 +80,10 @@ def fts_statement(
     # when the expressions match exactly. See `rag/fts.py` for the measured EXPLAIN.
     config = fts.regconfig(fts_config)
     tsvector = func.to_tsvector(config, Chunk.content)
-    # The *query* side takes a bind parameter for the text, which is correct and must stay
-    # that way — only the config has to be constant for the index to match.
-    tsquery = func.plainto_tsquery(config, query)
+    # ANY of the query's terms, not all of them — see `fts.any_term_tsquery`. With `&`-joined
+    # terms this half of hybrid retrieval scored 1 query in 36 and RRF had nothing to fuse.
+    # The *text* stays a bind parameter; only the config is a literal.
+    tsquery = fts.any_term_tsquery(config, query)
     rank = func.ts_rank(tsvector, tsquery).label("rank")
     return (
         select(Chunk, rank)
@@ -119,26 +121,42 @@ async def search(
     score_threshold: float = 0.0,
     hybrid: bool = True,
     fts_config: str | None = None,
+    fts_weight: float | None = None,
+    reranker: rerank.Reranker | None = None,
 ) -> list[Citation]:
     """Return the top-k most relevant chunks for `query`, filtered by `organization_id`.
 
     `fts_config` is the Postgres text-search configuration for the keyword half — the owning
     knowledge base's `fts_config`. `None` means English.
+
+    `fts_weight` is the keyword list's weight in the fusion; `None` takes
+    `settings.rag_rrf_fts_weight`. See ADR-058 for why it is not 1.0.
+
+    `reranker` is stage 4. `None` or a `NoOpReranker` leaves RRF's ordering untouched, which is
+    the default for every deployment — see `rag/rerank.py`. When one is supplied, the candidate
+    pool widens to `settings.rerank_candidate_k`, because a reranker's whole value is rescuing a
+    correct chunk that RRF ranked below the cut, and it cannot rescue what was never fetched.
     """
     if not kb_ids or not query.strip():
         return []
 
+    reranking = reranker is not None and not isinstance(reranker, rerank.NoOpReranker)
     query_vec = (await embedder.embed([query]))[0]
-    fetch = max(top_k * 4, top_k)
+    fetch = max(settings.rerank_candidate_k, top_k) if reranking else max(top_k * 4, top_k)
     vector_hits = await _vector_hits(session, org_id, kb_ids, query_vec, fetch)
     vector_hits = [(c, s) for c, s in vector_hits if s >= score_threshold]
 
     if not hybrid:
-        return [_to_citation(c, s) for c, s in vector_hits[:top_k]]
+        return await _finish(reranker, query, list(vector_hits), top_k)
 
     fts_hits = await _fts_hits(session, org_id, kb_ids, query, fetch, fts_config)
+    weight = settings.rag_rrf_fts_weight if fts_weight is None else fts_weight
 
-    # Reciprocal rank fusion across the two ranked lists.
+    # WEIGHTED reciprocal rank fusion. Textbook RRF weights each list equally, which assumes
+    # the retrievers are comparable; measured on the eval corpus they are not (dense NDCG@10
+    # 0.898, keyword 0.660), and at equal weight the keyword list dragged the fused result to
+    # 0.816 — below dense on its own. `settings.rag_rrf_fts_weight` and ADR-058 carry the
+    # sweep and, more importantly, what it does not establish.
     fused: dict[uuid.UUID, float] = {}
     chunks: dict[uuid.UUID, Chunk] = {}
     sims: dict[uuid.UUID, float] = {}
@@ -147,9 +165,31 @@ async def search(
         chunks[chunk.id] = chunk
         sims[chunk.id] = sim
     for rank, (chunk, _score) in enumerate(fts_hits):
-        fused[chunk.id] = fused.get(chunk.id, 0.0) + 1.0 / (_RRF_K + rank + 1)
+        fused[chunk.id] = fused.get(chunk.id, 0.0) + weight / (_RRF_K + rank + 1)
         chunks.setdefault(chunk.id, chunk)
         sims.setdefault(chunk.id, 0.0)
 
-    ordered = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
-    return [_to_citation(chunks[cid], sims[cid]) for cid, _ in ordered]
+    ordered = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
+    candidates = [(chunks[cid], sims[cid]) for cid, _ in ordered]
+    return await _finish(reranker, query, candidates, top_k)
+
+
+async def _finish(
+    reranker: rerank.Reranker | None,
+    query: str,
+    candidates: list[tuple[Chunk, float]],
+    top_k: int,
+) -> list[Citation]:
+    """Stage 4, then the top-k slice.
+
+    `apply()` returns `None` when reranking did not run — disabled, no-op, or failed open — and
+    that is deliberately distinct from "ran and changed nothing": the caller must fall back to
+    the ordering it already had rather than to an empty list. A reranker outage degrades the
+    ranking; it must never be able to make a client's agent answer with no context at all.
+    """
+    order = None
+    if reranker is not None:
+        order = await rerank.apply(reranker, query, [c.content for c, _ in candidates])
+    if order is not None:
+        candidates = [candidates[i] for i in order]
+    return [_to_citation(c, s) for c, s in candidates[:top_k]]

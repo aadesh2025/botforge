@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.rag.fts import DEFAULT_CONFIG, FtsConfigName
 from app.rag.retrieval import Citation
 
 EMBEDDING_PROVIDERS = ("ollama", "openai", "gemini", "fake")
@@ -20,6 +21,9 @@ class CreateKBRequest(BaseModel):
     embedding_model: str = Field(default="nomic-embed-text", max_length=128)
     chunk_size: int = Field(default=1000, ge=64, le=8000)
     chunk_overlap: int = Field(default=150, ge=0, le=2000)
+    #: Language for the keyword half of hybrid retrieval. `simple` (tokenise, never stem) is
+    #: the honest choice for a language Postgres has no dictionary for.
+    fts_config: FtsConfigName = DEFAULT_CONFIG
 
 
 class UpdateKBRequest(BaseModel):
@@ -27,6 +31,7 @@ class UpdateKBRequest(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
     chunk_size: int | None = Field(default=None, ge=64, le=8000)
     chunk_overlap: int | None = Field(default=None, ge=0, le=2000)
+    fts_config: FtsConfigName | None = None
 
 
 class AttachedAgent(BaseModel):
@@ -47,6 +52,7 @@ class KBOut(BaseModel):
     embedding_model: str
     chunk_size: int
     chunk_overlap: int
+    fts_config: str
     document_count: int
     #: Populated on the detail endpoint only — the list would need one query per card, and
     #: nothing on the list acts on it.

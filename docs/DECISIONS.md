@@ -18,6 +18,115 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-063: Reranking is platform infrastructure, off by default, and fails open to RRF order
+- **Date:** 2026-08-13
+- **Status:** accepted
+- **Context:** docs/13 R1 / docs/14 K4. BotForge had stages 1-3 of the four-stage pipeline
+  (FTS, dense, RRF) and no cross-encoder. Two questions the cookbook does not have to answer:
+  whose credential pays, and what happens to the latency budget.
+- **Decision:** (a) the rerank credential is the **platform's** (`RERANK_API_KEY`), resolved by
+  `rag.rerank.platform_rerank_key()` and **never** through `llm.registry.resolve_credential()`
+  — the same rule ADR-055 set for guard models. (b) **Off by default platform-wide and
+  per-agent** (`rag_config.rerank`); both must be on. (c) Any failure — timeout, bad shape,
+  out-of-range index, HTTP error — degrades to the RRF ordering and is logged, never raises and
+  never returns an empty candidate set. (d) A self-hosted `/rerank` endpoint is the recommended
+  deployment.
+- **Alternatives considered:** *Let it fall through `resolve_credential()`* — rejected for
+  exactly the reason ADR-055 gives: the agent → org → env chain reaches the env key last, so an
+  org holding its own Mistral/DeepSeek key would have had that key sent to a rerank endpoint,
+  and because this layer fails open nothing would have said so. *On by default* — rejected:
+  NFR-1 is p50 417 ms to first token and this call lands before generation starts, so enabling
+  it spends someone else's latency budget. *Hosted API by default* — rejected as the default
+  because it ships client knowledge-base text to a third party (a residency and contractual
+  question, not a technical one) and because bge-reranker-v2-m3 is trained multilingual, which
+  matters where docs/11 §9.2a records Tamil as a first language. The HTTP client speaks both
+  shapes, so a hosted vendor stays one env var away.
+- **Consequences:** rerank spend and latency get their own metrics bucket
+  (`botforge_rerank_calls_total`, `botforge_rerank_milliseconds_total`), never folded into
+  `TurnResult`, or per-org margin analysis is quietly wrong. Enabled-with-no-endpoint warns at
+  startup, because a reranker that is off looks exactly like one that ran and agreed.
+  **Not enabled for any live agent** — that needs the measured latency delta docs/14 K4-4 asks
+  for, on a real deployment.
+
+### ADR-062: The keyword half of hybrid retrieval matches ANY term, not all of them
+- **Date:** 2026-08-13
+- **Status:** accepted
+- **Context:** Found by the first run of the new eval harness (ADR-061), not by a report.
+  `_fts_hits` built its query with `plainto_tsquery`, which joins every lexeme with `&`. A
+  customer types a sentence, so *"ordered a kurta to delhi last week and it doesn't suit me,
+  how long have i got"* became nine ANDed stems and matched no chunk. Measured: **NDCG@10
+  0.0278 — one query in thirty-six.** And because RRF then had a single non-empty list to fuse,
+  `hybrid` scored *byte-identically* to `dense`. The hybrid retrieval this product advertises,
+  and which docs/13 §1 describes as "done", was dense-only in production.
+- **Decision:** `replace(plainto_tsquery(cfg, q)::text, '&', '|')::tsquery`. Keyword retrieval
+  becomes a recall stage whose `ts_rank` ordering discriminates, which is what RRF needs.
+  Measured **0.0278 → 0.6604**.
+- **Alternatives considered:** *`websearch_to_tsquery`* — still ANDs bare terms. *Rebuild from
+  `tsvector_to_array` joined with `' | '`* — rejected: it would have to re-quote every lexeme
+  by hand and gets it wrong on the first apostrophe, where `plainto_tsquery` has already done
+  the stemming, stopword removal and quoting correctly. Verified `&` can never survive into a
+  lexeme (it is a separator), and that stopword-only and empty inputs yield an empty tsquery
+  that matches nothing rather than erroring on a visitor's turn.
+- **Consequences:** the keyword half now returns a near-full list for most queries, which is
+  what forced ADR-058's weighting question.
+
+### ADR-061: A retrieval eval harness, and an honest account of what its corpus cannot measure
+- **Date:** 2026-08-13
+- **Status:** accepted
+- **Context:** docs/13 R2 / docs/14 P0-2. 773 tests and zero retrieval-quality metrics.
+  `score_threshold` moved 0.7 → 0.35 by feel; `top_k` and `chunk_size` never measured. docs/11
+  §9 records grounding as the weakest link and the 2026-08-02 incident traced it to retrieval
+  missing, not the prompt. This is Phase D for retrieval: the same unfalsifiability problem, in
+  a new area.
+- **Decision:** NDCG@10 / Recall@5 / MRR in plain arithmetic; a frozen corpus/queries/qrels set
+  in `apps/api/evals/retrieval/`; a runner that ingests through the **real** pipeline into a
+  scratch org; `make eval-retrieval` plus two CI steps separate from the main suite. Baselines
+  are keyed by embedder, and the runner **refuses** to score dense/hybrid under the fake
+  embedder rather than print a number that measures a hash function.
+- **Alternatives considered:** *Assert metrics in the main pytest run* — rejected for docs/11
+  Phase D's reason: buried among 780 tests, "1 failed" reads as flake. *Generate the corpus
+  from a live client KB now* — the right answer and still outstanding; it needs a real KB and
+  model budget, and shipping the harness without it beats shipping neither.
+- **Consequences:** **the seed corpus was hand-authored in the same session as the code, which
+  is exactly the unfalsifiability Phase D was built to remove.** It is stated in the module
+  docstring rather than implied away. It also proved to have a hole: every query was written
+  with deliberately low lexical overlap, which is a fair test of dense retrieval and a rigged
+  one against keyword search — ten exact-identifier queries (order references, decline codes,
+  style codes, form numbers) were added once the first weight sweep exposed it. Replacing it
+  with a set generated from a real client KB is the follow-up.
+
+### ADR-058: Weighted RRF, and what the weight sweep does *not* establish
+- **Date:** 2026-08-13
+- **Status:** accepted
+- **Context:** After ADR-062 made the keyword half work, `hybrid` **regressed** against
+  dense-only: 0.8977 → 0.8162 NDCG@10. Textbook RRF weights every list equally, which assumes
+  the retrievers are comparable. Measured on this corpus they are not — dense 0.898, keyword
+  0.660 — so equal weighting spends precision to buy recall that was already there.
+- **Decision:** weight the keyword list in the fusion (`RAG_RRF_FTS_WEIGHT`, dense fixed at
+  1.0) and default it to **0.05**, the highest value at which hybrid does not regress against
+  dense-only on the available evidence.
+- **Alternatives considered, all measured rather than argued:**
+  | weight | 1.0 | 0.7 | 0.5 | 0.3 | 0.15 | 0.05 | dense-only |
+  |---|---|---|---|---|---|---|---|
+  | NDCG@10 | 0.816 | 0.819 | 0.825 | 0.861 | 0.868 | 0.897 | **0.898** |
+
+  A **relative `ts_rank` floor** on the keyword list was implemented and then **deleted**: the
+  per-query data showed hybrid only ever lost where the keyword list scored *exactly* 0.000,
+  i.e. the noise is at the top of that list, not in its tail, and a relative floor cannot tell
+  "best of a bad list" from "best of a good list". It moved NDCG by ≤0.01 across a 0→0.5 sweep
+  and did not earn a config knob.
+- **Consequences and the honest part.** Per-query, fusion beat **both** retrievers where the
+  keyword list had real signal (q001 0.37/0.52 → 0.92; q008 0.63/0.63 → 1.00), so keyword
+  retrieval is not worthless — it is unrewarded by a 46-query corpus of short, paraphrase-heavy
+  documents against a strong embedding model. At 0.05 those wins are given up too. **This is a
+  conservative default chosen to avoid shipping a measured regression, not a fitted optimum**,
+  and the sweep also showed the gap narrowing as `score_threshold` rises (at 0.5 the keyword
+  half is much closer to carrying its weight) — which is the production case where dense
+  returns nothing and the 2026-08-02 fabrication happened. Re-fit with
+  `make eval-retrieval-full` against a real client KB before raising it. The structural fix is
+  ADR-063: once a cross-encoder orders the pool, fusion only has to produce good *recall*, and
+  the weight stops mattering.
+
 ### ADR-060: Four greys, light-first (supersedes ADR-059)
 - **Date:** 2026-08-05
 - **Status:** accepted

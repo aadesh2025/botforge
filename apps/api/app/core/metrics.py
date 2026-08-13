@@ -32,6 +32,13 @@ _guard_tokens = 0
 # L3 policy calls, bucketed by distress level so the escalation rate is graphable.
 _policy_calls: dict[str, int] = {}
 _policy_tokens = 0
+# Reranker calls by outcome, and the milliseconds they spent. Its own bucket for the same
+# reason as the guard buckets: rerank runs on the *platform's* credential and infrastructure,
+# so folding it into per-agent cost would misreport client margin. The latency total is here
+# rather than in the request histogram because it is spent BEFORE first token, i.e. it comes
+# straight out of the NFR-1 p50 417 ms budget and has to be attributable on its own.
+_rerank_calls: dict[str, int] = {}
+_rerank_ms = 0.0
 
 
 def _status_class(status: int) -> str:
@@ -64,6 +71,14 @@ def observe_policy_call(outcome: str, total_tokens: int) -> None:
     with _lock:
         _policy_calls[outcome] = _policy_calls.get(outcome, 0) + 1
         _policy_tokens += max(0, total_tokens)
+
+
+def observe_rerank_call(outcome: str, duration_ms: float) -> None:
+    """Record one rerank decision. `outcome` is scored|error."""
+    global _rerank_ms
+    with _lock:
+        _rerank_calls[outcome] = _rerank_calls.get(outcome, 0) + 1
+        _rerank_ms += max(0.0, duration_ms)
 
 
 def render() -> str:
@@ -112,5 +127,17 @@ def render() -> str:
         lines.append("# HELP botforge_policy_tokens_total Tokens spent on the policy classifier.")
         lines.append("# TYPE botforge_policy_tokens_total counter")
         lines.append(f"botforge_policy_tokens_total {_policy_tokens}")
+
+        # `outcome="error"` is the one to alert on: the reranker fails open, so a rising rate
+        # means turns are being ranked by RRF alone, not that there is nothing to rerank.
+        lines.append("# HELP botforge_rerank_calls_total Reranker decisions by outcome.")
+        lines.append("# TYPE botforge_rerank_calls_total counter")
+        for outcome, count in sorted(_rerank_calls.items()):
+            lines.append(f'botforge_rerank_calls_total{{outcome="{outcome}"}} {count}')
+        lines.append(
+            "# HELP botforge_rerank_milliseconds_total Time spent reranking, before first token."
+        )
+        lines.append("# TYPE botforge_rerank_milliseconds_total counter")
+        lines.append(f"botforge_rerank_milliseconds_total {_rerank_ms:.1f}")
 
     return "\n".join(lines) + "\n"

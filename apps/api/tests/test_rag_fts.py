@@ -43,6 +43,65 @@ def test_the_query_text_stays_parameterised() -> None:
     assert "plainto_tsquery('english'::regconfig, %(" in sql
 
 
+# ── any-term, not all-terms ──────────────────────────────────────────────────────────────
+
+def test_the_tsquery_matches_any_term_not_all_of_them() -> None:
+    """`plainto_tsquery` alone ANDs every lexeme, which made the keyword half score 1/36.
+
+    A customer types a sentence, not keywords: "ordered a kurta to delhi last week and it
+    doesn't suit me, how long have i got" becomes nine `&`-joined stems and matches no chunk.
+    With nothing coming back from FTS, RRF had a single list to fuse and `hybrid` was
+    byte-identical to `dense` — the hybrid retrieval this product advertises was dense-only.
+    """
+    stmt = fts_statement(uuid.uuid4(), [uuid.uuid4()], "refund policy", 20, None)
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    assert "replace(CAST(plainto_tsquery(" in str(compiled)
+    assert "AS TSQUERY)" in str(compiled)
+    # `&` and `|` are bind parameters, which is right — they are values, not identifiers, so
+    # only the parameters can say which substitution is actually being made.
+    scalars = {v for v in compiled.params.values() if isinstance(v, str)}
+    assert {"&", "|"} <= scalars
+
+
+async def test_any_term_tsquery_ors_its_lexemes_on_a_real_postgres(
+    db_session: AsyncSession,
+) -> None:
+    """Rendered SQL is not behaviour. Ask the server what the tsquery actually is."""
+    rendered = (
+        await db_session.execute(
+            text(
+                "SELECT replace(plainto_tsquery('english', :q)::text, '&', '|')::tsquery::text"
+            ),
+            {"q": "how long for a refund on international orders"},
+        )
+    ).scalar_one()
+    assert "|" in rendered
+    assert "&" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        # `&` is a separator, never part of a lexeme, so the substitution cannot corrupt one.
+        ("R&D budget & cost", "'r' | 'd' | 'budget' | 'cost'"),
+        # Stopword-only and empty input produce an empty tsquery that matches nothing, rather
+        # than an error on a visitor's turn.
+        ("the and of", ""),
+        ("", ""),
+    ],
+)
+async def test_the_substitution_survives_the_inputs_that_would_break_it(
+    db_session: AsyncSession, query: str, expected: str
+) -> None:
+    rendered = (
+        await db_session.execute(
+            text("SELECT replace(plainto_tsquery('english', :q)::text, '&', '|')::tsquery::text"),
+            {"q": query},
+        )
+    ).scalar_one()
+    assert rendered == expected
+
+
 def test_a_non_default_config_reaches_the_sql() -> None:
     assert "'tamil'::regconfig" in _compiled("tamil")
 
@@ -97,6 +156,32 @@ def test_tamil_and_hindi_are_supported() -> None:
     this test goes red and the docs get corrected back, rather than a KB silently degrading.
     """
     assert {"tamil", "hindi"} <= fts.SUPPORTED_CONFIGS
+
+
+def test_the_literal_and_the_frozenset_cannot_drift() -> None:
+    """One declaration, two uses. The API schema needs the static type; SQL needs the set."""
+    from typing import get_args
+
+    assert set(get_args(fts.FtsConfigName)) == fts.SUPPORTED_CONFIGS
+    assert fts.DEFAULT_CONFIG in fts.SUPPORTED_CONFIGS
+
+
+async def test_a_non_english_config_has_an_index_to_use(db_session: AsyncSession) -> None:
+    """Migration 0019's real job.
+
+    `migrations/0004` created ONE expression index, on `to_tsvector('english', content)`. An
+    expression index matches only the exact expression, so a knowledge base switched to another
+    configuration renders different SQL and falls back to a sequential scan over every chunk —
+    P0-1 reintroduced through the front door. docs/14 §5.4 warns about precisely this.
+    """
+    rows = (
+        await db_session.execute(
+            text("SELECT indexdef FROM pg_indexes WHERE tablename = 'chunks'")
+        )
+    ).scalars().all()
+    defs = " ".join(rows)
+    assert "to_tsvector('english'::regconfig, content)" in defs
+    assert "to_tsvector('simple'::regconfig, content)" in defs
 
 
 async def test_every_supported_config_exists_on_this_postgres(db_session: AsyncSession) -> None:

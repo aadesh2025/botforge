@@ -145,6 +145,35 @@ for prod; local default in dev.
   stored under the local backend. Created on demand; gitignored.
 - `RAG_CONTEXT_CHAR_BUDGET` (default `8000`) — ceiling on characters of retrieved context
   injected into a prompt (token budgeting; oldest/lowest-ranked citations are trimmed first).
+- `RAG_RRF_FTS_WEIGHT` (default `0.05`) — weight of the keyword (Postgres FTS) list in the
+  hybrid RRF fusion; the dense list is fixed at 1.0. Textbook RRF weights both equally, which
+  assumes comparable retrievers; measured on the frozen eval corpus they are not (dense NDCG@10
+  0.898 vs keyword 0.660) and equal weighting put hybrid *below* dense-only. **0.05 is a
+  conservative floor, not a fitted optimum** — see ADR-058 for the full sweep and what it does
+  not establish. Re-fit with `make eval-retrieval-full` against a real client knowledge base.
+
+### Reranking (stage 4) — ADR-063
+
+A cross-encoder reorders the fused RRF candidates before the top-k slice. **Off by default
+platform-wide and per agent** (`rag_config.rerank`); both must be on. It spends a network round
+trip *before* generation starts, straight out of the NFR-1 p50 417 ms first-token budget, so
+enabling it is a latency decision. Every failure — timeout, bad response, HTTP error — degrades
+to RRF ordering, logged, never an error and never an empty result set.
+
+- `RERANK_ENABLED` (default `false`) — the platform-wide switch.
+- `RERANK_ENDPOINT` (default empty) — base URL of a `/rerank` service. Self-hosted
+  text-embeddings-inference is the recommended shape: client knowledge-base text never leaves
+  the deployment, and `bge-reranker-v2-m3` is trained multilingual, which matters where Tamil is
+  a first language (docs/11 §9.2a). A hosted API of the same shape works too.
+  **Enabled with this empty warns at startup** — a reranker that is off looks exactly like one
+  that ran and agreed.
+- `RERANK_MODEL` (default `BAAI/bge-reranker-v2-m3`) — ignored by TEI (it serves one model),
+  required by a hosted API.
+- `RERANK_CANDIDATE_K` (default `50`) — how many fused candidates the cross-encoder sees. This
+  also widens the retrieval fetch: a reranker cannot rescue a chunk that was never fetched.
+- `RERANK_TIMEOUT_MS` (default `800`) — availability budget.
+- `RERANK_API_KEY` (default unset) — **the platform's credential, never an org's** (ADR-063,
+  the rule ADR-055 set for guard models). A self-hosted container needs none.
 - `CELERY_TASK_ALWAYS_EAGER` (default `false`) — when true, Celery tasks (document ingestion)
   run inline in-process instead of via the worker/broker. Handy for dev/tests; never in prod.
 - `LLM_FORCE_FAKE` (default `false`) — when true, every chat and embedding call is forced onto

@@ -26,6 +26,10 @@ settings.guard_injection_enabled = False
 # Same for L3 (policy/distress) — also a live model call on every turn.
 settings.guard_policy_enabled = False
 settings.guard_distress_enabled = False
+# And stage-4 reranking, which is a live HTTP call on every retrieval. Off here means every
+# existing retrieval test keeps asserting RRF's ordering, so the reranker cannot change a result
+# nobody asked it to; `test_rerank.py` turns it on with a mock transport.
+settings.rerank_enabled = False
 
 
 @pytest.fixture

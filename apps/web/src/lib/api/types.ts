@@ -167,6 +167,13 @@ export interface ApiKnowledgeBase {
   embedding_model: string;
   chunk_size: number;
   chunk_overlap: number;
+  /**
+   * Postgres text-search configuration driving the keyword half of hybrid retrieval, e.g.
+   * `english`, `tamil`, or `simple` (tokenise, never stem) for a language Postgres has no
+   * dictionary for. Per knowledge base, because a client can legitimately hold an English
+   * manual and a Tamil FAQ side by side.
+   */
+  fts_config: string;
   document_count: number;
   /** Only populated by the detail endpoint; the list always returns an empty array. */
   attached_agents: ApiAttachedAgent[];

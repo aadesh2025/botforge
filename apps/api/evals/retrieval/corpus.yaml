@@ -317,3 +317,76 @@
     welcome but a booked slot takes priority, and Saturdays fill about a week ahead. Bring the
     shoes you intend to wear with the piece, since hem length is decided in the room and cannot
     be judged afterwards.
+
+# ── exact-identifier documents ───────────────────────────────────────────────────────────
+#
+# ADDED after the first weight sweep, because the corpus above could not measure the thing it
+# was being used to tune. Every query in q001-q036 was written to share as little vocabulary
+# with its answer as possible, which is a fine test of *dense* retrieval and a rigged one
+# against keyword search: the sweep found every hybrid weight losing to dense-only, converging
+# on dense as the weight went to zero. Reading that as "keyword search is worthless" would have
+# been fitting a production constant to a benchmark with a hole in it.
+#
+# Keyword search earns its place on tokens an embedding model cannot represent: order
+# references, SKUs, decline codes, carrier names, form numbers. A visitor pasting
+# `AZ-2026-004417` or asking about `E51` is the case where dense retrieval degrades and BM25 is
+# exact. These documents and queries q037-q046 exist so the sweep can see both halves.
+
+- id: order-reference-format
+  title: "Orders > Your Order Reference"
+  text: |
+    Your Order Reference
+
+    Every order is given a reference in the form AZ-2026-000000, where the middle block is the
+    year it was placed. It appears on the confirmation email, the invoice inside the parcel and
+    the account page. Quote it in full when you contact us; the last six digits on their own are
+    not unique across years.
+
+- id: payment-decline-codes
+  title: "Payment > What the Decline Code Means"
+  text: |
+    What the Decline Code Means
+
+    E05 means the bank refused the transaction without giving a reason, and a different card is
+    the only remedy. E51 means insufficient funds. E14 means the card number was mistyped. E91
+    means the bank could not be reached and is worth retrying in a few minutes. None of these
+    are charges, and none of them create an order.
+
+- id: courier-partners
+  title: "Delivery > Who Carries Your Parcel"
+  text: |
+    Who Carries Your Parcel
+
+    Domestic parcels go with Delhivery or Bluedart depending on the pin code, and we do not let
+    you choose between them. Overseas parcels go with Aramex. Bluedart handles most metro
+    addresses and Delhivery the rest. Cash on delivery is only available on the Delhivery
+    network.
+
+- id: product-codes
+  title: "Products > How Style Codes Are Built"
+  text: |
+    How Style Codes Are Built
+
+    A style code such as WC-KUR-2201 names the label, the garment type and the season: WC is the
+    house label, KUR a kurta, SHR a shirt, TRS trousers, and the four digits are the season and
+    the design number. Codes are printed on the care label and quoted on every invoice. A code
+    ending in X is a sample and was never sold.
+
+- id: warranty-claim-form
+  title: "Quality > Making a Claim"
+  text: |
+    Making a Claim
+
+    A manufacturing fault is claimed on form QF-12, downloadable from the quality page. It asks
+    for the style code, the date of purchase and two photographs. Claims without a style code
+    cannot be traced back to the mill batch and are returned unprocessed. Form QF-12 replaced
+    the older QF-08 in 2025 and the old one is no longer accepted.
+
+- id: outlet-addresses
+  title: "Showroom > Where to Find Us"
+  text: |
+    Where to Find Us
+
+    The main showroom is on Nungambakkam High Road in Chennai. There is a smaller outlet in
+    Coimbatore on Avinashi Road that carries the previous season only, and a concession inside
+    the Phoenix mall in Bengaluru. The Coimbatore outlet does not take fitting appointments.

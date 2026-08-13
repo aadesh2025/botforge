@@ -71,6 +71,9 @@ from app.rag.ingest import ingest_document
 SCRATCH_SLUG = "botforge-retrieval-eval-scratch"
 BASELINE_PATH = EVAL_SET_DIR / "baseline.json"
 
+# `hybrid` uses the configured RRF weight; `hybrid@<w>` overrides it, so the weight can be
+# swept without editing settings. Only the plain names carry a committed baseline — a sweep is
+# an experiment, not a number to defend.
 VARIANTS = ("fts", "dense", "hybrid")
 # Retrieve 10 so NDCG@10 has 10 ranks to score. Recall is reported at 5 to match the production
 # `top_k`, so that column answers "would the model actually have been given this?".
@@ -162,12 +165,16 @@ async def _run_variant(
     score_threshold: float,
 ) -> VariantResult:
     embedder = build_embedding_provider(provider, model)
+    base, _, weight_arg = variant.partition("@")
+    fts_weight = float(weight_arg) if weight_arg else None
     predictions: dict[str, list[str]] = {}
     for query in eval_set.queries:
-        if variant == "fts":
+        if base == "fts":
             # Straight to the keyword half so the dense side cannot contribute. `search()` with
             # hybrid=False is the *dense* path, not this one.
-            hits = await retrieval._fts_hits(session, org_id, [kb_id], query.text, RETRIEVE_K * 4)
+            hits = await retrieval._fts_hits(
+                session, org_id, [kb_id], query.text, RETRIEVE_K * 4
+            )
             citations = [retrieval._to_citation(chunk, score) for chunk, score in hits][:RETRIEVE_K]
         else:
             citations = await retrieval.search(
@@ -178,7 +185,8 @@ async def _run_variant(
                 embedder,
                 top_k=RETRIEVE_K,
                 score_threshold=score_threshold,
-                hybrid=(variant == "hybrid"),
+                hybrid=(base == "hybrid"),
+                fts_weight=fts_weight,
             )
         predictions[query.id] = _doc_ids(citations)
     return score_variant(variant, predictions, eval_set.queries, recall_k=RECALL_K)
@@ -205,6 +213,23 @@ def _print_worst(result: VariantResult, eval_set: EvalSet, limit: int = 5) -> No
         print(f"  {score:.3f}  {qid}  {query.text!r}{note}")
 
 
+def _print_per_query(results: list[VariantResult], eval_set: EvalSet) -> None:
+    """Per-query NDCG for every variant, side by side.
+
+    A headline mean cannot tell you *why* a variant lost, and the interesting question for
+    hybrid retrieval is never "is the average better" but "which queries does each half win,
+    and do they overlap". A keyword list that wins nothing the dense list loses has no business
+    being fused in at any weight.
+    """
+    by_id = {q.id: q for q in eval_set.queries}
+    names = [r.name for r in results]
+    print("\n" + "QUERY".ljust(7) + "".join(n[:11].rjust(12) for n in names) + "  TEXT")
+    print("-" * (7 + 12 * len(names) + 30))
+    for qid in sorted(by_id):
+        cells = "".join(f"{r.per_query.get(qid, 0.0):>12.3f}" for r in results)
+        print(f"{qid:<7}{cells}  {by_id[qid].text[:44]}")
+
+
 def _load_baseline() -> dict[str, Any]:
     if not BASELINE_PATH.exists():
         return {}
@@ -214,13 +239,13 @@ def _load_baseline() -> dict[str, Any]:
 async def run(args: argparse.Namespace) -> int:
     eval_set = load_eval_set()
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
-    unknown = [v for v in variants if v not in VARIANTS]
+    unknown = [v for v in variants if v.partition("@")[0] not in VARIANTS]
     if unknown:
-        print(f"unknown variant(s): {unknown}. Choose from {list(VARIANTS)}.")
+        print(f"unknown variant(s): {unknown}. Choose from {list(VARIANTS)}, optionally 'hybrid@0.3'.")
         return 2
 
     provider, model = args.embedder_provider, args.embedder_model
-    if provider == "fake" and set(variants) - {"fts"}:
+    if provider == "fake" and {v.partition("@")[0] for v in variants} - {"fts"}:
         # Refusing rather than warning: a dense number produced by hashing text is not a weak
         # measurement, it is a meaningless one, and printing it next to a real one in the same
         # table is how a wrong number gets quoted later.
@@ -254,8 +279,11 @@ async def run(args: argparse.Namespace) -> int:
 
     embedder = _embedder_key(provider, model)
     _print_table(results, eval_set, embedder)
-    for result in results:
-        _print_worst(result, eval_set)
+    if args.per_query:
+        _print_per_query(results, eval_set)
+    else:
+        for result in results:
+            _print_worst(result, eval_set)
 
     baseline = _load_baseline()
     recorded = dict(baseline.get("runs", {}).get(embedder, {}))
@@ -310,6 +338,11 @@ def main() -> int:
     parser.add_argument("--tolerance", type=float, default=0.02, help="allowed NDCG@10 drop")
     parser.add_argument("--save-baseline", action="store_true", help="record these as the numbers to beat")
     parser.add_argument("--keep", action="store_true", help="leave the scratch org for inspection")
+    parser.add_argument(
+        "--per-query",
+        action="store_true",
+        help="per-query NDCG for every variant, side by side, instead of the weakest-query list",
+    )
     return asyncio.run(run(parser.parse_args()))
 
 

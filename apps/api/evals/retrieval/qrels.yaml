@@ -95,3 +95,27 @@
 - {query_id: q035, doc_id: exchanges, relevance: 3}
 
 - {query_id: q036, doc_id: appointments, relevance: 3}
+
+# ── exact-identifier judgements (see the header block in queries.yaml) ───────────────────
+
+- {query_id: q037, doc_id: order-reference-format, relevance: 3}
+- {query_id: q037, doc_id: tracking, relevance: 1}
+
+- {query_id: q038, doc_id: payment-decline-codes, relevance: 3}
+
+- {query_id: q039, doc_id: payment-decline-codes, relevance: 3}
+- {query_id: q039, doc_id: payment-failed, relevance: 1}
+
+- {query_id: q040, doc_id: product-codes, relevance: 3}
+
+- {query_id: q041, doc_id: product-codes, relevance: 3}
+
+- {query_id: q042, doc_id: courier-partners, relevance: 3}
+
+- {query_id: q043, doc_id: warranty-claim-form, relevance: 3}
+
+- {query_id: q044, doc_id: warranty-claim-form, relevance: 3}
+
+- {query_id: q045, doc_id: outlet-addresses, relevance: 3}
+
+- {query_id: q046, doc_id: order-reference-format, relevance: 3}

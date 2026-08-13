@@ -25,30 +25,61 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "api"))
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import settings
+from app.models import Chunk
+from app.rag import fts
 from app.rag.fts import DEFAULT_CONFIG, normalize_config
+from app.rag.retrieval import fts_statement
 
 _INDEX = "ix_chunks_content_fts"
 
-# The two shapes, side by side. `LITERAL` is what `rag/fts.regconfig()` renders today;
-# `PARAMETER` is what `func.to_tsvector("english", ...)` rendered before P0-1 and is kept here
-# as the control — a comparison with nothing to compare against proves nothing.
-_LITERAL = (
-    "SELECT id FROM chunks "
-    "WHERE to_tsvector('{cfg}'::regconfig, content) "
-    "@@ plainto_tsquery('{cfg}'::regconfig, :q)"
-)
+# The control. This is what `func.to_tsvector("english", ...)` rendered before P0-1; a
+# comparison with nothing to compare against proves nothing.
 _PARAMETER_PREPARE = (
     "PREPARE bf_fts_param(regconfig, text) AS "
     "SELECT id FROM chunks WHERE to_tsvector($1, content) @@ plainto_tsquery($1, $2)"
 )
+
+
+def _inline(stmt: object) -> str:
+    return str(
+        stmt.compile(  # type: ignore[attr-defined]
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+
+
+def _match_only_sql(config: str, query: str) -> str:
+    """The FTS predicate alone, built from the same `rag/fts` helpers production uses.
+
+    **This is the P0-1 gate, and it deliberately drops the tenant filters.** With them in place
+    the planner may legitimately prefer `ix_chunks_organization_id` — filtering to one org is
+    very selective, so on a small table that is the *better* plan and says nothing about whether
+    the expression index is usable. Stripping them isolates the only question P0-1 asks: can
+    Postgres match this expression to `ix_chunks_content_fts` at all?
+    """
+    tsvector = func.to_tsvector(fts.regconfig(config), Chunk.content)
+    tsquery = fts.any_term_tsquery(fts.regconfig(config), query)
+    return _inline(select(Chunk.id).where(tsvector.op("@@")(tsquery)))
+
+
+def _real_query_sql(config: str, query: str) -> str:
+    """The production statement itself, values inlined — informational, not the gate.
+
+    Compiled from `retrieval.fts_statement()` rather than retyped, so this script cannot drift
+    away from the query it claims to be explaining. It would have done exactly that the moment
+    the tsquery changed from all-terms to any-term.
+    """
+    return _inline(fts_statement(uuid.uuid4(), [uuid.uuid4()], query, 20, config))
 
 
 async def _plan(conn: object, sql: str, params: dict[str, object] | None = None) -> str:
@@ -80,14 +111,29 @@ async def explain(config: str, query: str) -> int:
         await conn.execute(text("SET enable_seqscan = off"))
         await conn.execute(text("SET plan_cache_mode = force_generic_plan"))
 
-        literal_plan = await _plan(conn, _LITERAL.format(cfg=config), {"q": query})
         # ASCII only: a Windows console defaults to cp1252 and a box-drawing character raises
         # UnicodeEncodeError partway through, which loses the plan this script exists to print.
         # Same lesson as scripts/audit_kb_pii.py.
-        print("\n-- literal regconfig (what BotForge renders now) " + "-" * 30)
-        print(literal_plan)
-        if _INDEX not in literal_plan:
-            failures.append(f"the literal form did NOT reach {_INDEX} — retrieval is seq-scanning")
+        match_plan = await _plan(conn, _match_only_sql(config, query))
+        print("\n-- GATE: the FTS predicate alone, literal regconfig " + "-" * 26)
+        print(match_plan)
+        if _INDEX not in match_plan:
+            failures.append(
+                f"the literal form did NOT reach {_INDEX} - the expression no longer matches "
+                "the index, so keyword retrieval is a sequential scan"
+            )
+
+        real_plan = await _plan(conn, _real_query_sql(config, query))
+        print("\n-- for information: the full production statement " + "-" * 28)
+        print(real_plan)
+        if _INDEX not in real_plan:
+            # Not a failure. `ix_chunks_organization_id` is often the better access path once
+            # the tenant filter is applied, especially on a small table.
+            print(
+                f"\n(note) the planner chose another index for the full query. That is a data\n"
+                f"       and selectivity decision, not an expression mismatch - the gate above\n"
+                f"       is what says whether {_INDEX} is usable at all."
+            )
 
         await conn.execute(text(_PARAMETER_PREPARE))
         # `EXECUTE` takes no driver-level parameters — asyncpg reports "the server expects 0

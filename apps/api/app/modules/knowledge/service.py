@@ -79,6 +79,7 @@ async def _kb_out(
         embedding_model=kb.embedding_model,
         chunk_size=kb.chunk_size,
         chunk_overlap=kb.chunk_overlap,
+        fts_config=kb.fts_config,
         document_count=await _doc_count(session, kb.id),
         attached_agents=(
             await _attached_agents(session, kb.organization_id, kb.id) if with_usage else []
@@ -98,6 +99,7 @@ async def create_kb(session: AsyncSession, ctx: OrgContext, data: schemas.Create
         embedding_model=data.embedding_model,
         chunk_size=data.chunk_size,
         chunk_overlap=data.chunk_overlap,
+        fts_config=data.fts_config,
         created_by=ctx.user.id,
     )
     session.add(kb)
@@ -134,6 +136,12 @@ async def update_kb(
         kb.chunk_size = data.chunk_size
     if data.chunk_overlap is not None:
         kb.chunk_overlap = data.chunk_overlap
+    if data.fts_config is not None:
+        # Takes effect on the next query, not the next ingest: `to_tsvector` runs at read time
+        # against `chunks.content`, so nothing needs re-ingesting. What DOES need to exist is a
+        # GIN index for the new configuration (migration 0019) — without one the keyword half
+        # silently degrades to a sequential scan, which is P0-1 all over again.
+        kb.fts_config = data.fts_config
     return await _kb_out(session, kb)
 
 
@@ -309,5 +317,6 @@ async def search_kb(
         top_k=data.top_k,
         score_threshold=data.score_threshold,
         hybrid=data.hybrid,
+        fts_config=kb.fts_config,
     )
     return schemas.SearchResponse(query=data.query, citations=citations)
