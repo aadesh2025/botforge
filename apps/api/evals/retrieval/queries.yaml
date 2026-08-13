@@ -1,0 +1,128 @@
+# Retrieval eval queries — seed set (docs/13 R2, docs/14 P0-2).
+#
+# Written the way the recipe asks for them: how a customer would actually type the question,
+# in their own words, NOT in the document's phrasing, under 20 words. Where a document says
+# "carriage", the query says "who pays to post it back"; where it says "showroom opening
+# hours", the query says "what time do you shut on saturday".
+#
+# That vocabulary gap is the point. A query that reuses the document's own nouns is answered by
+# the keyword half alone and tells you nothing about whether retrieval works — it measures
+# string matching. Several of these are answerable ONLY by meaning.
+#
+# FROZEN alongside corpus.yaml. Regenerating or rewording makes every recorded number
+# non-comparable; that is the one warning docs/13 R2 puts in bold.
+
+- id: q001
+  text: "ordered a kurta to delhi last week and it doesn't suit me, how long have i got"
+  note: "near-miss: refunds-international shares almost all of its vocabulary"
+
+- id: q002
+  text: "sent something to my sister in canada, what's the window for posting it back"
+  note: "near-miss sibling of q001; the domestic/international split is the whole test"
+
+- id: q003
+  text: "bought the wrong size, can i just swap it rather than get money back"
+
+- id: q004
+  text: "the shirt turned up with a rip in the sleeve"
+
+- id: q005
+  text: "you sent me completely different trousers to what i ordered"
+
+- id: q006
+  text: "what time do you shut on saturday"
+  note: "the 2026-08-02 fabrication invented Mon-Fri 9am-5pm for exactly this question"
+
+- id: q007
+  text: "if i write in the evening how soon does someone get back to me"
+  note: "near-miss: store-hours also talks about times of day"
+
+- id: q008
+  text: "how many days to reach bangalore"
+
+- id: q009
+  text: "will i have to pay anything extra when it arrives in the uk"
+
+- id: q010
+  text: "my tracking number hasn't updated since yesterday"
+
+- id: q011
+  text: "it's been two weeks and nothing has turned up, what happens now"
+
+- id: q012
+  text: "placed an order five minutes ago by mistake, can i stop it"
+  note: "near-miss: cancel-subscription. Also the 'cancel my cancellation' L1 family"
+
+- id: q013
+  text: "i want to stop the monthly swatch box coming"
+
+- id: q014
+  text: "can i pay the delivery guy when he turns up"
+
+- id: q015
+  text: "my card was rejected but the money has gone out of my account"
+
+- id: q016
+  text: "how long is a voucher good for before it stops working"
+  note: "near-miss: store-credit, which never lapses; the opposite answer"
+
+- id: q017
+  text: "my old card is closed so where does the money from a return go"
+
+- id: q018
+  text: "i'm between two sizes on a jersey top, which way should i go"
+
+- id: q019
+  text: "the trousers are too long, can you take them up"
+
+- id: q020
+  text: "can i put linen in the dryer"
+
+- id: q021
+  text: "how do i clean a silk blouse without ruining it"
+
+- id: q022
+  text: "we need 200 of the same shirt for our staff, how does that work"
+
+- id: q023
+  text: "is gst added on top of the price i can see"
+
+- id: q024
+  text: "can i use two discount codes together"
+
+- id: q025
+  text: "when do my points actually show up on the account"
+
+- id: q026
+  text: "keep getting my password wrong, will i get locked out"
+
+- id: q027
+  text: "i want everything you hold about me removed"
+
+- id: q028
+  text: "i unsubscribed but you're still texting me"
+
+- id: q029
+  text: "the zip came apart after three months of wearing it"
+  note: "near-miss: refunds-domestic. Past the returns window but covered as a fault"
+
+- id: q030
+  text: "do i need to book ahead to come and try things on"
+
+- id: q031
+  text: "are things bought in the sale still returnable"
+
+- id: q032
+  text: "how much is postage if i only buy one thing"
+
+- id: q033
+  text: "do you take upi"
+
+- id: q034
+  text: "who pays to post an overseas parcel back to you"
+
+- id: q035
+  text: "is the first swap free or does it cost"
+
+- id: q036
+  text: "what should i bring with me to a fitting"

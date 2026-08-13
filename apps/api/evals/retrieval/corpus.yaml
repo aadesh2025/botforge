@@ -1,0 +1,319 @@
+# Retrieval eval corpus — seed set (docs/13 R2, docs/14 P0-2).
+#
+# A support knowledge base for a fictional clothing/fabric retailer, which is the shape of a
+# real BotForge client. Deliberately built to be HARD for a lexical retriever:
+#
+#   * every document has at least one NEAR-MISS SIBLING that shares most of its vocabulary and
+#     answers a different question (domestic vs international refunds, store hours vs support
+#     hours, order cancellation vs subscription cancellation). Lexical overlap alone must not
+#     be enough to win.
+#   * the numbers echo real incidents. `store-hours` says Mon-Sat 10am-7pm IST and
+#     `refunds-domestic` says 14 days, because those are the two facts the 2026-08-02
+#     fabrication invented ("Mon-Fri 9am-5pm", "30-day refund window") when retrieval scored
+#     0.0318 and no context block was appended at all.
+#   * `refunds-domestic` / `refunds-international` are the docs/14 §3.2 W2 case: the
+#     distinguishing fact lives in the heading, and a chunk that drops its heading path carries
+#     no signal about which one it is.
+#
+# FROZEN. Editing a document changes what every committed baseline number means. Add new
+# documents at the end and re-baseline explicitly; never reword one in place.
+
+- id: refunds-domestic
+  title: "Returns Policy > Domestic Orders"
+  text: |
+    Returns Policy - Domestic Orders
+
+    Items bought for delivery within India may be sent back for a full refund within 14 days
+    of the date the parcel was signed for. The garment must be unworn, unwashed and carry its
+    original tags. Once the parcel reaches our warehouse the amount is credited to the original
+    payment method within 5 to 7 working days. Sale items and clearance stock are covered by
+    this window on the same terms as full-price stock.
+
+- id: refunds-international
+  title: "Returns Policy > International Orders"
+  text: |
+    Returns Policy - International Orders
+
+    Parcels shipped outside India are covered for 30 days from the delivery date, because
+    transit times vary considerably by destination. The buyer pays the return carriage and any
+    customs charges raised on the outbound shipment are not refundable. We recommend a tracked
+    service; we cannot process a refund on a parcel we never received. Refunds are issued in
+    the currency of the original transaction.
+
+- id: exchanges
+  title: "Returns Policy > Exchanges"
+  text: |
+    Exchanges
+
+    If a garment does not fit, an exchange is quicker than a return and a fresh purchase. Tell
+    us the size you want and we hold it against your order for 10 days. There is no charge for
+    the first exchange on any order; a second exchange on the same item is treated as a return
+    and a new purchase. Exchanges are limited to the same style in a different size or colour.
+
+- id: damaged-item
+  title: "Problems With an Order > Damaged on Arrival"
+  text: |
+    Damaged on Arrival
+
+    If a garment reaches you torn, stained or with a broken fastening, photograph it as it came
+    out of the packaging and send the pictures with your order number. We replace it at no cost
+    and arrange collection of the faulty piece. Do not wash or attempt a repair first, as that
+    makes the fault impossible for us to assess with the mill.
+
+- id: wrong-item
+  title: "Problems With an Order > Wrong Item Sent"
+  text: |
+    Wrong Item Sent
+
+    Picking errors happen. If the contents of your parcel do not match your confirmation email,
+    keep everything in its packaging and contact us. We despatch the correct piece the same
+    working day and send a prepaid label for the one you received in error. You are never
+    charged twice while the two parcels cross.
+
+- id: store-hours
+  title: "Contact > Showroom Opening Hours"
+  text: |
+    Showroom Opening Hours
+
+    Our showroom is open Monday to Saturday, 10am to 7pm IST. We are closed on Sundays and on
+    national holidays. The last fitting appointment of the day is taken at 6:15pm. During
+    Diwali week the showroom stays open until 9pm; those dates are announced on the front page
+    each year.
+
+- id: support-hours
+  title: "Contact > When You Will Hear Back"
+  text: |
+    When You Will Hear Back
+
+    Written enquiries can be sent at any hour. The team works through the queue between 9am and
+    6pm IST on working days, and most messages are answered the same day. Anything that arrives
+    over a weekend is picked up on Monday morning. Urgent problems with an order already in
+    transit are prioritised ahead of general questions.
+
+- id: shipping-domestic
+  title: "Delivery > Within India"
+  text: |
+    Delivery Within India
+
+    Orders confirmed before 2pm IST leave the same working day. Metro addresses usually receive
+    the parcel in 2 to 4 working days and other pin codes in 4 to 7. Delivery is free on orders
+    above Rs 2,500; below that a flat charge of Rs 99 applies. We do not deliver to PO boxes.
+
+- id: shipping-international
+  title: "Delivery > Outside India"
+  text: |
+    Delivery Outside India
+
+    We ship to most countries by tracked air freight, typically arriving in 7 to 14 working
+    days. Duties and import taxes are payable by the recipient on arrival and are not included
+    in the price shown at checkout. A few destinations are excluded by our carrier; the address
+    form will tell you at the point of entry rather than after payment.
+
+- id: tracking
+  title: "Delivery > Following Your Parcel"
+  text: |
+    Following Your Parcel
+
+    A tracking reference is emailed the moment the carrier scans your parcel into their
+    network, which is usually a few hours after despatch rather than instantly. The reference
+    can take a further 12 hours to become active on the carrier's own site. If it has not moved
+    for three working days, tell us and we open an enquiry with the carrier.
+
+- id: delivery-delays
+  title: "Delivery > When a Parcel Is Late"
+  text: |
+    When a Parcel Is Late
+
+    Weather, strikes and customs inspections all add days that no carrier can predict. We treat
+    a domestic parcel as lost once it is 10 working days past its estimate and an international
+    one at 21, and at that point we either resend or refund at your choice. You do not have to
+    wait for the carrier's own investigation to finish before we act.
+
+- id: cancel-order
+  title: "Orders > Cancelling an Order"
+  text: |
+    Cancelling an Order
+
+    An order can be stopped at no cost any time before it is handed to the carrier, which in
+    practice means within a couple of hours on a working day. After that it has to run its
+    course and be sent back under the returns policy instead. Cancelling does not close your
+    account or affect anything else you have bought.
+
+- id: cancel-subscription
+  title: "Fabric Club > Ending Your Membership"
+  text: |
+    Ending Your Membership
+
+    The Fabric Club renews on the same date each month and can be stopped from the membership
+    page at any time. Stopping it prevents the next charge; it does not refund the month you
+    are currently in, and the swatch box for that month is still sent. Your accumulated points
+    stay on the account for a year afterwards.
+
+- id: payment-methods
+  title: "Payment > What We Accept"
+  text: |
+    What We Accept
+
+    Cards from all major networks, UPI, net banking from 40-odd banks, and three of the common
+    wallets. Cash on delivery is offered on domestic orders below Rs 5,000 and carries a Rs 50
+    handling charge. We do not accept cheques, bank drafts or cryptocurrency.
+
+- id: payment-failed
+  title: "Payment > A Charge That Did Not Go Through"
+  text: |
+    A Charge That Did Not Go Through
+
+    When a payment is declined but the money has left your account, what you are seeing is
+    almost always a hold rather than a completed charge. Banks release these automatically,
+    usually within 3 to 5 working days and occasionally up to 10. No order is created against a
+    declined attempt, so placing a new one does not risk being billed twice.
+
+- id: gift-cards
+  title: "Payment > Gift Cards"
+  text: |
+    Gift Cards
+
+    Gift cards are delivered by email within a few minutes of purchase and are valid for three
+    years from the date of issue. They can be spent across several orders until the balance
+    runs out and can be combined with a promotional code. They cannot be exchanged for cash and
+    are not replaced if the code is forwarded to the wrong person.
+
+- id: store-credit
+  title: "Payment > Store Credit"
+  text: |
+    Store Credit
+
+    Store credit is what we issue when a return cannot go back to the original payment method,
+    for instance when the card has since expired. It never lapses, appears automatically at
+    checkout, and is used up before any card is charged. Unlike a gift card it is tied to your
+    account and cannot be transferred to anyone else.
+
+- id: sizing-womens
+  title: "Sizing > Women's Garments"
+  text: |
+    Women's Garments
+
+    Our women's range is cut to Indian standard sizing and runs slightly close through the
+    shoulder compared with European labels. If you are between two sizes on the chart, take the
+    larger one for structured pieces and the smaller for anything in jersey. Every product page
+    lists the measurements of the piece itself, not of the body it is meant to fit.
+
+- id: sizing-mens
+  title: "Sizing > Men's Garments"
+  text: |
+    Men's Garments
+
+    Men's shirts are offered in both a regular and a slim block; the slim block takes about two
+    inches out of the chest and waist. Trousers are sold by waist measurement with a fixed
+    inside leg per size, and we can shorten a leg at no charge if you tell us at the time of
+    ordering. Collar sizes follow the neck measurement, not the chest.
+
+- id: care-cotton
+  title: "Fabric Care > Cotton and Linen"
+  text: |
+    Cotton and Linen
+
+    Wash at 30 degrees on a gentle cycle and take the piece out while it is still slightly damp.
+    Both fibres crease by nature and press best with a warm iron on the reverse before they are
+    completely dry. Avoid tumble drying, which is what causes most of the shrinkage people
+    attribute to the first wash.
+
+- id: care-silk
+  title: "Fabric Care > Silk"
+  text: |
+    Silk
+
+    Silk should be cleaned professionally. If you must do it at home, use cold water and a
+    detergent made for delicates, never wring the piece out, and dry it flat away from direct
+    sun, which fades the dye unevenly. Deodorant and perfume mark silk permanently, so dress
+    after they have dried.
+
+- id: bulk-pricing
+  title: "Trade > Wholesale and Bulk"
+  text: |
+    Wholesale and Bulk
+
+    Orders above 50 pieces of one style are quoted individually rather than priced from the
+    site. Lead times run to 3 to 5 weeks depending on the mill's schedule, and a 40% deposit is
+    taken before cutting begins. Trade customers are invoiced on 30-day terms once a first
+    order has been completed.
+
+- id: retail-pricing
+  title: "Pricing > What the Price Includes"
+  text: |
+    What the Price Includes
+
+    Every price shown on the site includes GST. Nothing further is added at checkout for a
+    domestic order beyond the delivery charge, which is displayed before you confirm. Prices
+    are held for the duration of a season and any reduction is applied automatically rather
+    than needing a code.
+
+- id: promo-codes
+  title: "Pricing > Promotional Codes"
+  text: |
+    Promotional Codes
+
+    One code per order, entered on the payment page rather than in the basket. Codes do not
+    stack with each other but they do apply on top of a seasonal reduction unless the code
+    itself says otherwise. If a code is rejected the message on screen names the reason, most
+    often that it is restricted to a category your basket does not contain.
+
+- id: loyalty-points
+  title: "Fabric Club > Points"
+  text: |
+    Points
+
+    Members earn a point for every hundred rupees spent, and a hundred points comes off a
+    future order as a hundred rupees. Points post once the return window on the order has
+    closed rather than at the moment of purchase. They expire twelve months after the last
+    activity on the account.
+
+- id: account-password
+  title: "Your Account > Signing In"
+  text: |
+    Signing In
+
+    If you cannot get in, use the reset link on the sign-in page; it arrives within a minute and
+    stays valid for an hour. Accounts are not locked after failed attempts, so repeated tries do
+    nothing worse than waste time. Changing the password signs out every device except the one
+    you changed it on.
+
+- id: account-deletion
+  title: "Your Account > Closing Your Account"
+  text: |
+    Closing Your Account
+
+    Ask us in writing and the account is closed within seven days. Order records are kept for
+    the period tax law requires even after closure, but the address book, saved cards and
+    marketing preferences are removed. Closure is final; a later purchase starts a new account
+    with no history and no points.
+
+- id: privacy-marketing
+  title: "Your Account > Marketing Preferences"
+  text: |
+    Marketing Preferences
+
+    Email and SMS are separate settings and turning one off leaves the other running, which is
+    the usual reason someone still hears from us after opting out. Transactional messages about
+    an order you have placed are always sent and are not affected by these settings. Changes
+    take effect on the next send rather than retroactively.
+
+- id: warranty
+  title: "Quality > Manufacturing Faults"
+  text: |
+    Manufacturing Faults
+
+    A seam that fails, a zip that parts or dye that runs on a first correct wash is a fault in
+    the making and is covered for a year from purchase whatever the returns window says. Wear,
+    fading with age, and damage from an incorrect wash are not covered. We repair where a repair
+    is sound and replace where it is not.
+
+- id: appointments
+  title: "Showroom > Booking a Fitting"
+  text: |
+    Booking a Fitting
+
+    Fittings are half an hour and are booked from the showroom page or by phone. Walk-ins are
+    welcome but a booked slot takes priority, and Saturdays fill about a week ahead. Bring the
+    shoes you intend to wear with the piece, since hem length is decided in the room and cannot
+    be judged afterwards.

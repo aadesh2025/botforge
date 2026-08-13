@@ -64,6 +64,26 @@ jobs:
       - name: Red-team corpus (guardrail regression gate)
         run: uv run pytest tests/test_redteam_corpus.py tests/test_guardrails_redteam.py -q -s
 
+      # Retrieval quality, on its own for the same reason as the red-team gate above: a drop in
+      # NDCG buried among 780 tests reads as flake. Two steps, because they answer different
+      # questions and only one of them can run without a model.
+      #
+      # The harness's own tests pin the arithmetic — a silently wrong NDCG would make every
+      # later phase report an improvement it did not earn.
+      - name: Retrieval eval harness (metrics + corpus integrity)
+        run: uv run pytest tests/test_retrieval_eval.py -q
+
+      # The keyword half against the frozen corpus, scored end to end through the real ingest
+      # pipeline. Deterministic and model-free: FTS never touches embeddings, so the fake
+      # embedder changes nothing. This would have caught the P0-1 index regression, and it
+      # catches a chunking or fts_config regression. Fails on an NDCG@10 drop beyond tolerance.
+      #
+      # `dense` and `hybrid` are NOT run here — they need a genuine embedding provider, and a
+      # dense score under the fake embedder measures a hash function. Run `make
+      # eval-retrieval-full` locally against Ollama and commit the baseline it prints.
+      - name: Retrieval eval (keyword half, regression gate)
+        run: uv run python ../../scripts/eval_retrieval.py --variants fts
+
       - name: Pytest
         run: uv run pytest -q
 

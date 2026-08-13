@@ -61,6 +61,13 @@ clean-devdata: ## Remove ephemeral @example.com test users/orgs + the live_demo 
 explain-fts: ## EXPLAIN the hybrid-retrieval keyword query — proves it uses the GIN index (P0-1)
 	cd $(API) && uv run python ../../scripts/explain_fts.py
 
+eval-retrieval: ## Score retrieval against the frozen eval set — keyword half, no model needed
+	cd $(API) && uv run python ../../scripts/eval_retrieval.py --variants fts
+
+eval-retrieval-full: ## Same, plus dense + hybrid. Needs a real embedder (Ollama nomic-embed-text)
+	cd $(API) && uv run python ../../scripts/eval_retrieval.py \
+		--variants fts,dense,hybrid --embedder-provider ollama
+
 provision: ## Provision a client end-to-end: make provision NAME="Acme Co" EMAIL=owner@acme.com
 	node scripts/provision-client.mjs --name "$(NAME)" --email "$(EMAIL)" --plan "$(or $(PLAN),starter)"
 
