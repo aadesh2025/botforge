@@ -11,7 +11,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-botforge}
       POSTGRES_DB: ${POSTGRES_DB:-botforge}
     ports:
-      - "5432:5432"
+      # Same reason as N8N_HOST_PORT below: 5432 is routinely already taken on a dev machine by
+      # another project's Postgres, and BotForge must not be pointed at that one — it would
+      # migrate someone else's database. Container port stays 5432, so DATABASE_URL is the only
+      # other thing to line up. Default keeps the canonical setup unchanged.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -64,6 +68,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-botforge}:${POSTGRES_PASSWORD:-botforge}@postgres:5432/${POSTGRES_DB:-botforge}
       REDIS_URL: redis://redis:6379/0
       OLLAMA_BASE_URL: http://ollama:11434
+      # Internal address only; the service publishes no host port (docs/14 §9).
+      DOCLING_ENDPOINT: http://docling:5001
     volumes:
       - ../apps/api:/app
       - api_venv:/app/.venv
@@ -130,6 +136,32 @@ services:
     volumes:
       - n8ndata:/home/node/.n8n
 
+  # Layout-aware document extraction (docs/14 K1-2). Its own service rather than in-process in
+  # the worker, for the reasons in docs/14 §4.1: the worker image stays free of torch and the
+  # layout models, a bad PDF cannot OOM the worker, and it scales (or gets a GPU) on its own.
+  docling:
+    image: ghcr.io/docling-project/docling-serve:latest
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "false"
+      # RapidOCR downloads its models on first use and breaks on a read-only filesystem —
+      # called out in Docling's own PdfPipelineOptions docstring (docs/14 §3.8 trap 3). The
+      # volume below is that writable cache; without it OCR fails at runtime, not at startup.
+      HF_HOME: /opt/app-root/src/.cache/huggingface
+    volumes:
+      - doclingmodels:/opt/app-root/src/.cache
+    # DELIBERATELY NO `ports:`. docs/14 §9: this service accepts arbitrary documents and URLs,
+    # so publishing it is SSRF plus resource exhaustion. It is reachable on the compose network
+    # as http://docling:5001 and must stay that way.
+    expose:
+      - "5001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      # Layout models load on boot; a short start period would mark it unhealthy while it works.
+      start_period: 120s
+
   ollama:
     image: ollama/ollama
     ports:
@@ -142,5 +174,6 @@ volumes:
   redisdata:
   n8ndata:
   ollamadata:
+  doclingmodels:
   api_venv:
   web_node_modules:

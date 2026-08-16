@@ -6,8 +6,10 @@ test session. The Celery task in `app.worker.tasks` wraps it with its own commit
 
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
+from typing import Any
 
 import httpx
 from sqlalchemy import delete
@@ -17,7 +19,7 @@ from app.chat.pii import scan_document_text
 from app.core.logging import get_logger
 from app.llm.registry import build_embedding_provider
 from app.models import Chunk, Document, KnowledgeBase
-from app.rag import loaders
+from app.rag import converters, loaders
 from app.rag.chunking import chunk_text
 from app.webhooks.dispatch import emit_event
 
@@ -26,22 +28,68 @@ log = get_logger("rag.ingest")
 _EMBED_BATCH = 64
 
 
-def _read_file_source(storage_path: str, filename: str | None, mime_type: str | None) -> str:
+def _stored_bytes(storage_path: str) -> bytes:
+    """Read the uploaded file. Sync on purpose — see below.
+
+    Kept out of the async path so the blocking read is honest rather than hidden inside a
+    coroutine (ruff ASYNC240). It runs in the Celery ingest worker, where blocking on a local
+    file for a few milliseconds is the expected shape of the job, not a latency problem.
+    """
     path = Path(storage_path)
     if not path.exists():
         raise loaders.LoaderError(f"Stored file is missing: {path}")
-    data = path.read_bytes()
-    return loaders.load_bytes(data, filename=filename, mime_type=mime_type)
+    return path.read_bytes()
 
 
-async def _read_source(document: Document, *, url_transport: httpx.AsyncBaseTransport | None) -> str:
+async def _read_source(
+    document: Document,
+    *,
+    url_transport: httpx.AsyncBaseTransport | None,
+    docling_transport: httpx.AsyncBaseTransport | None = None,
+) -> converters.ConvertedDocument:
     if document.source_type == "url":
         if not document.source_url:
             raise loaders.LoaderError("Document has no source URL.")
-        return await loaders.load_url(document.source_url, transport=url_transport)
+        # URL ingest deliberately stays on trafilatura and does NOT go through Docling. The
+        # SSRF controls in `loaders.load_url` (scheme check, private/loopback rejection) are
+        # what stand between a visitor-suppliable URL and the internal network, and handing the
+        # URL to docling-serve to fetch would route around them entirely — docs/14 §9's rule
+        # that a new code path must not bypass an existing control. trafilatura also already
+        # produces structured markdown for HTML, which is what Docling would add.
+        text = await loaders.load_url(document.source_url, transport=url_transport)
+        return converters.ConvertedDocument(text=text, backend=converters.BACKEND_LEGACY)
     if not document.storage_path:
         raise loaders.LoaderError("Document has no stored file.")
-    return _read_file_source(document.storage_path, document.filename, document.mime_type)
+    data = _stored_bytes(document.storage_path)
+    return await converters.convert_with_fallback(
+        data,
+        filename=document.filename,
+        mime_type=document.mime_type,
+        transport=docling_transport,
+    )
+
+
+def _persist_docling_json(document: Document, payload: dict[str, Any]) -> str | None:
+    """Write the `DoclingDocument` beside the source file. Never fails the ingest.
+
+    Losing the structured form costs a future re-chunk a re-conversion (docs/14 §8: "fall back
+    to full re-conversion; log it"). Losing the *document* because a disk was full would be a
+    far worse trade, so this is best-effort by design.
+    """
+    if not document.storage_path:
+        return None
+    path = Path(document.storage_path).with_suffix(".docling.json")
+    try:
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError as exc:
+        log.warning(
+            "docling_json_persist_failed",
+            document_id=str(document.id),
+            error=str(exc)[:200],
+            impact="re-chunking this document will need a full re-conversion",
+        )
+        return None
+    return str(path)
 
 
 async def ingest_document(
@@ -49,6 +97,7 @@ async def ingest_document(
     document_id: uuid.UUID,
     *,
     url_transport: httpx.AsyncBaseTransport | None = None,
+    docling_transport: httpx.AsyncBaseTransport | None = None,
 ) -> Document:
     """Parse, chunk, embed and store a document. Sets status ready|failed; never raises."""
     document = await session.get(Document, document_id)
@@ -63,9 +112,17 @@ async def ingest_document(
     await session.flush()
 
     try:
-        text = await _read_source(document, url_transport=url_transport)
+        converted = await _read_source(
+            document, url_transport=url_transport, docling_transport=docling_transport
+        )
+        text = converted.text
         if not text.strip():
             raise loaders.LoaderError("No extractable text in document.")
+        document.extraction_backend = converted.backend
+        # Persisted before chunking, so a later re-chunk (K2-4) can skip conversion entirely.
+        document.docling_json_path = (
+            _persist_docling_json(document, converted.document) if converted.document else None
+        )
 
         # Scan before chunking, so a contact detail split across a chunk boundary is still
         # counted once against the whole document (docs/11 Phase B, §6).
@@ -84,7 +141,13 @@ async def ingest_document(
             text,
             kb.chunk_size,
             kb.chunk_overlap,
-            metadata={"filename": document.filename, "source_url": document.source_url},
+            metadata={
+                "filename": document.filename,
+                "source_url": document.source_url,
+                # Provenance on the chunk itself, so a retrieved result can be traced to the
+                # extractor that produced it without a join back to `documents`.
+                "backend": converted.backend,
+            },
         )
         if not chunks:
             raise loaders.LoaderError("Document produced no chunks.")

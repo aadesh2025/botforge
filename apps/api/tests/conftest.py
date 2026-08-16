@@ -30,6 +30,10 @@ settings.guard_distress_enabled = False
 # existing retrieval test keeps asserting RRF's ordering, so the reranker cannot change a result
 # nobody asked it to; `test_rerank.py` turns it on with a mock transport.
 settings.rerank_enabled = False
+# And Docling, which is an HTTP call to a container on every file ingest. Off here means every
+# existing ingest test keeps exercising the legacy extractor it was written against;
+# `test_converters.py` turns it on with a mock transport.
+settings.docling_enabled = False
 
 
 @pytest.fixture

@@ -69,6 +69,29 @@ class Settings(BaseSettings):
     # it with `make eval-retrieval-full` against a real client KB before raising it.
     rag_rrf_fts_weight: float = 0.05
 
+    # --- Docling ingestion (docs/14 K1) ---
+    # Layout-aware extraction, reading order, table structure and OCR, replacing the flat
+    # `pypdf` text stream. Runs in the Celery worker, so it cannot touch the p50 first-token
+    # budget — the risk here is a bad extraction, not a slow chat.
+    #
+    # OFF by default and rolled out per docs/14 §12. `LegacyConverter` is never deleted, so
+    # every step back is a flag flip. Any Docling failure falls back to it rather than failing
+    # the document: a client must never be told their upload is broken because an internal
+    # service was down.
+    docling_enabled: bool = False
+    # A `docling-serve` base URL. INTERNAL ONLY — do not publish its port (docs/14 §9): it
+    # accepts arbitrary documents and URLs, so a public port is SSRF plus resource exhaustion.
+    # Enabled with this empty warns at startup and silently takes the legacy path.
+    docling_endpoint: str = ""
+    # Turns a scanned PDF from `LoaderError: no extractable text` into a working document.
+    docling_do_ocr: bool = True
+    # Reconstructs row/column relationships. Without it a pricing table becomes word soup and
+    # numbers lose their row — the content shape that produces confidently wrong price answers.
+    docling_do_table_structure: bool = True
+    # Docling's own guidance is 90-120s. Ingest is a background job, so this buys correctness
+    # on a large document rather than costing anyone latency.
+    docling_timeout_seconds: float = 120.0
+
     # --- Reranking (docs/13 R1, docs/14 K4) ---
     # Stage 4: a cross-encoder reorders the fused RRF candidates. OFF platform-wide and off per
     # agent, because it costs a network round trip *before* generation starts — straight out of

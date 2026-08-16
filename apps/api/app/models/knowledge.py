@@ -66,6 +66,20 @@ class Document(Base, UUIDPrimaryKey, TimestampMixin):
     #: PII is the same leak in a different place. `None` means the document predates the scan;
     #: `{}` means it was scanned and is clean, and the UI distinguishes the two.
     pii_flags: Mapped[dict[str, int] | None] = mapped_column(JSONB)
+    #: Which extractor produced this document's chunks — `legacy` (pypdf/python-docx/csv) or
+    #: `docling`. Recorded so a re-ingest campaign is targetable and a quality regression is
+    #: attributable to a backend. A mixed corpus is the *expected* state during the docs/14 §12
+    #: rollout, not a transient one.
+    extraction_backend: Mapped[str] = mapped_column(String(16), default="legacy", nullable=False)
+    #: Path to the persisted `DoclingDocument` JSON, or `None` when there is no structured form
+    #: (legacy extraction, or Docling before persistence existed). A **path**, not the JSON:
+    #: these blobs carry per-element geometry and table cells, and a `jsonb` column would bloat
+    #: the table every tenant query touches (docs/14 §6).
+    #:
+    #: What it buys: re-chunking never re-runs the ML pipeline. Chunk size, the tokenizer and
+    #: the chunker itself become parameters the eval harness can optimise, rather than a
+    #: one-shot commitment paid for by re-converting every document in every org.
+    docling_json_path: Mapped[str | None] = mapped_column(String(1024))
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
 
 

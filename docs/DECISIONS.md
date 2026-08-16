@@ -18,6 +18,47 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-064: Docling is a converter *behind* the legacy one, and a Docling outage is not an ingest failure
+- **Date:** 2026-08-16
+- **Status:** accepted
+- **Context:** docs/14 K1. Extraction was `pypdf`/`python-docx`/csv/plaintext — structure-blind,
+  so a table arrived as a run-on line and a heading was indistinguishable from body text.
+  Docling fixes that, but it is an ML pipeline in a separate container, which means introducing
+  a **new way for an upload to fail** into a path that previously depended on nothing but the
+  local disk.
+- **Decision:** (a) A `DocumentConverter` Protocol with two implementations; `LegacyConverter`
+  is the default and is **never deleted**, because it is also the fallback. (b)
+  `convert_with_fallback()` catches **everything** from the Docling path — HTTP error, timeout,
+  malformed JSON, missing `document` key, and an extraction that is merely *empty* — and re-runs
+  the legacy extractor. A document reaches `status=ready` either way; only the legacy path
+  failing can mark it `failed`. (c) Which extractor ran is recorded on the row
+  (`documents.extraction_backend`) **and** on every chunk's metadata, so a quality regression is
+  attributable without a join. (d) The `DoclingDocument` JSON is persisted beside the source
+  file as a **path**, not a `jsonb` column. (e) **URL ingest deliberately does not go through
+  Docling** and stays on trafilatura.
+- **Alternatives considered:** *Let a Docling failure fail the ingest* — rejected outright:
+  nothing re-drives a failed document, so an outage would leave every upload during it as
+  `failed` with an error message about an internal service, and the client would have to notice
+  and re-upload. Extracting with `pypdf` is strictly better than that. *Treat an empty
+  extraction as an empty document* — rejected; it is indistinguishable from a failure and the
+  legacy parser deserves its go first (docs/14 §8). *Store the DoclingDocument in a `jsonb`
+  column* — rejected: these blobs carry per-element geometry and table cells, and the bloat
+  lands on a table every tenant query touches. *Hand the URL to docling-serve to fetch* —
+  rejected as an SSRF hole: `loaders.load_url`'s scheme and private/loopback checks are what
+  stand between a visitor-suppliable URL and the internal network, and a new code path must not
+  route around an existing control (docs/14 §9). trafilatura already produces structured
+  markdown for HTML, which is the only thing Docling would have added.
+- **Consequences:** a mixed corpus is the **expected** state during rollout, not a transient
+  one — hence the recorded backend. Persisting the structured form is what makes re-chunking
+  (K2) a parameter sweep instead of a full re-conversion of every document in every org; it is
+  best-effort, so losing it costs a future re-conversion and never the document. `docling-serve`
+  is `expose:`d on the compose network with **no published port** — it accepts arbitrary
+  documents and URLs, so a host port is SSRF plus resource exhaustion. Off by default
+  (`DOCLING_ENABLED=false`); enabled-with-no-endpoint degrades to legacy and says so at startup.
+  **Not enabled for any live deployment yet** — K1-5's golden files (a scanned PDF, a
+  table-heavy PDF, the 2026-08-03 PII-incident PDF) need real binaries that are not in the repo,
+  and docs/14 §11 is explicit that hand-typed fixtures cannot stand in for them.
+
 ### ADR-063: Reranking is platform infrastructure, off by default, and fails open to RRF order
 - **Date:** 2026-08-13
 - **Status:** accepted

@@ -646,6 +646,20 @@ until re-ingested. Read defensively; never assume `heading` exists.
 **K1-5 is the acceptance test for the phase** — it converts a past incident into a regression test,
 the same move docs/11 made with the red-team corpus.
 
+> **Status 2026-08-16 — K1-1 … K1-4 shipped; K1-5 is OPEN, so K1 is not done.** ADR-064.
+> `app/rag/converters.py`, migration 0020, the `docling` compose service (`expose:` only, no
+> published port), `DOCLING_*` settings off by default. Covered by `tests/test_converters.py`
+> (13) and `tests/test_ingest_docling.py` (6) — both directions on the same input, including a
+> simulated outage still reaching `status=ready` via `LegacyConverter`.
+>
+> **K1-5 is blocked on binaries, not on code.** It names three real files (a scanned PDF, a
+> table-heavy PDF, the PII-incident PDF) and none are in the repo. §11 of this document is
+> explicit that hand-typed fixtures cannot substitute — that is precisely how the 2026-08-03 PII
+> detector shipped believing it worked, when real extracted text carried `\x01` for ☎ and tabs
+> for spacing and libphonenumber matched nothing. Writing a synthetic "scanned PDF" here would
+> reproduce that mistake with a green tick on top. **Docling stays disabled for every deployment
+> until K1-5 has real files**, which is the honest reading of "K1-5 is the acceptance test".
+
 ### Phase K2 — HybridChunker + real tokens
 
 | # | Task | Done when |

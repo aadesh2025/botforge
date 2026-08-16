@@ -30,8 +30,16 @@ which parses the file with its own rules that the Python fix cannot reach.
 | `ENV` | dev/test/prod | yes | dev | no |
 | `SECRET_KEY` | JWT signing + key encryption | yes | — | yes (generate) |
 | `DATABASE_URL` | Postgres async DSN | yes | compose default | no |
+| `POSTGRES_HOST_PORT` | host port the bundled Postgres binds (default `5432`); must agree with `DATABASE_URL`. **Compose-only**, same as `N8N_HOST_PORT` — read from the shell or `infra/.env`, not from the root `.env` | no |
 | `REDIS_URL` | Redis DSN | yes | compose default | no |
 | `API_BASE_URL` / `WEB_BASE_URL` | absolute URLs | yes | localhost | no |
+
+`POSTGRES_HOST_PORT` exists for the same reason as `N8N_HOST_PORT`: on a machine running more
+than one project, 5432 is usually already bound. The tempting shortcut — leaving `DATABASE_URL`
+on 5432 and using whatever Postgres answers there — is the dangerous one, because
+`alembic upgrade head` would then migrate another project's database. Move BotForge's own
+instead (`POSTGRES_HOST_PORT=5433`, `DATABASE_URL=...@localhost:5433/botforge`); the container
+port and the `pgdata` volume are unchanged, so no data moves with it.
 
 ## LLM providers (free-first)
 | Var | Purpose | Needs human |
@@ -151,6 +159,32 @@ for prod; local default in dev.
   0.898 vs keyword 0.660) and equal weighting put hybrid *below* dense-only. **0.05 is a
   conservative floor, not a fitted optimum** — see ADR-058 for the full sweep and what it does
   not establish. Re-fit with `make eval-retrieval-full` against a real client knowledge base.
+
+### Docling extraction — docs/14 K1
+
+Layout-aware extraction replacing `pypdf`'s flat text stream: real headings, reading order,
+table structure and OCR. Runs in the Celery ingest worker, so it **cannot** affect chat latency
+— the risk here is a bad extraction, not a slow reply. **Off by default**; roll out per
+docs/14 §12, where every step back is a flag flip because `LegacyConverter` is never deleted.
+
+- `DOCLING_ENABLED` (default `false`) — the switch.
+- `DOCLING_ENDPOINT` (default empty) — base URL of a `docling-serve` instance. **Internal
+  only. Never publish its port** (docs/14 §9): it accepts arbitrary documents and URLs, so a
+  public port is SSRF plus resource exhaustion. The dev compose file sets this on the worker as
+  `http://docling:5001` and gives the service `expose:` rather than `ports:`.
+  **Enabled with this empty warns at startup** and silently takes the legacy path.
+- `DOCLING_DO_OCR` (default `true`) — turns `scanned PDF → LoaderError: no extractable text`
+  into a working document.
+- `DOCLING_DO_TABLE_STRUCTURE` (default `true`) — reconstructs row/column relationships. Without
+  it a pricing table becomes word soup and numbers lose their row, which is the content shape
+  that produces confidently wrong price answers.
+- `DOCLING_TIMEOUT_SECONDS` (default `120`) — Docling's own guidance is 90–120s. On timeout the
+  document falls back to the legacy extractor rather than failing.
+
+**URL ingest deliberately does not go through Docling.** The SSRF controls in
+`loaders.load_url` are what stand between a user-supplied URL and the internal network, and
+handing the URL to `docling-serve` to fetch would route around them — docs/14 §9's rule that a
+new code path must not bypass an existing control.
 
 ### Reranking (stage 4) — ADR-063
 
