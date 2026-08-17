@@ -29,8 +29,18 @@ observability (`SENTRY_DSN`). Every var: name, purpose, required?, default, "nee
 ```bash
 cp .env.example .env   # set SECRET_KEY, POSTGRES_PASSWORD, DOMAIN, API_DOMAIN, ACME_EMAIL,
                        # NEXT_PUBLIC_API_BASE_URL=https://$API_DOMAIN, CORS_ORIGINS=https://$DOMAIN
-cd infra && docker compose -f docker-compose.prod.yml up -d --build
+cd infra && docker compose --env-file ../.env -f docker-compose.prod.yml up -d --build
 ```
+
+⚠️ **`--env-file ../.env` is required, and the instructions here previously omitted it.** Two
+mechanisms read env from two different files: `env_file: ../.env` supplies the *containers* their
+application settings, but `${VAR}` **interpolation inside the compose file** is resolved by Compose
+itself, which reads the shell and `infra/.env` — **never `../.env`**. Verified: with
+`POSTGRES_PASSWORD` present in `../.env` and absent from the shell, `docker compose config` still
+fails with *"required variable POSTGRES_PASSWORD is missing a value"*. It fails loudly before
+anything starts, which is the one good thing about it. Affects `POSTGRES_PASSWORD`, `DOMAIN`,
+`API_DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_API_BASE_URL`, `OLLAMA_BASE_URL` and the `*_MEM_LIMIT`
+variables — pass `--env-file`, or put them in `infra/.env`.
 
 - **Reverse proxy: Caddy** (`infra/caddy/Caddyfile`) — automatic HTTPS (Let's Encrypt) for two
   hostnames: `$DOMAIN`→web:3000 and `$API_DOMAIN`→api:8000; HSTS + security headers on the web host
@@ -48,6 +58,28 @@ cd infra && docker compose -f docker-compose.prod.yml up -d --build
   each file, so one volume covers both.
 - **An `ollama` service for embeddings**, internal-only. See §3a — this needs reading before a
   first deploy, because the failure it prevents is silent.
+- **A memory limit on every service** (docs/15 PROD-3). Before this, any container could take all
+  RAM and the kernel OOM-killer chose a victim host-wide — usually Postgres, since it is the
+  largest resident process, and `restart: unless-stopped` then restarted into the same condition.
+  With limits, an overrunning container is killed **alone** (`OOMKilled=true`, exit 137). Postgres
+  and Redis additionally get memory **reservations**, which is what actually protects them: under
+  host pressure the kernel reclaims from containers *above* their reservation first, whereas a
+  limit only stops a service growing.
+  - Defaults target the 16 GB VPS of docs/15 §4 Option 1. Every one is overridable —
+    `POSTGRES_MEM_LIMIT` (3g), `WORKER_MEM_LIMIT` (3g), `OLLAMA_MEM_LIMIT` (4g),
+    `API_MEM_LIMIT` (2g), `REDIS_MEM_LIMIT` (1g), `WEB_MEM_LIMIT` (1g), `MIGRATE_MEM_LIMIT` (1g),
+    `BEAT_MEM_LIMIT` / `BACKUP_MEM_LIMIT` (512m), `CADDY_MEM_LIMIT` (256m), plus
+    `POSTGRES_MEM_RESERVATION` (1g) and `REDIS_MEM_RESERVATION` (256m).
+  - **The ceilings sum to more than the box has, on purpose.** They are ceilings, not a budget:
+    sizing every service at its worst case would leave most of a 16 GB machine idle. Steady state
+    is ~3.5–6 GB (docs/15 §3.1) plus ollama.
+  - ⚠️ **A limit set too low is a crashloop.** `docker inspect <container> --format
+    '{{.State.OOMKilled}}'` tells you in one command; raise that service's variable. Postgres is
+    the one to watch — an HNSW index build is spiky and is not the steady state.
+  - **No CPU limits on `api` or `ollama`**, deliberately: both serve the p50 first-token path.
+    `retrieval.search()` embeds the visitor's query inline on every RAG turn, so `ollama` is
+    latency-critical exactly as the reranker is — a point docs/15 §3.4's table missed. CPU caps
+    belong on the batch ML services (docling-serve, ASR) when they land.
 - Scale stateless tiers: `docker compose -f docker-compose.prod.yml up -d --scale api=3 --scale worker=3`
   (the realtime hub is Redis-backed — ADR-028 — so multi-replica WebSocket fan-out works).
   ⚠️ **The `uploads` volume does not survive a second machine.** Scaling replicas on one host is

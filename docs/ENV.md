@@ -53,6 +53,24 @@ port and the `pgdata` volume are unchanged, so no data moves with it.
 | `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | default embeddings | no |
 | `EMBEDDING_PROBE_ENABLED` | startup reachability check for the above | no (default on) |
 
+## Production compose interpolation (not container env)
+
+⚠️ **These are read by Compose itself, not by the app, and they do NOT come from `.env`.** Compose
+resolves `${VAR}` from the shell and from `infra/.env` — never from the `../.env` that
+`env_file:` gives the containers. Pass `--env-file ../.env` or put them in `infra/.env`; see
+`docs/09` §3, which had this wrong until 2026-08-17.
+
+| Variable | Purpose |
+|---|---|
+| `POSTGRES_PASSWORD`, `DOMAIN`, `API_DOMAIN`, `ACME_EMAIL`, `NEXT_PUBLIC_API_BASE_URL` | required; compose refuses to start without them |
+| `POSTGRES_HOST_PORT`, `N8N_HOST_PORT` | host ports, for machines where 5432/5678 are taken |
+| `POSTGRES_MEM_LIMIT` (3g), `WORKER_MEM_LIMIT` (3g), `OLLAMA_MEM_LIMIT` (4g), `API_MEM_LIMIT` (2g), `REDIS_MEM_LIMIT` (1g), `WEB_MEM_LIMIT` (1g), `MIGRATE_MEM_LIMIT` (1g), `BEAT_MEM_LIMIT` (512m), `BACKUP_MEM_LIMIT` (512m), `CADDY_MEM_LIMIT` (256m) | per-service memory ceilings (docs/15 PROD-3) |
+| `POSTGRES_MEM_RESERVATION` (1g), `REDIS_MEM_RESERVATION` (256m) | soft floors — what actually protects the datastores under host pressure |
+
+Defaults target a 16 GB VPS. **They are ceilings, not a budget, and sum to more than the box has**
+on purpose. ⚠️ **Set one too low and that service crashloops** — check
+`docker inspect <container> --format '{{.State.OOMKilled}}'` and raise it.
+
 **Embeddings are the one provider with no fallback**, so two things about them are worth knowing
 before a deploy (docs/15 PROD-2):
 

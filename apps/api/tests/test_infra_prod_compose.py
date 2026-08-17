@@ -200,6 +200,62 @@ def test_the_platform_does_not_hard_depend_on_embeddings(compose: dict[str, Any]
         )
 
 
+# ── PROD-3: nothing may be able to eat the whole box ─────────────────────────────────────────
+
+def test_every_service_declares_a_memory_limit(compose: dict[str, Any]) -> None:
+    """The bug: no limits at all, so the kernel OOM-killer chose a victim host-wide.
+
+    It usually chose Postgres, because Postgres is the largest resident process, and
+    `restart: unless-stopped` then restarted everything into the same condition. With a limit, a
+    container that overruns is killed alone (verified: `OOMKilled=true`, exit 137).
+
+    Asserted for *every* service rather than a listed set, because the way this bug comes back is
+    someone adding a service — docling-serve, an ASR worker, a rerank container — and not thinking
+    about its ceiling. Those are exactly the memory-hungry ones (docs/15 §3.2).
+    """
+    missing = []
+    for name, service in sorted(_services(compose).items()):
+        limits = ((service.get("deploy") or {}).get("resources") or {}).get("limits") or {}
+        if not (limits.get("memory") or service.get("mem_limit")):
+            missing.append(name)
+    assert not missing, (
+        f"no memory limit on: {missing}. On a single VPS any one of these can consume all RAM "
+        "and the OOM killer will pick a victim — usually Postgres (docs/15 PROD-3)."
+    )
+
+
+def test_the_datastores_reserve_memory_so_they_are_preferred_under_pressure(
+    compose: dict[str, Any],
+) -> None:
+    """A limit stops a service growing; it does not make the kernel *prefer* it when RAM is short.
+
+    docs/15 PROD-3 asks for Postgres and Redis to be protected "by construction, not by hope".
+    That is the reservation, not the limit: under host pressure the kernel reclaims from containers
+    above their reservation first.
+    """
+    for name in ("postgres", "redis"):
+        resources = (_services(compose)[name].get("deploy") or {}).get("resources") or {}
+        reserved = (resources.get("reservations") or {}).get("memory")
+        assert reserved, f"'{name}' has no memory reservation; a limit alone does not protect it"
+
+
+def test_the_latency_path_is_not_cpu_capped(compose: dict[str, Any]) -> None:
+    """`api` and `ollama` both sit on the p50 first-token path, so neither gets a CPU ceiling.
+
+    This is a correction to docs/15 §3.4, which lists the reranker as latency-critical and the
+    chart VLM and Whisper as throughput, and omits embeddings entirely — but
+    `retrieval.search()` embeds the visitor's query inline on every RAG turn, so `ollama` is on
+    that path exactly as the reranker is. CPU caps belong on the batch ML services when they land.
+    """
+    for name in ("api", "ollama"):
+        limits = ((_services(compose)[name].get("deploy") or {}).get("resources") or {}).get(
+            "limits"
+        ) or {}
+        assert "cpus" not in limits, (
+            f"'{name}' has a cpu limit, but it serves the first-token latency path"
+        )
+
+
 # ── the image the mount depends on ───────────────────────────────────────────────────────────
 
 def test_the_dockerfile_creates_the_upload_dir_before_dropping_privileges() -> None:

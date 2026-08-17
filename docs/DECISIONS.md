@@ -18,6 +18,59 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-069: Memory ceilings everywhere, reservations on the datastores, and no CPU cap on the latency path
+- **Date:** 2026-08-17
+- **Status:** accepted
+- **Context:** docs/15 §2 PROD-3. No `deploy.resources`, `mem_limit` or `cpus` on any service in the
+  prod compose, so on a single co-located VPS any container could consume all RAM and the kernel
+  OOM-killer would pick a victim **host-wide** — usually Postgres, because Postgres is the largest
+  resident process. `restart: unless-stopped` then restarted everything into the same condition.
+  Tolerable only while nothing in the stack is memory-hungry, which stopped being true the moment
+  ADR-068 added an ML container (`ollama`) and stops being true properly when docling-serve lands.
+- **Decision:** a memory limit on **all ten services**, every value overridable
+  (`POSTGRES_MEM_LIMIT` … `CADDY_MEM_LIMIT`), defaults sized for the 16 GB VPS of docs/15 §4
+  Option 1. Plus memory **reservations** on Postgres and Redis.
+- **Verified, not assumed.** Non-swarm Compose does honour `deploy.resources`: `limits.memory` →
+  `Memory`, `reservations.memory` → `MemoryReservation`, `limits.cpus` → `NanoCpus`, confirmed via
+  `docker inspect` on a throwaway stack. And a container overrunning its own limit is killed
+  **alone** (`OOMKilled=true`, exit 137), which is the property §2 asked for.
+- **A limit is not protection — that is why the reservations exist.** A limit only stops a service
+  *growing*; under host pressure the kernel reclaims from containers **above** their reservation
+  first. So the reservation is what makes "protect Postgres and Redis by construction, not by hope"
+  true, and a test asserts both are present.
+- **⚠️ The ceilings sum to ~16.25 GB on a 16 GB box, on purpose.** They are ceilings, not a budget:
+  sizing every service at its worst case would leave most of the machine idle. Steady state is
+  §3.1's ~3.5–6 GB plus ollama, `migrate` is one-shot and `backup` sleeps 24h at a time. What the
+  ceilings buy is that no *single* service can take the host.
+- **⚠️ The honest risk this fix introduces: a limit set too low is a crashloop**, converting "works
+  but unprotected" into "restarts forever". docs/15 §7 rates the §3 RAM figures only medium
+  confidence and they were never measured on this stack, so every default carries headroom over the
+  estimate and every one is overridable. Postgres is the one to watch — an HNSW index build is
+  spiky and is not the steady state. `docker inspect --format '{{.State.OOMKilled}}'` separates
+  "limit too low" from "bug" in one command; `docs/09` §3 says so rather than leaving it to be
+  rediscovered at 3am.
+- **⚠️ A correction to docs/15 §3.4, which is why there are no CPU limits on `api` or `ollama`.**
+  §3.4 splits the work into latency-critical (the reranker) and throughput (chart VLM, Whisper) and
+  **omits embeddings** — but `retrieval.search()` embeds the visitor's *query* inline on every RAG
+  turn, so `ollama` sits on the p50 first-token path exactly as the reranker does. Capping its CPU
+  would add latency to every grounded answer and buy nothing, since a runaway there is a memory
+  problem. §3.4's argument survives intact; its conclusion just belongs on the **batch** ML
+  services when they land. A test pins that neither latency-path service acquires a CPU cap.
+- **Alternatives considered:** *`mem_limit` instead of `deploy.resources`* — equivalent (measured:
+  both produce `Memory=314572800`) but `deploy.resources` also expresses reservations and cpus, so
+  one syntax covers everything; the test accepts either so an older file does not read as unlimited.
+  *`--maxmemory` on Redis so it evicts instead of dying* — **rejected, and this one matters**: Redis
+  is the Celery **broker** as well as the cache, so an eviction policy would silently drop queued
+  ingest and email tasks. A visible restart loses nothing (AOF persists); a vanished task is
+  invisible. *CPU limits on everything, per §3.4* — see above. *Limits summing to the box's RAM* —
+  rejected, that is a budget, not a ceiling, and it wastes the machine.
+- **Consequences:** ten new interpolation variables. A first deploy on a box smaller than 16 GB
+  needs them lowered, which is now documented rather than implied. **Found while fixing this and
+  worth more than the fix itself: the documented deploy command never worked** — `${VAR}`
+  interpolation is resolved by Compose from the shell and `infra/.env`, *never* from the `../.env`
+  the header told you to populate. Verified both directions; `--env-file ../.env` is now in the
+  compose header and `docs/09` §3, with each variable attributed to the mechanism that reads it.
+
 ### ADR-068: Two deployment bugs that no test could see, and the deployment tests that now see them
 - **Date:** 2026-08-17
 - **Status:** accepted

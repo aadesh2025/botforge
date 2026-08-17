@@ -13,9 +13,10 @@
 > **Committed 2026-08-17, after re-verifying every claim in §2 against the code.** Two of this
 > file's forward-looking statements were overtaken by work that landed the same day — see **§8**.
 >
-> **PROD-1 and PROD-2 were then fixed for the compose deployment (ADR-068); PROD-3 is still open
-> and the k8s manifests are documented rather than fixed — see §9.** §8 and §9 are the first two
-> things to read if you are picking this up later; §2–§7 are preserved as the original analysis.
+> **All three PROD bugs were then fixed for the compose deployment — PROD-1/PROD-2 in ADR-068
+> (§9), PROD-3 in ADR-069 (§10). The k8s manifests are documented rather than fixed (§9.5).**
+> §8–§10 are what to read first if you are picking this up later; §2–§7 are preserved as the
+> original analysis, including where it turned out to be wrong.
 
 ---
 
@@ -42,10 +43,10 @@ made it expensive.
 
 These are **not** caused by the Docling plan. They are in `infra/docker-compose.prod.yml` now.
 
-> **Update 2026-08-17 — PROD-1 and PROD-2 are FIXED for the compose deployment (ADR-068).**
-> PROD-3 is still open. The analysis below is kept as written, because it is the record of what
-> was wrong and why it was invisible; **§9 records what shipped, what it did not cover, and the
-> two things the fix turned up that this section did not know about.**
+> **Update 2026-08-17 — all three are FIXED for the compose deployment.** PROD-1 and PROD-2 in
+> ADR-068 (**§9**), PROD-3 in ADR-069 (**§10**). The analysis below is kept as written, because it
+> is the record of what was wrong and why it was invisible; §9 and §10 record what shipped, what
+> they did not cover, and the four things the fixes turned up that this section had wrong.
 
 ### PROD-1 — File uploads cannot be ingested in production ⛔
 
@@ -319,7 +320,7 @@ stop being guesses.
 |---|---|---|
 | ~~**1**~~ | **PROD-1** shared uploads volume (api + worker) | ✅ **shipped** 2026-08-17, ADR-068 — compose only, k8s documented (§9.5) |
 | ~~**2**~~ | **PROD-2** reachable embedding provider + startup check | ✅ **shipped** 2026-08-17, ADR-068 — and §2's proposed fix would not have worked (§9.2) |
-| **3** | **PROD-3** memory limits on every service | ⬅ **next.** Protects Postgres before ML lands |
+| ~~**3**~~ | **PROD-3** memory limits on every service | ✅ **shipped** 2026-08-17, ADR-069 — §10. Ceilings + reservations on the datastores |
 | 4 | Sizing section in `docs/09-DEPLOYMENT.md` | The gap that produced this whole file |
 | 5 | Blob storage (MinIO or S3) | Proper PROD-1 fix; unblocks docs/14 K1-4 |
 | 6 | docs/14 **P0-1**, **P0-2** | Unchanged — still first among the retrieval work |
@@ -511,7 +512,6 @@ volume per service, service added but model never pulled, model drifted, port pu
 
 ### 9.5 Not fixed, deliberately
 
-- **PROD-3 (no resource limits)** — untouched. Still the thing to do before docling-serve exists.
 - **k8s (`infra/k8s/app.yaml`)** — **documented, not fixed**, and that is a trade rather than an
   oversight. 2 api + 2 worker replicas need `ReadWriteMany`; a `ReadWriteOnce` PVC would not fix
   it, and an RWX PVC on a cluster without an RWX StorageClass stays `Pending` and leaves every api
@@ -522,3 +522,68 @@ volume per service, service added but model never pulled, model drifted, port pu
 - **`ollama`'s resident size is still unmeasured.** §3.2 estimates 1–2 GB, but that figure assumed
   a chat model; serving only `nomic-embed-text` should be far smaller. Not measured, so not
   claimed — it is a planning correction to validate, exactly as §7 says of every number in §3.
+
+---
+
+## 10. PROD-3: what shipped — 2026-08-17
+
+ADR-069. A memory limit on **all ten services**, plus memory reservations on Postgres and Redis.
+
+**The mechanism was verified, not assumed.** Non-swarm Compose does honour `deploy.resources`:
+`limits.memory` → `Memory`, `reservations.memory` → `MemoryReservation`, `limits.cpus` →
+`NanoCpus`, confirmed by `docker inspect` on a throwaway stack. And a container that overruns its
+own limit is killed **alone** — `OOMKilled=true`, exit 137 — which is the entire point of §2's
+"protected by construction": the blast radius becomes the offending service instead of whatever
+the kernel judged largest, which was Postgres.
+
+**A limit is not protection, and that distinction is the reason for the reservations.** A limit
+only stops a service *growing*. Under host pressure the kernel reclaims from containers that are
+**above** their reservation first — so `POSTGRES_MEM_RESERVATION` and `REDIS_MEM_RESERVATION` are
+what actually make the datastores preferred, and a test asserts both exist.
+
+**⚠️ The ceilings sum to ~16.25 GB on a 16 GB box, deliberately.** They are ceilings, not a budget.
+Sizing every service at its worst case would leave most of the machine idle; steady state is
+§3.1's ~3.5–6 GB plus ollama, `migrate` is one-shot, and `backup` sleeps 24h at a time. What they
+buy is that no *single* service can take the host.
+
+**⚠️ And the honest risk of this fix: a limit set too low turns a working service into a
+crashloop.** §7 rates §3's RAM figures only medium confidence and they were never measured on this
+stack, so every default has headroom over the estimate and **every one is overridable** — the box
+decides, not this file. Postgres is the one to watch: an HNSW index build is spiky and is not the
+steady state. `docker inspect <container> --format '{{.State.OOMKilled}}'` distinguishes "limit too
+low" from "bug" in one command, and `docs/09` §3 says so.
+
+### 10.1 ⚠️ A correction to §3.4: embeddings are latency-critical too
+
+§3.4's table splits the work into **latency-critical** (the reranker, p50 under 417 ms) and
+**throughput** (chart VLM, Whisper). It leaves embeddings out — but `retrieval.search()` embeds the
+visitor's **query** inline on every RAG turn, so `ollama` sits on the p50 first-token path *exactly
+as the reranker does*, and it is the one ML container in the stack today.
+
+So **no CPU limit on `api` or `ollama`**: capping either would add latency to every grounded answer
+to buy nothing, because a runaway there is a memory problem, not a CPU one. §3.4's argument is
+untouched and its conclusion is unchanged — CPU caps belong on the **batch** ML services
+(docling-serve, ASR) when they land, and that is where §3.4's contention actually bites. A test
+pins that neither of the two latency-path services acquires a CPU cap.
+
+### 10.2 The check that stops PROD-3 coming back
+
+`test_every_service_declares_a_memory_limit` asserts it for **every** service rather than a listed
+set, because the way this returns is someone adding a service — docling-serve, an ASR worker, a
+rerank container — without thinking about its ceiling, and those are precisely the memory-hungry
+ones in §3.2. Verified against mutations: no limits anywhere → red; a new unlimited `docling`
+service → red; reservations dropped from Postgres → red; a CPU cap added to `ollama` → red. The
+legacy `mem_limit` spelling stays green on purpose, since Docker applies it identically (measured:
+both produce `Memory=314572800`).
+
+### 10.3 ⚠️ Found while fixing this: the deploy command in the docs did not work
+
+Not a PROD bug, but it would stop a first deploy dead. Two mechanisms read env from two different
+files: `env_file: ../.env` supplies the *containers*, but `${VAR}` **interpolation** is resolved by
+Compose itself from the shell and `infra/.env` — **never `../.env`**. Verified: with
+`POSTGRES_PASSWORD` present in `../.env` and cleared from the shell, `docker compose config` still
+fails with *"required variable POSTGRES_PASSWORD is missing a value"*; adding `--env-file ../.env`
+gets past it. So the documented `docker compose -f docker-compose.prod.yml up -d --build` could
+never have worked from the file the header told you to populate. It fails **loudly**, before
+anything starts, which is the one good thing about it. Both the compose header and `docs/09` §3 now
+carry `--env-file ../.env` and name which variables belong to which mechanism.

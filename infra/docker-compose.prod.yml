@@ -1,12 +1,51 @@
 # BotForge — production stack. TLS-terminated by Caddy, non-root app images, healthchecks,
 # and a ONE-SHOT migration job (so scaling api/worker replicas never re-runs migrations).
 #
-#   cp ../.env.example ../.env   # set SECRET_KEY, DOMAIN, API_DOMAIN, ACME_EMAIL, LLM keys…
-#   docker compose -f docker-compose.prod.yml up -d --build
+#   cp ../.env.example ../.env   # set SECRET_KEY, LLM keys, … (goes INSIDE the containers)
+#   docker compose --env-file ../.env -f docker-compose.prod.yml up -d --build
 #
-# Required env (../.env): SECRET_KEY, POSTGRES_PASSWORD, DOMAIN, API_DOMAIN, ACME_EMAIL,
-#   NEXT_PUBLIC_API_BASE_URL (= https://$API_DOMAIN), CORS_ORIGINS (= https://$DOMAIN).
+# ⚠️ `--env-file ../.env` is not optional, and the older instructions here were wrong about it.
+# TWO different mechanisms read env, from TWO different files:
+#
+#   * `env_file: ../.env` gives the CONTAINERS their application settings (SECRET_KEY, LLM keys,
+#     EMBEDDING_*, …). This one does work from `../.env`.
+#   * `${VAR}` INTERPOLATION in this file is resolved by Compose itself, which reads the shell and
+#     the `.env` beside the compose file (`infra/.env`) — never `../.env`. Verified: with
+#     POSTGRES_PASSWORD present in `../.env` and absent from the shell,
+#     `docker compose -f docker-compose.prod.yml config` still fails with
+#     "required variable POSTGRES_PASSWORD is missing a value".
+#
+# So the interpolated ones — POSTGRES_PASSWORD, DOMAIN, API_DOMAIN, ACME_EMAIL, POSTGRES_USER,
+# POSTGRES_DB, N8N_BASE_URL, OLLAMA_BASE_URL, NEXT_PUBLIC_API_BASE_URL, BACKUP_RETENTION_DAYS and
+# the *_MEM_LIMIT set below — must come from `infra/.env`, the shell, or `--env-file`. It fails
+# loudly rather than silently, which is the one good thing about it.
+#
+# Required (container env, ../.env): SECRET_KEY, CORS_ORIGINS (= https://$DOMAIN).
+# Required (interpolation): POSTGRES_PASSWORD, DOMAIN, API_DOMAIN, ACME_EMAIL,
+#   NEXT_PUBLIC_API_BASE_URL (= https://$API_DOMAIN).
 name: botforge-prod
+
+# ── Memory limits (docs/15 PROD-3, ADR-069) ──────────────────────────────────────────────────
+#
+# Nothing here had a limit, so any container could consume all RAM and the kernel OOM-killer then
+# picked a victim host-wide — usually Postgres, because Postgres is the largest resident process.
+# `restart: unless-stopped` then restarted everything into the same condition. Verified: a
+# container that exceeds its own limit is killed alone (`OOMKilled=true`, exit 137), which is the
+# whole point — the blast radius becomes the offending service instead of the database.
+#
+# ⚠️ THESE ARE CEILINGS, NOT A BUDGET, and they deliberately sum to more than the box has. Sizing
+# every service at its worst case would leave most of a 16 GB machine idle; steady state is
+# ~3.5-6 GB (docs/15 §3.1) plus ollama, `migrate` is one-shot and `backup` sleeps 24h at a time.
+# What the ceilings buy is that no ONE service can take the whole host.
+#
+# ⚠️ A limit set too low turns a working service into a crashloop, so these have headroom over
+# docs/15 §3.1's estimates — which §7 rates only medium confidence, and which were never measured
+# on this stack. Postgres in particular is spiky: an HNSW index build is not the steady state.
+# If a container is restarting with exit 137, that is this, not a bug: raise its variable.
+# `docker inspect <container> --format '{{.State.OOMKilled}}'` confirms it in one command.
+#
+# Every value is overridable so the box, not this file, decides. Defaults target the 16 GB VPS of
+# docs/15 §4 Option 1 (Docling core off, no chart VLM, no ASR, no self-hosted reranker).
 
 x-api-env: &api-env
   DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-botforge}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-botforge}
@@ -29,6 +68,17 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-botforge}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          # Generous on purpose. This is the process the OOM killer used to choose, and it is the
+          # one service whose death loses in-flight work rather than just a request.
+          memory: ${POSTGRES_MEM_LIMIT:-3g}
+        reservations:
+          # A soft floor: under host pressure the kernel reclaims from containers that are ABOVE
+          # their reservation first. This is what "protect Postgres by construction" means here —
+          # a limit alone only stops Postgres growing, it does not prefer it when RAM runs short.
+          memory: ${POSTGRES_MEM_RESERVATION:-1g}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-botforge}"]
       interval: 10s
@@ -42,6 +92,16 @@ services:
     command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
     volumes:
       - redisdata:/data
+    deploy:
+      resources:
+        limits:
+          memory: ${REDIS_MEM_LIMIT:-1g}
+        reservations:
+          memory: ${REDIS_MEM_RESERVATION:-256m}
+    # ⚠️ Deliberately NO `--maxmemory`. Redis here is the Celery broker as well as the cache, and
+    # `maxmemory` with an eviction policy would silently drop QUEUED TASKS under pressure — an
+    # ingest or email job vanishing is worse than a visible restart, and AOF means a restart loses
+    # nothing. The real control on broker growth is queue depth, not an eviction policy.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -57,6 +117,11 @@ services:
     environment: *api-env
     command: ["alembic", "upgrade", "head"]
     restart: "no"
+    deploy:
+      resources:
+        limits:
+          # One-shot and idle for the life of the stack after it exits.
+          memory: ${MIGRATE_MEM_LIMIT:-1g}
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,6 +144,13 @@ services:
       # Single-VPS fix. It does NOT survive scaling to a second node — the proper answer is
       # object storage (docs/15 §4 Option 2), which the persisted DoclingDocument needs anyway.
       - uploads:/app/var/uploads
+    deploy:
+      resources:
+        limits:
+          # Two uvicorn workers. NO cpu limit: this is the p50 first-token path (NFR-1, 417 ms)
+          # and capping it would add latency to every visitor to buy nothing — a runaway is a
+          # memory problem here, not a CPU one.
+          memory: ${API_MEM_LIMIT:-2g}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
       interval: 15s
@@ -105,6 +177,13 @@ services:
       # ingest task reads the file the api wrote (`ingest._stored_bytes`) and also writes the
       # persisted DoclingDocument *beside* it, so one shared mount covers both files.
       - uploads:/app/var/uploads
+    deploy:
+      resources:
+        limits:
+          # Four concurrent ingest processes, each holding a document's text, its chunks and a
+          # batch of vectors. The most likely service to hit its ceiling, and the least harmful:
+          # a killed worker loses a task that Redis still has.
+          memory: ${WORKER_MEM_LIMIT:-3g}
     depends_on:
       redis:
         condition: service_healthy
@@ -125,6 +204,11 @@ services:
     environment: *api-env
     restart: unless-stopped
     command: ["celery", "-A", "app.worker.celery_app", "beat", "--loglevel=info"]
+    deploy:
+      resources:
+        limits:
+          # A scheduler. It enqueues and sleeps.
+          memory: ${BEAT_MEM_LIMIT:-512m}
     depends_on:
       redis:
         condition: service_healthy
@@ -140,6 +224,10 @@ services:
       # Server-side BFF reaches the API in-network (refresh-token custody, see ADR-019).
       API_INTERNAL_URL: http://api:8000
       NODE_ENV: production
+    deploy:
+      resources:
+        limits:
+          memory: ${WEB_MEM_LIMIT:-1g}
     depends_on:
       - api
 
@@ -157,6 +245,13 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddydata:/data
       - caddyconfig:/config
+    deploy:
+      resources:
+        limits:
+          # A reverse proxy. But it is also the only service holding port 443, so if it is the one
+          # the OOM killer takes, the whole platform is unreachable — hence a limit, not "it is
+          # small, never mind".
+          memory: ${CADDY_MEM_LIMIT:-256m}
     depends_on:
       - web
       - api
@@ -207,6 +302,20 @@ services:
       retries: 5
       # First boot has to download the weights before this can pass.
       start_period: 300s
+    deploy:
+      resources:
+        limits:
+          # The only ML container in this stack, and therefore the one PROD-3 was really about.
+          # docs/15 §3.2 estimates 1-2 GB, but that figure assumed a chat model; serving only
+          # `nomic-embed-text` (a 137M-parameter embedder) should be well under it. UNMEASURED,
+          # so the ceiling is generous rather than tight.
+          memory: ${OLLAMA_MEM_LIMIT:-4g}
+          # ⚠️ NO cpu limit, and this corrects docs/15 §3.4. That table splits work into
+          # "latency-critical" (the reranker) and "throughput" (chart VLM, Whisper) and leaves
+          # embeddings out — but `retrieval.search()` embeds the visitor's QUERY inline on every
+          # RAG turn, so this service sits on the p50 first-token path exactly as the reranker
+          # does. Capping its CPU would add latency to every grounded answer. CPU caps belong on
+          # the batch ML services when they land (docling-serve, ASR), not here.
 
   # Nightly pg_dump backup with rotation (see infra/scripts/backup.sh).
   backup:
@@ -226,6 +335,11 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     # Run the backup script once an hour past 3am UTC daily; keep the container alive with a sleep loop.
     command: ["while true; do sh /scripts/backup.sh || true; sleep 86400; done"]
+    deploy:
+      resources:
+        limits:
+          # Sleeps 24h at a time; the ceiling covers `pg_dump | gzip` streaming a large database.
+          memory: ${BACKUP_MEM_LIMIT:-512m}
     depends_on:
       postgres:
         condition: service_healthy

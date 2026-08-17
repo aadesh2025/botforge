@@ -186,6 +186,47 @@ Two standing rules from that spec, repeated here because they are easy to violat
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-17 — docs/15 PROD-3: memory ceilings, and the deploy command that never worked
+- **ADR-069.** Memory limit on **all ten** prod services (every value overridable, defaults for the
+  16 GB VPS of docs/15 §4 Option 1) plus memory **reservations** on Postgres and Redis. Before this,
+  any container could take all RAM and the kernel OOM-killer chose a victim **host-wide** — usually
+  Postgres, being the largest RSS — and `restart: unless-stopped` restarted into the same state.
+- **Verified, not assumed.** Non-swarm Compose *does* honour `deploy.resources`: `limits.memory` →
+  `Memory`, `reservations.memory` → `MemoryReservation`, `limits.cpus` → `NanoCpus` (checked with
+  `docker inspect` on a throwaway stack). And an overrunning container is killed **alone**
+  (`OOMKilled=true`, exit 137) — the property §2 actually asked for.
+- **A limit is not protection; the reservation is.** A limit only stops a service growing. Under
+  host pressure the kernel reclaims from containers **above** their reservation first, so
+  `POSTGRES_MEM_RESERVATION` / `REDIS_MEM_RESERVATION` are what make "protected by construction"
+  true. A test asserts both exist.
+- **⚠️ The ceilings sum to ~16.25 GB on a 16 GB box, deliberately** — ceilings, not a budget; sizing
+  each service at worst case would idle most of the machine. **⚠️ And the risk this fix introduces
+  is real: a limit set too low is a crashloop.** §7 rates the §3 RAM numbers medium confidence and
+  they were never measured here, so defaults carry headroom and all are overridable. Postgres is the
+  one to watch (an HNSW build is spiky). `docker inspect --format '{{.State.OOMKilled}}'` separates
+  "limit too low" from "bug"; docs/09 §3 says so.
+- **⚠️ A correction to docs/15 §3.4 — embeddings are latency-critical too.** §3.4 splits work into
+  latency-critical (reranker) and throughput (chart VLM, Whisper) and omits embeddings, but
+  `retrieval.search()` embeds the visitor's **query** inline on every RAG turn, so `ollama` is on the
+  p50 first-token path exactly as the reranker is. Hence **no CPU cap on `api` or `ollama`**; CPU
+  caps belong on the batch ML services when they land. §3.4's argument is intact, its target moves.
+- **⚠️ Found while fixing this, and worth more than the fix: the documented deploy command never
+  worked.** `${VAR}` interpolation is resolved by Compose from the shell and `infra/.env` — **never**
+  from the `../.env` the header told you to populate. Verified both ways: with `POSTGRES_PASSWORD` in
+  `../.env` and cleared from the shell, `docker compose config` still failed; `--env-file ../.env`
+  got past it. Fails loudly before anything starts, which is its one virtue. Compose header and
+  docs/09 §3 now carry `--env-file` and attribute each var to the mechanism that reads it.
+- **`--maxmemory` on Redis was rejected on purpose**: it is the Celery **broker** as well as the
+  cache, so eviction would silently drop queued ingest/email tasks. A restart loses nothing (AOF);
+  a vanished task is invisible.
+- Mutation-checked again: no limits → red, a new unlimited service → red, reservations dropped →
+  red, CPU cap on `ollama` → red. Legacy `mem_limit` stays green because Docker applies it
+  identically (measured). Suites: **920 pytest**, ruff + mypy clean.
+- Note for the next session: the pytest suite now takes **~18 minutes** on this machine, against
+  195s earlier the same day. Not investigated (it is green), and **not** the orphaned-process
+  contention it first looked like — a clean run with nothing else touching the test database took
+  the same time. Budget for it rather than assuming a hang.
+
 ### 2026-08-17 — docs/15 PROD-1 + PROD-2: file ingest was broken in production, and no test could see it
 - **ADR-068. Both were deployment bugs: every line of app code was correct and the suite was
   green.** PROD-1 — `api` and `worker` are separate containers with separate filesystems and **no
