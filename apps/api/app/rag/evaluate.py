@@ -31,6 +31,22 @@ neither the code nor its author has seen.
 
 Absolute numbers here will not match BEIR leaderboards and are not meant to. The relative
 ordering between methods on your own data is the signal.
+
+**Two blind spots this corpus has already had, both found by a phase it was supposed to judge.**
+Record them: the pattern is that a corpus quietly decides an answer before anyone checks it can.
+
+1. *Rigged against keyword search* (2026-08-13). Every query was written with deliberately low
+   lexical overlap — a fair test of dense retrieval, an unfair one for FTS — so the first
+   RRF weight sweep "proved" the keyword half was worthless at every weight. Ten
+   exact-identifier queries were added before any constant was tuned.
+2. *Blind to chunking* (2026-08-17, docs/14 K2-5). Every seed document was 272–445 characters,
+   i.e. **one chunk at any chunk size this product uses**, so no chunking change could move the
+   number and the mechanism §3.2 W2 improves could not occur at all. Four long multi-section
+   documents were added, and `test_retrieval_eval.py` now fails if that property is lost.
+
+**And it was not reproducible.** Until the tie-break fix in `retrieval.fts_statement`
+(2026-08-17), four runs of the same variant over the same corpus scored 0.6247, 0.6247, 0.6220,
+0.6397. Run a benchmark twice on identical input before trusting anything it says.
 """
 
 from __future__ import annotations

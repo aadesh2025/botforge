@@ -20,9 +20,17 @@ the point: docs/14 §3.4's re-chunk feedback loop is only usable if something sc
 **Two run modes, and the difference matters.**
 
 * `--variants fts` uses the fake embedder. The keyword half of hybrid retrieval does not touch
-  embeddings at all, so this is fully deterministic, needs no model, and is a real signal: it
-  would have caught the P0-1 index regression, and it catches chunking and `fts_config`
-  regressions. This is the mode CI can run.
+  embeddings at all, so this is deterministic, needs no model, and is a real signal: it would
+  have caught the P0-1 index regression, and it catches chunking and `fts_config` regressions.
+  This is the mode CI can run.
+
+  **It was not deterministic until 2026-08-17, and this paragraph used to say it was.** Four
+  consecutive runs over an unchanged corpus scored 0.6247, 0.6247, 0.6220 and 0.6397 — a spread
+  of 0.018, wider than every effect docs/14 K2 set out to measure and wider than the 0.02
+  tolerance that fails CI. The cause was in the product, not the harness: `fts_statement`
+  ordered by `ts_rank` alone, and tied ranks came back in physical row order. See the tie-break
+  comment in `rag/retrieval.py`. **A benchmark that has never been run twice on the same input
+  has not been checked for reproducibility.**
 * `--variants dense,hybrid` needs a genuine embedding provider (Ollama `nomic-embed-text` by
   default - local and free). These are the numbers that matter for the product, and they cannot
   be faked: `FakeEmbeddingProvider` hashes text, so a "dense" score under it measures a hash
@@ -95,8 +103,63 @@ async def _reset_scratch(session: AsyncSession) -> None:
         await session.commit()
 
 
+def _as_docling_json(title: str, text: str) -> tuple[str, dict[str, Any]]:
+    """Build a `DoclingDocument` whose heading is *structure*, not a line of body text.
+
+    This is what makes K2 measurable at all. On the legacy path the heading is simply the first
+    line of the chunk, so `contextualize()` has nothing to add and the two paths embed identical
+    strings. Real extraction is not like that: Docling emits the heading as a node, every chunk
+    under it inherits the heading path, and the *second* chunk of a section — which on the legacy
+    path carries no heading at all — is the one W2 is about.
+
+    Returns `(markdown, docling_json)`, the two fields docling-serve returns.
+    """
+    from docling_core.types.doc.document import DoclingDocument
+    from docling_core.types.doc.labels import DocItemLabel
+
+    lines = [ln.strip() for ln in text.strip().splitlines()]
+    # The corpus writes each document's heading as its own first line. Lift it out, so the body
+    # below it does not repeat it — otherwise this measures nothing.
+    heading = lines[0] if lines else title
+    body = "\n".join(lines[1:]).strip() or text.strip()
+
+    doc = DoclingDocument(name=title or heading)
+    top = doc.add_heading(text=heading, level=1)
+    parent = top
+    for block in [p.strip() for p in body.split("\n\n") if p.strip()]:
+        # `## ` marks a subsection in the long documents added for K2-5. Everything after it
+        # hangs off that heading, which is what gives chunks 2..N of a section a heading path
+        # on this side and nothing at all on the legacy side.
+        if block.startswith("## "):
+            parent = doc.add_heading(text=block[3:].strip(), level=2, parent=top)
+            continue
+        doc.add_text(label=DocItemLabel.TEXT, text=" ".join(block.split()), parent=parent)
+    return doc.export_to_markdown(), doc.model_dump(mode="json")
+
+
+def _docling_transport(markdown: str, payload: dict[str, Any]) -> Any:
+    """Stand in for docling-serve, so the eval exercises the real K1 ingest path.
+
+    Not a shortcut around the pipeline — `ingest_document` still does the persisting, the PII
+    scan, the chunking and the embedding. Only the ML container is replaced, which the eval has
+    no business running.
+    """
+    import httpx
+
+    return httpx.MockTransport(
+        lambda request: httpx.Response(
+            200, json={"document": {"md_content": markdown, "json_content": payload}}
+        )
+    )
+
+
 async def _ingest(
-    session: AsyncSession, eval_set: EvalSet, provider: str, model: str
+    session: AsyncSession,
+    eval_set: EvalSet,
+    provider: str,
+    model: str,
+    *,
+    structural: bool = False,
 ) -> tuple[Organization, KnowledgeBase]:
     org = Organization(name="Retrieval eval (scratch)", slug=SCRATCH_SLUG, plan="free")
     session.add(org)
@@ -132,7 +195,11 @@ async def _ingest(
         row.storage_path = str(path)
         row.size_bytes = len(body)
         await session.flush()
-        await ingest_document(session, row.id)
+        transport = None
+        if structural:
+            markdown, payload = _as_docling_json(doc.title, doc.text)
+            transport = _docling_transport(markdown, payload)
+        await ingest_document(session, row.id, docling_transport=transport)
         if row.status != "ready":
             raise RuntimeError(f"ingest failed for {doc.id}: {row.error_message}")
     await session.commit()
@@ -261,8 +328,30 @@ async def run(args: argparse.Namespace) -> int:
     try:
         async with AsyncSession(engine, expire_on_commit=False) as session:
             await _reset_scratch(session)
-            print(f"ingesting {len(eval_set.documents)} document(s) via the real pipeline...")
-            org, kb = await _ingest(session, eval_set, provider, model)
+            structural = args.chunking.startswith("structural")
+            previous_mode = settings.docling_chunk_heading_mode
+            previous_tokens = settings.docling_chunk_max_tokens
+            if structural and args.chunk_max_tokens:
+                settings.docling_chunk_max_tokens = args.chunk_max_tokens
+            if structural:
+                # Turned on around the ingest only. The transport is a mock, so nothing reaches
+                # a real docling-serve, but `converters.build_converter()` checks the flag.
+                settings.docling_enabled = True
+                settings.docling_endpoint = settings.docling_endpoint or "http://eval-mock"
+                settings.docling_chunk_heading_mode = (
+                    "inline" if args.chunking.endswith("inline") else "embed"
+                )
+            print(
+                f"ingesting {len(eval_set.documents)} document(s) via the real pipeline "
+                f"({args.chunking} chunking)..."
+            )
+            try:
+                org, kb = await _ingest(session, eval_set, provider, model, structural=structural)
+            finally:
+                if structural:
+                    settings.docling_enabled = False
+                    settings.docling_chunk_heading_mode = previous_mode
+                    settings.docling_chunk_max_tokens = previous_tokens
             for variant in variants:
                 results.append(
                     await _run_variant(
@@ -277,7 +366,11 @@ async def run(args: argparse.Namespace) -> int:
     finally:
         await engine.dispose()
 
+    # The baseline key carries the chunking too. A structural number compared against a legacy
+    # one would read as a retrieval regression when the only thing that changed is how the
+    # corpus was cut up — the same reason the key already carries the embedder.
     embedder = _embedder_key(provider, model)
+    run_key = embedder if args.chunking == "legacy" else f"{embedder}|{args.chunking}"
     _print_table(results, eval_set, embedder)
     if args.per_query:
         _print_per_query(results, eval_set)
@@ -286,11 +379,11 @@ async def run(args: argparse.Namespace) -> int:
             _print_worst(result, eval_set)
 
     baseline = _load_baseline()
-    recorded = dict(baseline.get("runs", {}).get(embedder, {}))
+    recorded = dict(baseline.get("runs", {}).get(run_key, {}))
 
     if args.save_baseline:
         baseline.setdefault("runs", {})
-        baseline["runs"][embedder] = {
+        baseline["runs"][run_key] = {
             **recorded,
             **{r.name: r.as_dict() for r in results},
         }
@@ -334,6 +427,27 @@ def main() -> int:
         type=float,
         default=0.0,
         help="0.0 measures pure ranking. Raise it to sweep the production constant (0.35).",
+    )
+    parser.add_argument(
+        "--chunking",
+        choices=("legacy", "structural", "structural-inline"),
+        default="legacy",
+        help=(
+            "legacy = the character splitter (production default). structural = K2's "
+            "HybridChunker over a DoclingDocument, with contextualize() as the embedding input. "
+            "structural-inline = the same, but the heading path is also prefixed to the stored "
+            "chunk, so the keyword half can see it (docs/14 K2-5)."
+        ),
+    )
+    parser.add_argument(
+        "--chunk-max-tokens",
+        type=int,
+        help=(
+            "override DOCLING_CHUNK_MAX_TOKENS for a structural run. This is the parameter "
+            "docs/14 §3.4 exists to make sweepable — the default 512 is roughly twice the "
+            "~250 tokens the legacy 1000-character splitter produces, so comparing the two at "
+            "their defaults confounds chunker with chunk size."
+        ),
     )
     parser.add_argument("--tolerance", type=float, default=0.02, help="allowed NDCG@10 drop")
     parser.add_argument("--save-baseline", action="store_true", help="record these as the numbers to beat")

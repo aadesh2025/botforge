@@ -33,6 +33,22 @@ dependencies = [
     # The leak that prompted this was an Indian mobile; a US-centric pattern misses it, and a
     # permissive one redacts order numbers and prices out of ordinary replies. See ADR-053.
     "phonenumbers>=8.13",
+    # Structural chunking over a persisted DoclingDocument (docs/14 K2). The `chunking-openai`
+    # extra is the tiktoken path, chosen to avoid pulling `transformers`/`torch` in for a
+    # tokenizer — but docs/14 §3.8 Trap 1 is real and reproduced: `LineBasedTokenChunker`
+    # imports the HF tokenizer unconditionally, so `huggingface-hub` must be pinned explicitly
+    # even on the OpenAI path or the chunker import fails with ModuleNotFoundError.
+    "docling-core[chunking-openai]>=2.0",
+    "huggingface-hub>=0.26",
+    # NOT a runtime constraint — numpy arrives transitively via docling-core → pandas, and any
+    # 2.x runs fine. This pins the *typecheck*: numpy 2.5's bundled stubs use the 3.12 `type`
+    # statement, and under `python_version = "3.11"` (which is what the Dockerfile actually
+    # ships) mypy reports that as a syntax error in numpy's own .pyi and then stops checking
+    # our code entirely. `follow_imports` does not help — mypy always parses stub files. The
+    # alternative was raising `python_version` to 3.12, which would have traded real 3.11
+    # compatibility checking for a third-party stub's convenience. Revisit when the API image
+    # moves off 3.11.
+    "numpy<2.5",
 ]
 
 [dependency-groups]
@@ -85,6 +101,15 @@ python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
+
+# These are reached only through lazy, try/except-guarded imports in `rag/docling_chunking.py`
+# and `rag/tokenizer.py` — the package may legitimately be absent at runtime, so `Any` at the
+# boundary is the accurate type rather than a concession. See the `numpy<2.5` pin above for the
+# separate reason mypy cannot simply be pointed at their stubs.
+[[tool.mypy.overrides]]
+module = ["docling_core", "docling_core.*", "tiktoken", "tiktoken.*"]
+follow_imports = "skip"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

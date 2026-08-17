@@ -186,6 +186,57 @@ Two standing rules from that spec, repeated here because they are easy to violat
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-17 — docs/14 K1+K2: the eval harness was not reproducible, and that was a product bug
+- **K1 (Docling) shipped behind a converter interface; K2 (real tokens + structural chunking)
+  shipped with structural chunking deliberately OFF.** ADR-064, ADR-065. Migration 0020.
+- **⚠️ `ORDER BY ts_rank DESC` had no tie-break, so the same question could answer differently
+  on the same data.** Found by running the eval's `fts` variant four times over an unchanged
+  corpus: **0.6247, 0.6247, 0.6220, 0.6397** — a spread of 0.018, wider than every effect K2 was
+  measuring and wider than the **0.02 tolerance CI fails on**. `ts_rank` is coarse and ADR-062's
+  any-term query makes ties the normal case, so tied chunks came back in physical row order and
+  `LIMIT` kept a different set each run. Now `ORDER BY rank DESC, chunks.id`. **P0-2 shipped
+  without ever being run twice on the same input** — do that before trusting a benchmark.
+- **⚠️ K2-5 says do not ship K2 without an improvement, and the honest answer was "not yet".**
+  40 docs / 54 queries / `ollama:nomic-embed-text`: legacy **hybrid 0.8846**, structural `embed`
+  **0.8745**, structural `inline` **0.8817**. `contextualize()` does what docs/14 W2 promised —
+  **dense +0.0104** — but the FTS index is built over `chunks.content`, so §4.2's
+  "embedding-input-only" rule *takes the heading out of the text the keyword half searches*
+  (**fts −0.0206**) and the fused path ends up net negative. Structural chunking stays off; the
+  fix is filed as **K2-6** (a `chunks.heading` column with the GIN index rebuilt over
+  `coalesce(heading,'') || ' ' || content`), deliberately not in the same commit because it
+  rebuilds the index P0-1 measured to enable a path that is switched off anyway.
+- **⚠️ The corpus had a second blind spot and K2-5 walked into it.** Every seed document was
+  272–445 characters — **one chunk at any chunk size this product uses** — so it could not
+  measure a chunking change at all, and the first run would have killed the phase on a benchmark
+  artifact. Four long multi-section documents + 8 queries aimed at their *later* sections were
+  added **before** any conclusion was drawn, and a test now fails if the property is lost. Second
+  time this corpus has quietly decided an answer before anyone checked it could (see 2026-08-13).
+- **K1's rule: a Docling outage is not an ingest failure.** `convert_with_fallback()` catches
+  everything — HTTP error, timeout, bad JSON, and an extraction that is merely *empty* — and
+  re-runs the legacy extractor. Nothing re-drives a failed document, so propagating an outage
+  would leave every upload during it as `failed` with an error about an internal service.
+  `docling-serve` is `expose:`d with **no published port** (SSRF + resource exhaustion), and
+  **URL ingest deliberately stays on trafilatura** so it cannot route around `load_url`'s
+  private/loopback checks.
+- **⚠️ K1-5 is OPEN, so K1 is not done and Docling is enabled nowhere.** It needs three real
+  binaries (scanned PDF, table-heavy PDF, the 2026-08-03 PII-incident PDF) that are not in the
+  repo. docs/14 §11 says commit real files; a synthetic "scanned PDF" would reproduce the exact
+  2026-08-03 mistake — where hand-typed fixtures hid that real extracted text carries `\x01` for
+  ☎ and tabs for spacing — with a green tick on top.
+- **Two corrections to docs/14 from introspecting the installed package:** `DocMeta.captions` is
+  deprecated **and always `None`** (the chunker inlines captions into `chunk.text`), so it is not
+  mapped; `page` comes from `doc_items[].prov[].page_no` and is **omitted, never defaulted to 0**
+  — a wrong page in a citation is worse than no page.
+- `estimate_tokens` is now cl100k_base, not `len/4`. Honest about what that means: it is not the
+  embedder's own tokenizer, but `len/4` was undercounting **Tamil and Devanagari by ~3×**, which
+  is the market docs/11 §9.2a already flags as underserved. Degrades to the old heuristic if
+  tiktoken cannot download its ranks — a *counter* must never fail an ingest.
+- Infra: `POSTGRES_HOST_PORT` (5432 is taken on this machine by another project; pointing
+  BotForge at it would have run `alembic upgrade head` on someone else's database). `numpy<2.5`
+  is a **typecheck** pin, not a runtime one — its 2.5 stubs use 3.12 syntax and under
+  `python_version = "3.11"` (what the Dockerfile ships) mypy stops checking our code entirely.
+- ADR-064/065. Migration 0020. `make rechunk` (re-chunk from persisted JSON, no re-conversion).
+
 ### 2026-08-13 — docs/13 executed: the eval harness went first and immediately found two bugs
 - **`docs/13-AI-COOKBOOK-REVIEW.md` implemented in its own §5 priority order.** R2 (eval harness),
   P0-1 (FTS index), R1 (reranker), R4b (per-KB FTS language) shipped. **R3 (Docling) and R5

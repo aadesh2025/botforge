@@ -139,6 +139,23 @@ def test_the_committed_eval_set_loads_and_is_consistent() -> None:
     assert len(eval_set.queries) >= 36
 
 
+def test_the_corpus_can_still_exercise_chunking() -> None:
+    """Guards the blind spot K2-5 found, so it cannot come back by attrition.
+
+    Every document in the seed corpus was 272-445 characters — one chunk at any chunk size this
+    product uses — which made the corpus structurally incapable of measuring a chunking change.
+    The first K2-5 run scored structural chunking *below* the baseline on a corpus where the
+    mechanism it improves cannot occur, and would have rejected the phase on that basis.
+
+    A benchmark that cannot fail in the interesting direction is not a benchmark. If someone
+    later trims the long documents, this goes red instead of the corpus going quietly blind.
+    """
+    docs = load_eval_set().documents
+    multi_chunk = [d for d in docs if len(d.text) > 1200]
+    assert len(multi_chunk) >= 4, "the corpus can no longer measure a chunking change"
+    assert any("## " in d.text for d in multi_chunk), "no document has internal section headings"
+
+
 def test_every_query_has_a_gradeable_answer() -> None:
     """`load_eval_set` raises on an unjudged query; this asserts none slipped in as grade 0."""
     for query in load_eval_set().queries:

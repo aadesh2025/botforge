@@ -16,11 +16,13 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.pii import scan_document_text
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.llm.registry import build_embedding_provider
 from app.models import Chunk, Document, KnowledgeBase
 from app.rag import converters, loaders
-from app.rag.chunking import chunk_text
+from app.rag.chunking import TextChunk, chunk_text
+from app.rag.docling_chunking import DoclingChunkingUnavailable, chunk_docling_document
 from app.webhooks.dispatch import emit_event
 
 log = get_logger("rag.ingest")
@@ -92,6 +94,44 @@ def _persist_docling_json(document: Document, payload: dict[str, Any]) -> str | 
     return str(path)
 
 
+def _chunk(
+    text: str,
+    kb: KnowledgeBase,
+    *,
+    structured: dict[str, Any] | None,
+    metadata: dict[str, Any],
+) -> list[TextChunk]:
+    """Structural chunking when there is a `DoclingDocument`, character splitting otherwise.
+
+    The fallback is not a formality. `docling-core` is an optional dependency of the API image,
+    and `HybridChunker`'s tokenizer downloads its BPE ranks on first use — neither is worth
+    failing a client's upload over when a working splitter is right there.
+    """
+    if structured:
+        try:
+            chunks = chunk_docling_document(
+                structured,
+                max_tokens=settings.docling_chunk_max_tokens,
+                metadata=metadata,
+                heading_mode=settings.docling_chunk_heading_mode,
+            )
+            if chunks:
+                return chunks
+            # An empty structural chunking of a document that *did* produce text means the
+            # DoclingDocument is not describing the same content. Fall through rather than
+            # store nothing.
+            log.warning("docling_chunking_empty", filename=metadata.get("filename"))
+        except DoclingChunkingUnavailable as exc:
+            log.warning(
+                "docling_chunking_unavailable",
+                error=str(exc)[:200],
+                impact="chunked by character split; heading context is not embedded",
+            )
+        except Exception as exc:  # a malformed persisted document must not fail the ingest
+            log.warning("docling_chunking_failed", error=str(exc)[:200])
+    return chunk_text(text, kb.chunk_size, kb.chunk_overlap, metadata=metadata)
+
+
 async def ingest_document(
     session: AsyncSession,
     document_id: uuid.UUID,
@@ -137,10 +177,10 @@ async def ingest_document(
                 flags=document.pii_flags,
             )
 
-        chunks = chunk_text(
+        chunks = _chunk(
             text,
-            kb.chunk_size,
-            kb.chunk_overlap,
+            kb,
+            structured=converted.document,
             metadata={
                 "filename": document.filename,
                 "source_url": document.source_url,
@@ -155,7 +195,10 @@ async def ingest_document(
         embedder = build_embedding_provider(kb.embedding_provider, kb.embedding_model)
         vectors: list[list[float]] = []
         for i in range(0, len(chunks), _EMBED_BATCH):
-            batch = [c.content for c in chunks[i : i + _EMBED_BATCH]]
+            # `embedding_input`, not `content` — on the Docling path these differ by the chunk's
+            # heading path (docs/14 §4.2). The enriched string improves the vector and is never
+            # persisted, so a citation still shows the visitor exactly what the document said.
+            batch = [c.embedding_input for c in chunks[i : i + _EMBED_BATCH]]
             vectors.extend(await embedder.embed(batch))
 
         # Reingest: clear any prior chunks for this document.

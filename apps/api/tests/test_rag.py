@@ -12,9 +12,21 @@ from app.rag.retrieval import Citation
 
 
 def test_estimate_tokens() -> None:
+    """Real tokens since docs/14 K2-1, and this test records the change rather than hiding it.
+
+    `estimate_tokens("a" * 400)` was **100** under the old `len(text) / 4` heuristic and is
+    **50** now: cl100k_base merges a run of identical characters into far fewer tokens than a
+    character ratio can model. That gap is the point of the change — it runs the other way for
+    Tamil and Devanagari, where the heuristic undercounted badly (see
+    `test_docling_chunking.py::test_non_english_is_no_longer_wildly_undercounted`).
+
+    Consequence worth knowing: `chunks.token_count` rows written before this are on the old
+    scale. Nothing budgets on the column — it is reporting only, surfaced in the knowledge UI —
+    so they are stale rather than wrong, and a re-ingest corrects them.
+    """
     assert estimate_tokens("") == 0
     assert estimate_tokens("abcd") == 1
-    assert estimate_tokens("a" * 400) == 100
+    assert estimate_tokens("a" * 400) == 50
 
 
 def test_chunk_text_splits_with_overlap() -> None:

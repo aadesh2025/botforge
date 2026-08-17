@@ -119,3 +119,26 @@
 - {query_id: q045, doc_id: outlet-addresses, relevance: 3}
 
 - {query_id: q046, doc_id: order-reference-format, relevance: 3}
+
+# ── docs/14 K2-5 additions ─────────────────────────────────────────────────────────────────
+# Graded on the same rule as above: 3 answers the question, 1 is the page a human agent would
+# send as a follow-up, and a near-miss sibling that would mislead is absent (0).
+
+- {query_id: q047, doc_id: alterations, relevance: 3}
+
+- {query_id: q048, doc_id: alterations, relevance: 3}
+
+- {query_id: q049, doc_id: fabric-sourcing, relevance: 3}
+- {query_id: q049, doc_id: care-cotton, relevance: 1}
+- {query_id: q049, doc_id: care-silk, relevance: 1}
+
+- {query_id: q050, doc_id: fabric-sourcing, relevance: 3}
+
+- {query_id: q051, doc_id: gift-services, relevance: 3}
+
+- {query_id: q052, doc_id: gift-services, relevance: 3}
+- {query_id: q052, doc_id: gift-cards, relevance: 1}
+
+- {query_id: q053, doc_id: packaging-recycling, relevance: 3}
+
+- {query_id: q054, doc_id: packaging-recycling, relevance: 3}

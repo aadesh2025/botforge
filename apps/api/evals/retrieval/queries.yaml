@@ -165,3 +165,42 @@
 
 - id: q046
   text: "what is the AZ number on my invoice for"
+
+# ── Queries against the long, multi-section documents (docs/14 K2-5) ───────────────────────
+#
+# Every one of these is answered by a fact in the SECOND section or later. That is deliberate:
+# on the legacy character-split path the chunk holding the answer carries no heading, so these
+# are the queries where contextualize() has something to contribute. Written to the same rule
+# as the rest — a customer's words, not the document's.
+
+- id: q047
+  text: "how long before i get my trousers back after they take the hem up"
+  note: "answer is in the fourth section; the legacy chunk holding it has no heading"
+
+- id: q048
+  text: "i live too far to come in, can i just post the jacket to you"
+  note: "second section"
+
+- id: q049
+  text: "will the colour run the first time i wash a dark kurta"
+  note: "fourth section; near-miss with care-cotton and care-silk, which are graded 1 not 3"
+
+- id: q050
+  text: "is your organic cotton actually checked by anyone independent"
+  note: "third section"
+
+- id: q051
+  text: "can you write something for me to go in with the present"
+  note: "second section"
+
+- id: q052
+  text: "i don't want my mum to see how much it cost"
+  note: "third section"
+
+- id: q053
+  text: "what am i meant to do with the cardboard box afterwards"
+  note: "second section"
+
+- id: q054
+  text: "is there any plastic in how you wrap things"
+  note: "third section"

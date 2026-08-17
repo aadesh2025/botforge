@@ -3,7 +3,7 @@ COMPOSE := docker compose -f infra/docker-compose.yml
 API := apps/api
 WEB := apps/web
 
-.PHONY: help up down logs dev-api dev-web install lint fmt typecheck test test-api test-web test-e2e migrate seed clean-devdata explain-fts eval-retrieval
+.PHONY: help up down logs dev-api dev-web install lint fmt typecheck test test-api test-web test-e2e migrate seed clean-devdata explain-fts eval-retrieval rechunk
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -73,6 +73,9 @@ provision: ## Provision a client end-to-end: make provision NAME="Acme Co" EMAIL
 
 audit-kb-pii: ## Scan every knowledge base for contact details and secrets (read-only)
 	cd apps/api && ./.venv/Scripts/python.exe ../../scripts/audit_kb_pii.py
+
+rechunk: ## Re-chunk + re-embed from the persisted DoclingDocument — no re-conversion (dry run)
+	cd $(API) && uv run python ../../scripts/rechunk_documents.py
 
 test-scripts: ## Unit-test the provisioning script's helpers
 	node --test scripts/provision-client.test.mjs

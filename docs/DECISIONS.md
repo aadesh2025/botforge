@@ -18,6 +18,70 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-065: `contextualize()` helps the vector and *hurts* the keyword half — so structural chunking ships off
+- **Date:** 2026-08-17
+- **Status:** accepted
+- **Context:** docs/14 K2-5, which is a gate: *"Do not ship K2 if K2-5 shows no improvement."*
+  docs/14 §3.2 W2 calls `contextualize()` the highest-value, least-obvious win — chunks embedded
+  with their heading path, so *"Refunds are processed within 14 days"* carries the signal that
+  it sits under *"International Orders"*. §4.2 then rules that the enriched string is
+  **embedding input only** and `content` stays raw. Both halves of that are reasonable and the
+  second one is what the measurement contradicts.
+- **Decision:** ship the K2 code, and **leave structural chunking disabled**. It is reachable
+  only behind `DOCLING_ENABLED`, which is already off everywhere and blocked separately on
+  K1-5. Add `DOCLING_CHUNK_HEADING_MODE` (`embed` | `inline`) rather than hard-coding §4.2's
+  rule, because the measurement says the rule has a cost that depends on which retriever you
+  are optimising. The real tokenizer (K2-1) ships **enabled** — it does not touch chunk
+  boundaries on the legacy path, so it changes no retrieval number.
+- **What the numbers are.** 40 documents, 54 queries, `ollama:nomic-embed-text`,
+  `score_threshold 0`:
+
+  | chunking | fts | dense | **hybrid** |
+  |---|---|---|---|
+  | legacy (production) | 0.6487 | 0.8983 | **0.8846** |
+  | structural, `embed` | 0.6281 | 0.9087 | **0.8745** |
+  | structural, `inline` | 0.6388 | 0.9087 | **0.8817** |
+
+  So `contextualize()` does what W2 claims — **dense +0.0104** — and the best structural
+  configuration is still **−0.0029 on hybrid**, which is the path production actually runs.
+- **Why, mechanically:** the FTS index is built over `chunks.content`. Moving the heading into
+  the embedding input *removes it from the text the keyword half searches*, and that costs more
+  (**fts −0.0206**) than the dense side gains. `inline` halves the damage by putting the heading
+  in both places. Nobody reasoned their way to this; the harness found it.
+- **⚠️ The first three attempts at that table were noise, and the noise was a product bug.**
+  Repeated runs of the *same* variant over an *unchanged* corpus scored 0.6247, 0.6247, 0.6220,
+  0.6397 — a spread of 0.018, wider than every effect being measured and wider than CI's 0.02
+  regression tolerance. Cause: `fts_statement` ordered by `ts_rank` alone, `ts_rank` is coarse,
+  and the any-term query (ADR-062) makes ties the normal case, so tied chunks came back in
+  physical row order and `LIMIT` kept a different set each run. **That is a live retrieval bug,
+  not a harness artifact — the same question answered differently on the same data.** Fixed with
+  `ORDER BY rank DESC, chunks.id` (and the same tie-break on the dense side for consistency);
+  four consecutive runs are now byte-identical. Every number above is post-fix.
+- **Alternatives considered:** *Ship it anyway because dense improved* — rejected, that is
+  reading the one number that agrees with you. *A `chunks.heading` column with the GIN index
+  rebuilt over `coalesce(heading,'') || ' ' || content`* — the architecturally correct fix, and
+  the one to do when structural chunking is actually turned on; rejected **for now** because it
+  rebuilds the expression index P0-1 measured, to enable a path that is off and blocked on
+  K1-5 anyway. Recorded as K2-6. *Tune `DOCLING_CHUNK_MAX_TOKENS`* — swept at 160/256/384/512
+  and it is not the lever; the first three are identical to four decimal places because every
+  section in the corpus already fits inside 160 tokens.
+- **⚠️ The corpus had a second blind spot and this phase found it.** Every seed document was
+  272–445 characters — **one chunk at any chunk size this product uses** — so the corpus was
+  structurally incapable of measuring a chunking change, and the mechanism W2 improves (chunks
+  2..N of a section inheriting a heading the first chunk consumed) could not occur in it. The
+  first K2-5 run scored structural chunking below baseline on that corpus and would have killed
+  the phase for a benchmark artifact. Four long multi-section documents and eight queries aimed
+  at their *later* sections were added before any conclusion was drawn — the same lesson as
+  2026-08-13's rigged-against-keyword-search sweep, and `test_retrieval_eval.py` now fails if
+  the corpus loses that property.
+- **Consequences:** honesty about what the number is worth — **the four long documents were
+  written in the same session as the code they judge**, which is exactly the unfalsifiability
+  docs/11 Phase D exists to remove and which `app/rag/evaluate.py` §2 already admits about the
+  seed set. A corpus built from a real client KB remains the outstanding follow-up, and the
+  −0.0029 is well inside the noise such a corpus would resolve. Baselines are keyed by chunking
+  as well as embedder, so a structural number can never be compared against a legacy one by
+  accident.
+
 ### ADR-064: Docling is a converter *behind* the legacy one, and a Docling outage is not an ingest failure
 - **Date:** 2026-08-16
 - **Status:** accepted

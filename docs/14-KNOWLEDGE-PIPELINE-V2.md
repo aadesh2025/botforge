@@ -672,6 +672,55 @@ the same move docs/11 made with the red-team corpus.
 
 **⚠️ Do not ship K2 if K2-5 shows no improvement.** That is what P0-2 is for.
 
+> **Status 2026-08-17 — K2-1…K2-4 shipped; K2-5 ran and its answer was "not yet".** ADR-065.
+>
+> **K2-5, the number.** 40 documents, 54 queries, `ollama:nomic-embed-text`, threshold 0:
+>
+> | chunking | fts | dense | **hybrid** |
+> |---|---|---|---|
+> | legacy (production) | 0.6487 | 0.8983 | **0.8846** |
+> | structural, `embed` (§4.2's rule) | 0.6281 | 0.9087 | **0.8745** |
+> | structural, `inline` | 0.6388 | 0.9087 | **0.8817** |
+>
+> `contextualize()` does what §3.2 W2 claims — **dense +0.0104**. But the FTS index is built
+> over `chunks.content`, so §4.2's "embedding input only" rule *removes the heading from the
+> text the keyword half searches*: **fts −0.0206**, and the fused **hybrid −0.0029 even in the
+> best configuration**. So structural chunking stays **off** (it is behind `DOCLING_ENABLED`
+> anyway, which is blocked on K1-5). The tokenizer, K2-1, ships enabled — it changes no chunk
+> boundary on the legacy path and therefore no retrieval number.
+>
+> **⚠️ Getting that table required fixing a live retrieval bug first.** The same variant over an
+> unchanged corpus scored 0.6247, 0.6247, 0.6220, 0.6397 — the harness was not reproducible, and
+> the cause was in the product: `ORDER BY ts_rank DESC` with no tie-break, over a coarse rank
+> that the any-term query (ADR-062) ties constantly, so tied chunks came back in physical row
+> order. **The same question could answer differently on the same data.** Fixed by ordering on
+> `(rank, chunks.id)`. Note the spread was 0.018 against a CI regression tolerance of 0.02 — the
+> gate was one unlucky run from a false alarm and blind to anything smaller. P0-2 shipped without
+> ever being run twice on the same input.
+>
+> **⚠️ §3.3's `DocMeta` table is wrong about one field.** `captions` is marked `deprecated=True`
+> in the installed `docling-core` *and* the chunker leaves it `None` even for a captioned table
+> — the caption is inlined at the top of `chunk.text` instead. Nothing is lost (it is therefore
+> in the embedding), but it is not mapped to metadata and reading it would emit a
+> `DeprecationWarning` per chunk to populate a key that is always empty. `page` comes from
+> `doc_items[].prov[].page_no` as documented, and is omitted rather than defaulted when a format
+> carries no page geometry.
+>
+> **⚠️ P0-2's corpus had a second blind spot, and K2-5 is the phase that hit it.** Every seed
+> document was 272–445 characters — one chunk at any chunk size this product uses — so the
+> corpus could not measure a chunking change *at all*, and the mechanism W2 improves cannot
+> occur in it. Four long multi-section documents and eight queries aimed at their later sections
+> were added **before** any conclusion was drawn. A test now fails if that property is lost
+> again. Read this next to the 2026-08-13 note about the rigged-against-keyword-search sweep:
+> that is twice this corpus has quietly decided an answer before anyone checked it could.
+>
+> **K2-6 (new, not built): give the keyword half the same context the vector half got.** A
+> `chunks.heading` column with the GIN index rebuilt over
+> `to_tsvector(config, coalesce(heading,'') || ' ' || content)` — the lexical twin of
+> `embed_text`, keeping `content` clean for citations. This is what makes structural chunking
+> shippable. Deliberately not done in the same commit: it rebuilds the expression index that
+> P0-1 measured, to enable a path that is switched off and blocked on K1-5.
+
 ### Phase K3 — Format breadth + media
 
 | # | Task | Done when |

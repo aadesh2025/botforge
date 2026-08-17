@@ -390,3 +390,167 @@
     The main showroom is on Nungambakkam High Road in Chennai. There is a smaller outlet in
     Coimbatore on Avinashi Road that carries the previous season only, and a concession inside
     the Phoenix mall in Bengaluru. The Coimbatore outlet does not take fitting appointments.
+
+# ── Long, multi-section documents (added 2026-08-17 for docs/14 K2-5) ──────────────────────
+#
+# Everything above is 272-445 characters, i.e. ONE chunk per document at any chunk size this
+# product uses. That makes the whole corpus blind to chunking: the mechanism docs/14 §3.2 W2
+# describes — the second and third chunk of a section carrying no heading, because the heading
+# was consumed by the first — literally cannot occur in it. The first K2-5 run measured
+# structural chunking at a hybrid NDCG@10 of 0.8737 against 0.8974 and would have rejected the
+# phase on a corpus incapable of exercising it.
+#
+# This is the same class of blind spot the 2026-08-13 session found when its first weight sweep
+# "proved" hybrid retrieval was worthless: every query had been written with deliberately low
+# lexical overlap, which is a fair test of dense retrieval and a rigged one against keyword
+# search. **Check a benchmark for blind spots before letting it decide anything.**
+#
+# So: four documents of 1800-2400 characters, each with several `## ` sections, and the
+# queries below aim at facts in the SECOND, THIRD or FOURTH section. On the legacy path the
+# chunk holding the answer has no heading in it at all. Topics are deliberately new — nothing
+# here competes with an existing gold document, so every qrel above stays valid.
+
+- id: alterations
+  title: "Alterations & Tailoring"
+  text: |
+    Alterations and Tailoring
+
+    ## In-Store Alterations
+
+    Every garment bought from us can be adjusted by the tailoring desk at the Chennai showroom.
+    Walk-ins are taken between 11am and 5pm on weekdays; on Saturdays the desk works to
+    appointment only because the fitting rooms are busy. Bring the garment unworn and unwashed
+    with its tags still attached, along with the shoes you intend to wear it with, since hem
+    length is measured against the shoe. The tailor will pin the garment on you and write the
+    measurements onto the job card.
+
+    ## Sending a Garment by Post
+
+    If you cannot reach a showroom you may post the garment to the tailoring desk instead. Write
+    to the alterations team first and they will issue a job number; a parcel arriving without one
+    sits unidentified and cannot be matched to an order. Enclose the printed job sheet and, where
+    the change is a length, a second garment of the correct length to copy. We pay the carriage
+    on the return leg but not on the leg to us.
+
+    ## What It Costs
+
+    Shortening a hem, taking in a waist or moving a button is done free of charge on any garment
+    bought from us within ninety days of purchase. Beyond ninety days, or on a garment bought
+    elsewhere, the desk charges by the operation: a hem is 250 rupees, a waist adjustment 400
+    rupees, and reshaping a shoulder or a sleeve head 900 rupees. Embroidered and hand-worked
+    panels cannot be cut and are quoted individually.
+
+    ## How Long It Takes
+
+    Plan on ten working days from the moment the garment reaches the tailoring desk, not from the
+    day you posted it. Simple length changes are usually back inside a week. Between October and
+    early January the desk runs a longer queue and the same job takes three weeks, so a garment
+    needed for a wedding in that window should be sent well ahead. The desk telephones when the
+    garment is ready and holds it for thirty days.
+
+- id: fabric-sourcing
+  title: "Fabric & Sourcing"
+  text: |
+    Fabric and Sourcing
+
+    ## Where the Cotton Comes From
+
+    Our cotton is grown and spun in Tamil Nadu and Andhra Pradesh, and the greater part of it
+    reaches us through two mills near Erode that we have bought from since the company began.
+    Long-staple varieties are reserved for shirting, which is why a shirt woven from them takes a
+    press so cleanly. Yarn counts run from 40s for everyday poplin up to 120s for the finest
+    voile in the summer range.
+
+    ## Silk and Handloom
+
+    Silk is woven at Kanchipuram on pit looms by weaver families we buy from directly rather than
+    through an agent. Because each length is made by one weaver, small irregularities in the
+    ground and slight variation in the zari are inherent to the cloth and are not treated as
+    faults. Handloom cotton comes from cooperatives in Chettinad, and the width of a handloom
+    panel varies by a centimetre or two from piece to piece.
+
+    ## Certifications
+
+    The Erode mills hold GOTS certification for organic cotton and OEKO-TEX Standard 100 for the
+    absence of harmful substances, and the certificates are reissued annually. Our silk carries
+    the Silk Mark issued by the Central Silk Board, which is what distinguishes genuine mulberry
+    silk from an art-silk blend sold under the same name. We are audited by an outside body once
+    a year and the summary report is published on request.
+
+    ## Dye and Colourfastness
+
+    Everything is dyed in reactive dyes rather than direct dyes, which bond to the fibre instead
+    of sitting on it. In practice this means a deep indigo or a madder red will release a small
+    amount of loose colour on the first wash and then stop; this is the surplus dye leaving the
+    surface, not the shade running out of the cloth. Wash a strong colour by itself the first
+    time, in cold water, and dry it in shade rather than direct sun.
+
+- id: gift-services
+  title: "Gift Services"
+  text: |
+    Gift Services
+
+    ## Wrapping
+
+    Any order can be wrapped at checkout for 150 rupees per item. The wrap is an unbleached
+    cotton sleeve tied with a jute cord rather than paper, so it survives the post and can be
+    reused. Two wrapping styles are offered, a plain sleeve and one block-printed by hand in
+    Sanganer, and the printed sleeve takes an extra day to prepare because it is made to order.
+
+    ## Messages
+
+    A handwritten card goes in with the parcel at no charge. Type the words into the message box
+    at checkout and one of the showroom staff writes it out; there is room for roughly forty
+    words on the card. We do not print the message on the invoice or the outside of the parcel,
+    so the wording stays between you and the person receiving it. Emoji and non-Latin scripts
+    other than Tamil cannot be reproduced by hand reliably and are politely dropped.
+
+    ## Hiding the Price
+
+    Ask for a gift receipt and the parcel travels with a slip that lists the items and the order
+    reference but shows no amounts anywhere, and the tax invoice is emailed to you instead of
+    being placed in the box. The recipient can exchange or return against that slip on the same
+    terms as the buyer, and any refund goes back to the original payment method rather than to
+    them. Removing the price tags from the garments themselves is done on request but has to be
+    asked for separately, because the tag also carries the size.
+
+    ## Seasonal Hampers
+
+    Between October and December we assemble hampers of a shawl, a stole and a set of napkins in
+    a lidded box. Hampers are made up in the Chennai workroom and cannot be altered once boxed.
+    They ship by surface only, because the box does not fit the courier's air cage.
+
+- id: packaging-recycling
+  title: "Packaging & Recycling"
+  text: |
+    Packaging and Recycling
+
+    ## What the Parcel Is Made Of
+
+    Orders travel in a corrugated carton made from recycled board, closed with paper tape and
+    filled with shredded offcuts from the cutting floor rather than bought-in void fill. The
+    garment inside sits in a cotton bag. Nothing in the parcel needs to be separated before it
+    goes into a paper recycling stream, and the paper tape can be left on the box.
+
+    ## Sending the Packaging Back
+
+    Keep the carton if you think you may return the garment, since a return travels best in the
+    box it arrived in. If you do not want it, the courier will take the flattened carton away on
+    any subsequent delivery to the same address at no charge, and we credit fifty loyalty points
+    the first time you do this in a calendar year. Cotton bags can be posted back in bundles of
+    five or more using the prepaid label printed inside the flap.
+
+    ## Plastic
+
+    There is no plastic film, no bubble wrap and no adhesive plastic tape anywhere in a standard
+    parcel. The one exception is the small polythene sleeve around a silk garment, which protects
+    it from moisture in transit during the monsoon months and is marked as recyclable LDPE; ask
+    at checkout and we will pack the silk in tissue and a cotton bag instead. Courier partners
+    occasionally add their own plastic overwrap on the international leg and that is outside our
+    control.
+
+    ## Carbon
+
+    Deliveries within Tamil Nadu run on the courier's electric fleet in Chennai, Coimbatore and
+    Madurai. For everything else we buy offsets through a cookstove programme in Karnataka, and
+    the annual retirement certificate is published alongside the sourcing audit.

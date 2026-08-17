@@ -5,13 +5,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.rag.tokenizer import count_tokens
+
 # Ordered separators — try to split on the most semantic boundary that fits.
 _SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
 
 
 def estimate_tokens(text: str) -> int:
-    """Cheap token estimate (~4 chars/token) — avoids a heavy tokenizer dependency."""
-    return max(1, round(len(text) / 4)) if text else 0
+    """Token count for `text` (docs/14 K2-1).
+
+    Was `len(text) / 4`. Now a real tokenizer, which is the same function to every caller but a
+    materially different number for non-English text — see `rag.tokenizer` for why that matters
+    and what it degrades to when tiktoken cannot load. The name is kept because "estimate" is
+    still the honest word: it is cl100k_base's count, not the embedder's own.
+    """
+    return count_tokens(text)
 
 
 @dataclass(slots=True)
@@ -20,6 +28,15 @@ class TextChunk:
     content: str
     token_count: int
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: What to send the embedding model, when that differs from what to store and cite.
+    #: `None` means "embed `content`". The Docling chunker sets this to `contextualize()`'s
+    #: heading-prefixed form (docs/14 §4.2) — the heading path improves the *vector* but must
+    #: never be shown to a visitor or counted twice against the context budget.
+    embed_text: str | None = None
+
+    @property
+    def embedding_input(self) -> str:
+        return self.embed_text or self.content
 
 
 def _split_recursive(text: str, size: int, seps: list[str]) -> list[str]:

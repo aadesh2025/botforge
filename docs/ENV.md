@@ -180,6 +180,16 @@ docs/14 §12, where every step back is a flag flip because `LegacyConverter` is 
   that produces confidently wrong price answers.
 - `DOCLING_TIMEOUT_SECONDS` (default `120`) — Docling's own guidance is 90–120s. On timeout the
   document falls back to the legacy extractor rather than failing.
+- `DOCLING_CHUNK_MAX_TOKENS` (default `512`) — token budget per chunk on the structural
+  chunking path. **Tokens, not characters**: 1000 characters is ~250 tokens of English and
+  ~800 of Tamil, and only one of those fits an embedding window predictably. Sweepable without
+  re-converting anything — `scripts/eval_retrieval.py --chunk-max-tokens` — which is the whole
+  point of persisting the `DoclingDocument`.
+- `DOCLING_CHUNK_HEADING_MODE` (default `embed`) — `embed` puts the chunk's heading path in the
+  embedding input only and leaves the stored chunk raw (docs/14 §4.2's rule); `inline` also
+  prefixes it to the stored chunk. **This is a measured trade, not a style choice** (ADR-065):
+  the FTS index is built over `chunks.content`, so under `embed` the heading is invisible to the
+  keyword half of hybrid retrieval and its NDCG@10 falls. See the K2-5 table in docs/14.
 
 **URL ingest deliberately does not go through Docling.** The SSRF controls in
 `loaders.load_url` are what stand between a user-supplied URL and the internal network, and

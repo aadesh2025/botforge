@@ -91,6 +91,20 @@ class Settings(BaseSettings):
     # Docling's own guidance is 90-120s. Ingest is a background job, so this buys correctness
     # on a large document rather than costing anyone latency.
     docling_timeout_seconds: float = 120.0
+    # Token budget per chunk on the Docling path (docs/14 K2). Tokens, not characters: the
+    # structural chunker splits on the tokenizer, which is the whole point — `chunk_size`'s
+    # 1000 characters means ~250 tokens of English and ~800 of Tamil, and only one of those
+    # fits an embedding window predictably.
+    #
+    # 512 targets the retrieval sweet spot rather than the model's ceiling. A chunk large
+    # enough to hold three topics retrieves for all three and answers none of them well;
+    # `merge_peers` is what stops the opposite failure of one-sentence fragments.
+    docling_chunk_max_tokens: int = 512
+    # Where the chunk's heading path goes: `embed` (embedding input only, docs/14 §4.2's rule)
+    # or `inline` (also prefixed to the stored chunk). Measured, not chosen on principle — see
+    # ADR-065 and the K2-5 table in docs/14. The short version: `embed` improves the dense half
+    # and *removes* the heading from the FTS-indexed text, so it makes the keyword half worse.
+    docling_chunk_heading_mode: str = "embed"
 
     # --- Reranking (docs/13 R1, docs/14 K4) ---
     # Stage 4: a cross-encoder reorders the fused RRF candidates. OFF platform-wide and off per
