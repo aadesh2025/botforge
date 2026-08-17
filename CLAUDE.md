@@ -186,6 +186,56 @@ Two standing rules from that spec, repeated here because they are easy to violat
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-17 — docs/15 PROD-1 + PROD-2: file ingest was broken in production, and no test could see it
+- **ADR-068. Both were deployment bugs: every line of app code was correct and the suite was
+  green.** PROD-1 — `api` and `worker` are separate containers with separate filesystems and **no
+  shared uploads volume**, so the api wrote the file, the worker read it elsewhere, got "Stored file
+  is missing", and the document landed `failed`. PROD-2 — `x-api-env` passed
+  `OLLAMA_BASE_URL=http://ollama:11434` while the prod compose declared **no `ollama` service**.
+  Both invisible in dev (one host directory, host-installed Ollama) and invisible to a smoke test,
+  because URL and pasted-text ingest never touch the filesystem. Same family as ADR-044.
+- **⚠️ docs/15's own PROD-2 fix would not have fixed it.** `ollama/ollama` starts **empty** — it
+  serves an API with no models, and embedding against an unpulled model is an error, not a
+  download. Adding the service alone gives a healthy port that cannot embed, i.e. the same symptom.
+  So it pulls the model on start and **the healthcheck asserts the model is present, not that the
+  port answers.**
+- **⚠️ And its other option — "point it at a reachable provider" — does not exist.**
+  `build_embedding_provider` accepts `openai` and `gemini` and builds an **Ollama** client for
+  both; no adapter for either was ever written. Setting `EMBEDDING_PROVIDER=openai` to escape a
+  missing Ollama changes nothing and there is no symptom that says so — now warned at startup.
+  `chunks.embedding` is `vector(768)` too, so a 1536-dim model is a migration, not an env var.
+- **⚠️ The volume alone would have swapped one bug for another, and this was measured.** Docker
+  seeds an empty named volume from the image's directory *including ownership*, but creates a
+  **root-owned** mountpoint when the path is absent from the image — and the api runs as uid 10001.
+  Two minimal images differing only in that `mkdir`: with it `appuser appuser` and the write
+  succeeds, without it `root root` and `touch` fails with `Permission denied`. `/app/var/uploads`
+  is now created in the same `RUN` as the `useradd`, and a test pins the ordering. "Permission
+  denied at the first client upload" is no better than "file not found".
+- Dev compose's `ollama` had the identical never-pulls-a-model gap; fixed there too. Its published
+  `11434` still collides with the host Ollama that CLAUDE.md §12 actually uses — noted in the file,
+  deliberately not changed. Dev has no PROD-1 because api and worker share one `../apps/api:/app`
+  bind mount.
+- **Embeddings deliberately do not gate startup.** `service_started`, never `service_healthy`, and
+  the probe never raises: embeddings are required by the knowledge base, not the platform, and a
+  worker held back by a model download would take webhooks, email and campaigns with it. A queued
+  ingest task waits in Redis — a delay, not an outage.
+- **The root cause was that nothing tested deployment shape.** `tests/test_infra_prod_compose.py`
+  now asserts properties, not lines: every service touching uploads mounts *the same* volume at the
+  same path (naming `api`/`worker` would wave a future `q=media` worker into the same bug); every
+  internal hostname is a declared service, with an explicit `_EXTERNAL_HOSTS` allowlist so a new
+  external dependency is a decision; the pulled model matches `Settings.embedding_model`; ollama
+  publishes no port. **All eight assertions were run against a mutated compose** — both original
+  bug states plus six plausible half-fixes (volume on api only, a different volume each, model
+  never pulled, model drifted, port published, `service_healthy`) — and all go red.
+- **k8s is documented, NOT fixed**, and that is a trade: 2 api + 2 worker replicas need RWX; a
+  `ReadWriteOnce` PVC would not fix it and an RWX PVC on a cluster without an RWX StorageClass
+  stays `Pending`, leaving every pod in `ContainerCreating` — a broken platform instead of a broken
+  feature. The manifest opens with the warning, the exact YAML for RWX clusters, and the pointer to
+  object storage. **PROD-3 (resource limits) still open.** `backup.sh` still does not cover uploads.
+- `pyyaml` was undeclared while `app/rag/evaluate.py` imports it at module level — arriving
+  transitively and working by luck. Declared. New env var `EMBEDDING_PROBE_ENABLED` (default on,
+  off in the suite so it does no network I/O). Suites: **917 pytest**, ruff + mypy clean.
+
 ### 2026-08-17 — docs/14 K2-6: the keyword index gets the heading, and the gate still says no
 - **ADR-067, migration 0021.** `chunks.heading` + the GIN indexes rebuilt over
   `coalesce(heading,'') || ' ' || content` — the lexical twin of `TextChunk.embed_text`, so the

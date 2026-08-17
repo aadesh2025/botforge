@@ -1,5 +1,31 @@
 # API + worker + beat + web. Replace image refs with your registry (see CI/CD in ci.yml).
 # The migration Job runs once per deploy; the api waits for it (initContainer gate below).
+#
+# ⚠️ FILE UPLOAD INGEST DOES NOT WORK ON THESE MANIFESTS. Read this before hosting a client.
+#
+# docs/15 PROD-1: the api writes an uploaded document to `UPLOAD_DIR` and the Celery worker reads
+# it back to ingest it. Here they are separate Deployments — 2 replicas each — with no shared
+# storage, so the worker gets "Stored file is missing" and the document lands in `failed`. URL and
+# pasted-text ingest are unaffected, which is why a smoke test passes while the feature is broken.
+#
+# This is deliberately NOT fixed with a PVC, and the reason is a trade rather than an oversight:
+#   * A ReadWriteOnce PVC cannot be mounted by 4 pods across nodes, so it would not fix it.
+#   * A ReadWriteMany PVC would, but needs an RWX-capable StorageClass (NFS/CephFS/EFS/Azure
+#     Files). On a cluster without one the PVC stays Pending and every api and worker pod stays
+#     in ContainerCreating — trading a broken *feature* for a broken *platform*.
+# The single-VPS compose deployment fixes it with a shared named volume
+# (`infra/docker-compose.prod.yml`). The fix for multi-replica k8s is object storage — docs/15 §4
+# Option 2 and §5, which the persisted DoclingDocument needs anyway.
+#
+# To run these manifests WITH file ingest, on a cluster that has RWX: create a
+# `botforge-uploads` PVC with `accessModes: [ReadWriteMany]`, then add to the api and worker
+# containers `volumeMounts: [{ name: uploads, mountPath: /app/var/uploads }]` and to each pod
+# spec `volumes: [{ name: uploads, persistentVolumeClaim: { claimName: botforge-uploads } }]`.
+# `UPLOAD_DIR` is already `/app/var/uploads` in the prod deployment; set it in botforge-config.
+#
+# ⚠️ There is also no `ollama` Deployment here, so the default embedding provider is unreachable
+# for the same reason it was in compose (docs/15 PROD-2). The API logs
+# `embedding_provider_unreachable` at error level on startup rather than failing quietly.
 apiVersion: batch/v1
 kind: Job
 metadata:

@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     embedding_provider: str = "ollama"
     embedding_model: str = "nomic-embed-text"
+    # One HTTP GET at startup, confirming the configured embedding endpoint answers AND has the
+    # model pulled (docs/15 PROD-2). It exists because production pointed at an `ollama` service
+    # that was never declared: every ingest failed and no configuration looked wrong. Capped at a
+    # couple of seconds, never fails startup. Off in the test suite — a diagnostic must not be
+    # the thing that makes the suite do network I/O.
+    embedding_probe_enabled: bool = True
 
     # --- Knowledge base / RAG ---
     # Directory for uploaded/ingested document files (created on demand).

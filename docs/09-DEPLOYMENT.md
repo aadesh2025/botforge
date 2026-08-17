@@ -41,8 +41,41 @@ cd infra && docker compose -f docker-compose.prod.yml up -d --build
   `depends_on: migrate: service_completed_successfully`, so scaling replicas never re-runs migrations.
 - **Healthchecks** on postgres, redis, api (`/healthz`), and web (`/login`); `restart: unless-stopped`.
 - **Persistent volumes** for postgres/redis/caddy; a **backup** service runs the nightly `pg_dump`.
+- **A shared `uploads` volume mounted into api *and* worker** at `UPLOAD_DIR=/app/var/uploads`.
+  Not optional and not a tidiness detail: the api writes an uploaded document and the Celery
+  worker reads it back to ingest it, so without one shared mount every file upload fails with
+  "Stored file is missing" (docs/15 PROD-1). The persisted `DoclingDocument` is written beside
+  each file, so one volume covers both.
+- **An `ollama` service for embeddings**, internal-only. See §3a — this needs reading before a
+  first deploy, because the failure it prevents is silent.
 - Scale stateless tiers: `docker compose -f docker-compose.prod.yml up -d --scale api=3 --scale worker=3`
   (the realtime hub is Redis-backed — ADR-028 — so multi-replica WebSocket fan-out works).
+  ⚠️ **The `uploads` volume does not survive a second machine.** Scaling replicas on one host is
+  fine; moving api and worker onto different hosts needs object storage (docs/15 §4 Option 2).
+
+### 3a. Embeddings: the one provider with no fallback  *(implemented)*
+
+Chat has a fallback chain and degrades to a written message when a provider fails. **Embeddings
+have neither**, and they are needed at *both* ends: ingesting a document and embedding the
+visitor's query at retrieval time. So an unreachable embedding endpoint is not a degraded
+knowledge base, it is no knowledge base.
+
+- The stack ships **`ollama` with no published port** (it has no authentication — a published port
+  is an open inference endpoint) holding **`nomic-embed-text`, 768 dimensions**, which is what the
+  `chunks.embedding` column is. A different-dimension model needs a migration, not just an env var.
+- **`ollama/ollama` starts empty.** It serves an API with no models, and embedding against a model
+  it has not pulled is an error rather than an implicit download — so the service pulls the model
+  on start and its healthcheck asserts the *model* is present, not that the port answers.
+- **api and worker depend on it with `service_started`, never `service_healthy`.** Embeddings are
+  required by the knowledge base, not by the platform: a worker held back by a failed model
+  download would take webhooks, email and campaigns down too, whereas a queued ingest task simply
+  waits in Redis.
+- **On startup the API resolves the endpoint and logs loudly** —
+  `embedding_provider_unreachable` / `embedding_model_missing`, error level under `ENV=prod`
+  (`EMBEDDING_PROBE_ENABLED`). It never fails startup. **Check for these two lines in the first
+  minute of a deploy**; before they existed, this failure looked like nothing at all.
+- ⚠️ **`EMBEDDING_PROVIDER=openai` and `=gemini` are accepted and then routed to Ollama anyway** —
+  no adapter for either exists. Startup warns, because there is otherwise no symptom.
 
 ## 4. Backups & data  *(implemented)*
 - **`infra/scripts/backup.sh`** — `pg_dump | gzip` to a timestamped file with N-day rotation.
@@ -50,8 +83,12 @@ cd infra && docker compose -f docker-compose.prod.yml up -d --build
   reach Postgres. The prod compose ships a `backup` service (cron-driven) writing to a `backups` volume.
 - **`infra/scripts/restore.sh <file.sql.gz>`** — documented, confirmation-gated restore (with an
   optional drop+recreate). Verify with `SELECT count(*) FROM organizations;`.
-- Uploaded files: local volume (`UPLOAD_DIR`) in dev; back that path up alongside the DB (or point
-  it at an S3-compatible bucket in prod). Retention + delete-per-org honored (NFR-8).
+- Uploaded files: the shared `uploads` volume (`UPLOAD_DIR`), holding each original document **and**
+  the persisted `DoclingDocument` beside it. Retention + delete-per-org honored (NFR-8).
+- ⚠️ **`backup.sh` does not cover `uploads`.** It dumps Postgres only, so restoring from a backup
+  alone leaves every `documents` row pointing at a `storage_path` and `docling_json_path` that are
+  gone. Back that volume up alongside the database, or move it to an S3-compatible bucket
+  (docs/15 §8.3).
 
 ## 5. Observability  *(implemented)*
 - `/healthz` (liveness), `/readyz` (DB+Redis), **`/metrics` (Prometheus exposition** — request

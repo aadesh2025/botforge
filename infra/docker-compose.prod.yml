@@ -13,6 +13,10 @@ x-api-env: &api-env
   REDIS_URL: redis://redis:6379/0
   N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+  # Explicit, and it must match the `uploads` volume mount on api + worker below. The default
+  # (`./var/uploads`) resolves to the same directory via WORKDIR, but naming it here means the
+  # setting and the mount are visibly one decision instead of two that happen to agree.
+  UPLOAD_DIR: /app/var/uploads
   ENV: prod
 
 services:
@@ -65,6 +69,16 @@ services:
     environment: *api-env
     restart: unless-stopped
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    volumes:
+      # docs/15 PROD-1. The api writes an upload here and the worker reads it back to ingest it;
+      # they are separate containers, so without a SHARED volume the worker gets
+      # "Stored file is missing" and the document lands in `failed`. Invisible in dev, where both
+      # run from one directory on the host, and invisible to a smoke test, because URL and
+      # pasted-text ingest never touch the filesystem.
+      #
+      # Single-VPS fix. It does NOT survive scaling to a second node — the proper answer is
+      # object storage (docs/15 §4 Option 2), which the persisted DoclingDocument needs anyway.
+      - uploads:/app/var/uploads
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
       interval: 15s
@@ -86,11 +100,22 @@ services:
     environment: *api-env
     restart: unless-stopped
     command: ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    volumes:
+      # The same volume as `api`, at the same path. This is the other half of PROD-1: the
+      # ingest task reads the file the api wrote (`ingest._stored_bytes`) and also writes the
+      # persisted DoclingDocument *beside* it, so one shared mount covers both files.
+      - uploads:/app/var/uploads
     depends_on:
       redis:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      # Start-order only, deliberately NOT `service_healthy`. Embeddings are required by the
+      # knowledge base, not by the platform, and a worker that refuses to start takes webhooks,
+      # email, campaigns and every other background job down with it. A queued ingest task waits
+      # in Redis instead, which is a delay rather than a failure.
+      ollama:
+        condition: service_started
 
   beat:
     build:
@@ -136,6 +161,53 @@ services:
       - web
       - api
 
+  # Embeddings for the knowledge base (docs/15 PROD-2).
+  #
+  # This service did not exist, while `x-api-env` above has always passed
+  # OLLAMA_BASE_URL=http://ollama:11434 and `config.py` defaults `embedding_provider` to ollama.
+  # So a knowledge base created with defaults in production pointed at a hostname that does not
+  # resolve: every embed call failed, every document failed to ingest, and nothing about the
+  # configuration looked wrong. Same family as the .env-comment-as-API-key outage — correct in
+  # dev, silently wrong in production.
+  #
+  # ⚠️ Adding the service is only half of it. `ollama/ollama` starts EMPTY: it serves an API with
+  # no models, and `POST /api/embeddings` for a model it does not have is an error, not a
+  # download. So the command below pulls the model on every start (a no-op once the volume has
+  # it) and the healthcheck asserts the model is actually present rather than that the port
+  # answers — a healthy-but-empty Ollama is exactly the state that produced PROD-2.
+  ollama:
+    image: ollama/ollama
+    restart: unless-stopped
+    volumes:
+      # Weights persist across restarts. Without this, every `docker compose up` re-downloads
+      # them: bandwidth on a metered VPS and minutes of failing ingest per deploy (docs/15 §5).
+      - ollamadata:/root/.ollama
+    # DELIBERATELY NO `ports:`. Ollama has no authentication of any kind, so a published port is
+    # an open inference endpoint on the internet. Same rule as docling-serve (docs/14 §9).
+    expose:
+      - "11434"
+    entrypoint: ["/bin/sh", "-c"]
+    # `nomic-embed-text` is hardcoded, not `${EMBEDDING_MODEL}`: compose interpolates from
+    # `infra/.env` and the shell, NOT from the `../.env` that `env_file` gives the containers, so
+    # a variable here would silently keep pulling the default after someone changed the app's
+    # model. `tests/test_infra_prod_compose.py` pins this string against `Settings.embedding_model`
+    # so the two cannot drift unnoticed.
+    # ONE list element on purpose. `sh -c` takes its whole script as a single argument; a plain
+    # string here is split into argv words by compose, so `sh -c ollama serve & ...` would run
+    # `ollama` alone and drop the rest into $0/$1. Verified with `docker compose config`.
+    command:
+      - "ollama serve &
+         until ollama list >/dev/null 2>&1; do sleep 1; done;
+         ollama pull nomic-embed-text || echo 'ollama pull failed - embeddings will not work';
+         wait"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list | grep -q nomic-embed-text"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      # First boot has to download the weights before this can pass.
+      start_period: 300s
+
   # Nightly pg_dump backup with rotation (see infra/scripts/backup.sh).
   backup:
     image: postgres:16
@@ -164,3 +236,9 @@ volumes:
   caddydata:
   caddyconfig:
   backups:
+  # Uploaded documents AND the persisted DoclingDocument beside each one. Shared by api +
+  # worker (PROD-1) and NOT covered by infra/scripts/backup.sh, which dumps Postgres only —
+  # restoring the database alone leaves every `documents` row pointing at a file that is gone
+  # (docs/15 §8.3).
+  uploads:
+  ollamadata:

@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from app.llm import embeddings
 from app.modules.admin.router import router as admin_router
 from app.modules.agents.router import router as agents_router
 from app.modules.agents.router import templates_router as agent_templates_router
@@ -48,6 +49,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     log.info("startup", env=settings.env, version=__version__)
     _warn_missing_secrets()
+    # Needs the network, so it cannot live in `_warn_missing_secrets`. Capped at a couple of
+    # seconds and it swallows everything — see `embeddings.probe_reachable`. Off in the suite via
+    # `EMBEDDING_PROBE_ENABLED`, which conftest clears.
+    await embeddings.probe_reachable()
     # Bridge the realtime hub over Redis so operator↔widget delivery works across API replicas.
     await hub.connect(settings.redis_url)
     yield
@@ -80,6 +85,7 @@ def _warn_missing_secrets() -> None:
     guard_models.warn_if_unconfigured()
     rerank.warn_if_misconfigured()
     converters.warn_if_misconfigured()
+    embeddings.warn_if_misconfigured()
 
 
 # A credential can't contain these and still be valid, so their presence means a typo or a

@@ -51,6 +51,23 @@ port and the `pgdata` volume are unchanged, so no data moves with it.
 | `OPENAI_API_KEY` | paid | yes |
 | `ANTHROPIC_API_KEY` | paid | yes |
 | `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | default embeddings | no |
+| `EMBEDDING_PROBE_ENABLED` | startup reachability check for the above | no (default on) |
+
+**Embeddings are the one provider with no fallback**, so two things about them are worth knowing
+before a deploy (docs/15 PROD-2):
+
+- **`EMBEDDING_PROVIDER=openai` and `=gemini` do not do what they say.** `build_embedding_provider`
+  accepts both names and constructs an *Ollama* client regardless — no adapter for either was ever
+  written. Setting one to work around a missing Ollama changes nothing, and there is no symptom
+  that distinguishes it from having worked, so startup logs `embedding_provider_has_no_adapter`.
+- **`EMBEDDING_MODEL` implies a vector dimension.** `chunks.embedding` is `vector(768)`, which is
+  `nomic-embed-text`. A 1536-dimension model needs a migration, not just this variable.
+- `EMBEDDING_PROBE_ENABLED` (default on) does one `GET /api/tags` at startup and logs
+  `embedding_provider_unreachable` or `embedding_model_missing` — error level under `ENV=prod`,
+  warning elsewhere, since a dev machine without Ollama running is normal. It never fails startup
+  and is capped at ~2s. The test suite disables it so the suite does no network I/O.
+  **`ollama/ollama` starts with no models**, so "the port answers" is not evidence that embedding
+  works; that is why the probe checks for the model and not just the endpoint.
 
 ## OAuth
 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` — all

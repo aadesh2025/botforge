@@ -165,9 +165,22 @@ services:
   ollama:
     image: ollama/ollama
     ports:
+      # ⚠️ Collides with a host-installed Ollama, which is what the documented dev workflow
+      # (CLAUDE.md §12) actually uses — api and web run on the host, not in compose. If this
+      # container will not bind, that is why, and the host one is already serving.
       - "11434:11434"
     volumes:
       - ollamadata:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    # Same gap as the prod compose had (docs/15 PROD-2): `ollama/ollama` starts EMPTY. It serves an
+    # API with no models, and embedding against a model it has not pulled is an error, not a
+    # download — so a bare `image: ollama/ollama` gives a container that answers and cannot embed.
+    # One list element: `sh -c` takes its whole script as a single argument.
+    command:
+      - "ollama serve &
+         until ollama list >/dev/null 2>&1; do sleep 1; done;
+         ollama pull nomic-embed-text || echo 'ollama pull failed - embeddings will not work';
+         wait"
 
 volumes:
   pgdata:

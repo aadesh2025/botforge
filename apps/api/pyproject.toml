@@ -40,6 +40,10 @@ dependencies = [
     # even on the OpenAI path or the chunker import fails with ModuleNotFoundError.
     "docling-core[chunking-openai]>=2.0",
     "huggingface-hub>=0.26",
+    # `app/rag/evaluate.py` imports yaml at module level to read the eval corpus, and the infra
+    # tests parse the compose files. It was arriving transitively (trafilatura/docling-core) and
+    # working by luck — a transitive drop would have broken an app module's import, not a test's.
+    "pyyaml>=6.0",
     # NOT a runtime constraint — numpy arrives transitively via docling-core → pandas, and any
     # 2.x runs fine. This pins the *typecheck*: numpy 2.5's bundled stubs use the 3.12 `type`
     # statement, and under `python_version = "3.11"` (which is what the Dockerfile actually

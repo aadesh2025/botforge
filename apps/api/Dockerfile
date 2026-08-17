@@ -19,7 +19,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev || true
 
 # Run as a non-root user.
-RUN useradd -m -u 10001 appuser && chown -R appuser:appuser /app
+#
+# `var/uploads` is created HERE, before the chown, and that ordering is the whole point. In
+# production a shared named volume is mounted at this path so `api` and `worker` see the same
+# files (docs/15 PROD-1). Docker seeds an empty named volume from the image's directory —
+# including its ownership — but if the path does not exist in the image it creates the mountpoint
+# as root:root instead, and appuser then cannot write to its own upload directory. That failure
+# looks like a permissions bug at the first client upload, i.e. after deploy, not at build time.
+RUN mkdir -p /app/var/uploads \
+    && useradd -m -u 10001 appuser \
+    && chown -R appuser:appuser /app
 USER appuser
 
 ENV PATH="/app/.venv/bin:$PATH"

@@ -10,10 +10,12 @@
 > **Status:** analysis + capacity plan. Sizing figures are **estimates, not measurements** —
 > see §7 for confidence.
 >
-> **Committed 2026-08-17, after re-verifying every claim in §2 against the code. All three PROD
-> bugs are still present.** Two of this file's forward-looking statements were overtaken by work
-> that landed the same day — see **§8**, which is the first thing to read if you are picking this
-> up later.
+> **Committed 2026-08-17, after re-verifying every claim in §2 against the code.** Two of this
+> file's forward-looking statements were overtaken by work that landed the same day — see **§8**.
+>
+> **PROD-1 and PROD-2 were then fixed for the compose deployment (ADR-068); PROD-3 is still open
+> and the k8s manifests are documented rather than fixed — see §9.** §8 and §9 are the first two
+> things to read if you are picking this up later; §2–§7 are preserved as the original analysis.
 
 ---
 
@@ -39,6 +41,11 @@ made it expensive.
 ## 2. ⚠️ Three production bugs that exist today
 
 These are **not** caused by the Docling plan. They are in `infra/docker-compose.prod.yml` now.
+
+> **Update 2026-08-17 — PROD-1 and PROD-2 are FIXED for the compose deployment (ADR-068).**
+> PROD-3 is still open. The analysis below is kept as written, because it is the record of what
+> was wrong and why it was invisible; **§9 records what shipped, what it did not cover, and the
+> two things the fix turned up that this section did not know about.**
 
 ### PROD-1 — File uploads cannot be ingested in production ⛔
 
@@ -310,9 +317,9 @@ stop being guesses.
 
 | # | Task | Why now |
 |---|---|---|
-| **1** | **PROD-1** shared uploads volume (api + worker) | ⛔ **File ingest is broken in prod today** |
-| **2** | **PROD-2** reachable embedding provider + startup check | ⛔ Default KB config cannot embed in prod |
-| **3** | **PROD-3** memory limits on every service | Protects Postgres before ML lands |
+| ~~**1**~~ | **PROD-1** shared uploads volume (api + worker) | ✅ **shipped** 2026-08-17, ADR-068 — compose only, k8s documented (§9.5) |
+| ~~**2**~~ | **PROD-2** reachable embedding provider + startup check | ✅ **shipped** 2026-08-17, ADR-068 — and §2's proposed fix would not have worked (§9.2) |
+| **3** | **PROD-3** memory limits on every service | ⬅ **next.** Protects Postgres before ML lands |
 | 4 | Sizing section in `docs/09-DEPLOYMENT.md` | The gap that produced this whole file |
 | 5 | Blob storage (MinIO or S3) | Proper PROD-1 fix; unblocks docs/14 K1-4 |
 | 6 | docs/14 **P0-1**, **P0-2** | Unchanged — still first among the retrieval work |
@@ -420,3 +427,98 @@ reranker** — stands on the §3.4 CPU-contention argument, which §7 rates high
 because it does not depend on the numbers.
 
 **Nothing in §2 is waiting on docs/14.** PROD-1 and PROD-2 block hosting a real client today.
+
+---
+
+## 9. PROD-1 and PROD-2: what shipped — 2026-08-17
+
+ADR-068. Both fixed for the **compose** deployment, which is the one §4 Option 1 recommends and
+the one a real client would be hosted on.
+
+### 9.1 PROD-1 — shared uploads volume
+
+An `uploads` named volume mounted into **api and worker at the same path**, with
+`UPLOAD_DIR=/app/var/uploads` named explicitly in `x-api-env` so the setting and the mount are
+visibly one decision. Because the persisted `DoclingDocument` is written *beside* the source file,
+one volume covers both — see §8.2.
+
+**⚠️ A trap this section did not know about, found while fixing it — and measured, not reasoned.**
+Docker seeds an empty named volume from the image's directory *including its ownership*, but if the
+path does not exist in the image it creates the mountpoint **root-owned**, and the api runs as uid
+10001. Two minimal images differing only in that `mkdir`, each with a fresh named volume mounted at
+the path:
+
+```
+WITH  mkdir in the image:  drwxr-xr-x appuser appuser  /app/var/uploads   -> WRITE OK
+WITHOUT:                   drwxr-xr-x root    root     /app/var/uploads   -> Permission denied
+```
+
+So mounting the volume alone would have replaced "file not found" with "permission denied",
+surfacing at the first client upload rather than at build time. `apps/api/Dockerfile` now creates
+the directory in the same `RUN` as the `useradd`, before the `chown`, and a test asserts that
+ordering.
+
+### 9.2 PROD-2 — the embedding service, and the half of it §2 got wrong
+
+An internal-only `ollama` service (`expose`, no `ports` — it has no authentication, so a published
+port is an open inference endpoint) with a weights volume so a restart does not re-download.
+
+**⚠️ §2's fix — "add an `ollama` service to prod compose" — would not have fixed it.**
+`ollama/ollama` starts **empty**: it serves an API with no models, and embedding against a model it
+has not pulled is an *error*, not an implicit download. So the service pulls `nomic-embed-text` on
+start and **its healthcheck asserts the model is present rather than that the port answers** — a
+healthy-but-empty Ollama is exactly the state that produced PROD-2 in the first place.
+
+**⚠️ §2's other fix option — "change the production default to a provider that is actually
+reachable" — does not exist.** `build_embedding_provider` accepts `openai` and `gemini` and
+constructs an **Ollama** client for both, because no adapter for either was ever written. An
+operator setting `EMBEDDING_PROVIDER=openai` to escape a missing Ollama would change nothing
+whatsoever and have no way to tell. Startup now warns (`embedding_provider_has_no_adapter`). Note
+also that `chunks.embedding` is `vector(768)`, so a 1536-dimension model is a migration, not an
+env var — the "just point it somewhere else" fix was never one line.
+
+**api and worker depend on it with `service_started`, never `service_healthy`.** Embeddings are
+required by the knowledge base, not by the platform; a worker held back by a failed model download
+would take webhooks, email and campaigns down with it, whereas a queued ingest task waits in Redis.
+That is a delay instead of an outage.
+
+### 9.3 The startup check §2 asked for
+
+§2 said *"a startup check that resolves the configured embedding provider and logs loudly would
+have caught all three."* It exists: `embeddings.probe_reachable()`, one `GET /api/tags` capped at
+2s, logging `embedding_provider_unreachable` or `embedding_model_missing` at **error** level under
+`ENV=prod` and warning elsewhere (a dev box without Ollama is normal). It **never fails startup** —
+a diagnostic that can stop the API coming up is worse than the bug it reports — and it is off in
+the test suite, because a suite that does network I/O has a result that depends on the host.
+
+### 9.4 What tests can now catch, and how that was verified
+
+The reason these two bugs shipped is that **no test looked at how the thing is deployed**: every
+line of application code was correct and the suite was green. `tests/test_infra_prod_compose.py`
+parses the prod compose and asserts the *shape*, not specific lines:
+
+- every service that touches uploads mounts **the same** volume at the same path (a test naming
+  `api` and `worker` would wave a future `q=media` worker straight into the same bug);
+- every internal hostname the containers are pointed at is a service declared in the same file,
+  with an explicit `_EXTERNAL_HOSTS` allowlist so a new external dependency is a decision;
+- the pulled model matches `Settings.embedding_model`, so the hardcoded string cannot drift;
+- ollama publishes no port, and nothing gates startup on it.
+
+**Each of those was run against a mutated compose file to confirm it goes red** — the original
+PROD-1 and PROD-2 states, plus the plausible half-fixes: volume on the api only, a *different*
+volume per service, service added but model never pulled, model drifted, port published, and
+`service_healthy` added. All eight fail. A check that has never failed has not been tested either.
+
+### 9.5 Not fixed, deliberately
+
+- **PROD-3 (no resource limits)** — untouched. Still the thing to do before docling-serve exists.
+- **k8s (`infra/k8s/app.yaml`)** — **documented, not fixed**, and that is a trade rather than an
+  oversight. 2 api + 2 worker replicas need `ReadWriteMany`; a `ReadWriteOnce` PVC would not fix
+  it, and an RWX PVC on a cluster without an RWX StorageClass stays `Pending` and leaves every api
+  and worker pod in `ContainerCreating` — trading a broken *feature* for a broken *platform*. The
+  manifest now opens with an unmissable warning, the exact YAML to add if the cluster has RWX, and
+  a pointer to object storage as the real answer.
+- **Backups still do not cover the `uploads` volume** (§8.3). `docs/09` §4 now says so explicitly.
+- **`ollama`'s resident size is still unmeasured.** §3.2 estimates 1–2 GB, but that figure assumed
+  a chat model; serving only `nomic-embed-text` should be far smaller. Not measured, so not
+  claimed — it is a planning correction to validate, exactly as §7 says of every number in §3.

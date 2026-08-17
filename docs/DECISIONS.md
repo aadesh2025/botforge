@@ -18,6 +18,67 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-068: Two deployment bugs that no test could see, and the deployment tests that now see them
+- **Date:** 2026-08-17
+- **Status:** accepted
+- **Context:** docs/15 §2 PROD-1 and PROD-2. **Every line of application code was correct, the whole
+  suite was green, and file ingest was broken for any real client.** PROD-1: `api` and `worker` are
+  separate containers with separate filesystems and no shared uploads volume, so the api wrote
+  `<upload_dir>/<id>.pdf` and the worker read it in a different container, got "Stored file is
+  missing", and marked the document `failed`. PROD-2: `x-api-env` passed
+  `OLLAMA_BASE_URL=http://ollama:11434` while the prod compose declared **no `ollama` service**, so
+  a knowledge base created with defaults pointed at a hostname that does not resolve. Both were
+  invisible in dev — where api and worker run from one host directory against a host-installed
+  Ollama — and invisible to a smoke test, because URL and pasted-text ingest never touch the
+  filesystem. Same family as ADR-044 (`.env` comment read as an API key) and the
+  `LLM_FORCE_FAKE`-on-8010 mix-up: **configuration correct in dev, silently wrong in production.**
+- **Decision:** a shared `uploads` named volume mounted into api and worker at an explicit
+  `UPLOAD_DIR=/app/var/uploads`; an internal-only `ollama` service that pulls its model on start;
+  and a startup probe that resolves the endpoint and logs loudly. Plus
+  `tests/test_infra_prod_compose.py`, which asserts *deployment shape* — the class of thing that
+  had no coverage at all and is the actual root cause of both bugs shipping.
+- **⚠️ Three things the fix turned up that docs/15 §2 had wrong or did not know:**
+  1. **§2's PROD-2 fix would not have fixed it.** `ollama/ollama` starts **empty** — it serves an
+     API with no models, and embedding against an unpulled model is an error, not an implicit
+     download. Adding the service alone leaves a healthy port that cannot embed, which is the same
+     symptom as no service at all. So the service pulls the model and **its healthcheck asserts
+     the model is present, not that the port answers.**
+  2. **§2's alternative fix — "point it at a provider that is actually reachable" — does not
+     exist.** `build_embedding_provider` accepts `openai` and `gemini` and constructs an *Ollama*
+     client for both; no adapter for either was ever written. An operator setting
+     `EMBEDDING_PROVIDER=openai` to escape a missing Ollama changes nothing and has no way to tell.
+     Now warned at startup. `chunks.embedding` is also `vector(768)`, so a 1536-dimension model is
+     a migration, not an env var.
+  3. **Mounting the volume without a Dockerfile change would have swapped one bug for another.**
+     Docker seeds an empty named volume from the image's directory *including its ownership*, but
+     creates a **root-owned** mountpoint when the path is absent from the image — and the api runs
+     as uid 10001. Verified with two minimal images differing only in that `mkdir`: with it,
+     `appuser appuser` and the write succeeds; without it, `root root` and `touch` fails with
+     `Permission denied`. `/app/var/uploads` is now created in the same `RUN` as the `useradd`,
+     before the `chown`, and a test asserts that ordering. "Permission denied at the first client
+     upload" is not an improvement on "file not found at the first client upload".
+- **Embeddings do not gate startup, and that is the deliberate part.** api and worker depend on
+  `ollama` with `service_started`, never `service_healthy`, and the probe never raises. Embeddings
+  are required by the *knowledge base*, not by the platform: a worker held back by a failed model
+  download would take webhooks, email and campaigns down too, whereas a queued ingest task waits
+  in Redis — a delay rather than an outage. The same logic makes the probe a pure diagnostic; a
+  check that can stop the API from starting is worse than the bug it reports.
+- **Alternatives considered:** *Object storage (MinIO/S3) instead of a volume* — the correct
+  long-term answer and still required for docs/15 §4 Option 2, but rejected as the fix *now*: it is
+  a new service, a new dependency and a storage-backend abstraction, against a one-volume change
+  that unblocks clients today on the single-VPS topology §4 recommends. *Store the bytes in
+  Postgres* — rejected, bloats the DB and every backup. *Block api startup until embeddings are
+  ready* — rejected, see above. *A `ReadWriteMany` PVC for k8s* — rejected: on a cluster without an
+  RWX StorageClass it stays `Pending` and leaves every api and worker pod in `ContainerCreating`,
+  trading a broken feature for a broken platform. k8s is **documented, not fixed**, with the exact
+  YAML to add where RWX exists.
+- **Consequences:** the `uploads` volume does not survive scaling onto a second host — stated in
+  `docs/09` §3 rather than left to be discovered. `backup.sh` still covers Postgres only, so the
+  volume is not backed up; also now stated. A new env var (`EMBEDDING_PROBE_ENABLED`, default on,
+  off in the suite). PROD-3 (resource limits) remains open. **Every new infra assertion was run
+  against a mutated compose file** — the original bug states plus six plausible half-fixes — to
+  confirm it goes red; a check that has never failed has not been tested either.
+
 ### ADR-067: The keyword index gets the heading too — which fixes the mechanism, and still does not clear the K2-5 gate
 - **Date:** 2026-08-17
 - **Status:** accepted

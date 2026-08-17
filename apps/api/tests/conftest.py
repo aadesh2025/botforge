@@ -34,6 +34,11 @@ settings.rerank_enabled = False
 # existing ingest test keeps exercising the legacy extractor it was written against;
 # `test_converters.py` turns it on with a mock transport.
 settings.docling_enabled = False
+# And the embedding-endpoint probe, which is one HTTP GET on app startup. Every test that builds
+# the app would otherwise reach for a real Ollama — succeeding on a dev machine that happens to
+# run one and burning the timeout in CI, which is a test suite whose result depends on the host.
+# `test_embedding_probe.py` turns it on with a mock transport.
+settings.embedding_probe_enabled = False
 
 
 @pytest.fixture
