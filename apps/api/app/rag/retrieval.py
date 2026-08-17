@@ -82,7 +82,9 @@ def fts_statement(
     # expression index on `to_tsvector('english', content)`, and the planner can only use it
     # when the expressions match exactly. See `rag/fts.py` for the measured EXPLAIN.
     config = fts.regconfig(fts_config)
-    tsvector = func.to_tsvector(config, Chunk.content)
+    # Heading + content, not content alone — see `fts.SEARCHABLE_SQL` for the measurement that
+    # forced it. This expression and the one in migration 0021 must stay character-identical.
+    tsvector = fts.searchable(config)
     # ANY of the query's terms, not all of them — see `fts.any_term_tsquery`. With `&`-joined
     # terms this half of hybrid retrieval scored 1 query in 36 and RRF had nothing to fuse.
     # The *text* stays a bind parameter; only the config is a literal.

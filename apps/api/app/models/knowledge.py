@@ -98,6 +98,17 @@ class Chunk(Base, UUIDPrimaryKey):
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    #: The chunk's heading path, joined — e.g. `"Returns Policy > International Orders"`. Set by
+    #: the structural chunker; `NULL` for every chunk the character splitter produced.
+    #:
+    #: It exists so the **keyword** half of hybrid retrieval can see the heading, which is what
+    #: the FTS index is built over (`rag/fts.SEARCHABLE_SQL`). The dense half gets the same
+    #: context through `TextChunk.embed_text`, and measuring only that half is how docs/14 K2-5
+    #: ended up net negative: moving the heading out of `content` improved the vector and
+    #: silently removed the term from the lexical index. Duplicated here rather than read from
+    #: `metadata->>'heading'` because an expression index over a JSONB extraction of an array is
+    #: both slower and much easier to get subtly wrong.
+    heading: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict, nullable=False)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
     created_at: Mapped[dt.datetime] = mapped_column(

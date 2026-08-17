@@ -186,6 +186,46 @@ Two standing rules from that spec, repeated here because they are easy to violat
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-08-17 — docs/14 K2-6: the keyword index gets the heading, and the gate still says no
+- **ADR-067, migration 0021.** `chunks.heading` + the GIN indexes rebuilt over
+  `coalesce(heading,'') || ' ' || content` — the lexical twin of `TextChunk.embed_text`, so the
+  heading informs both retrievers while `content` stays exactly what a citation shows a visitor.
+  This is the follow-up ADR-065 filed against itself.
+- **It fixes the mechanism ADR-065 identified: fts +0.0107, hybrid +0.0072, dense unchanged to
+  four decimals.** Dense not moving is what makes it a controlled result — only the keyword half
+  was touched and only the keyword half moved. **⚠️ And it does not clear K2-5's gate:** structural
+  hybrid **0.8817 vs legacy 0.8846**, i.e. still **−0.0029** on the path production runs, and
+  deterministic now rather than noise. Structural chunking **stays off**. The residual is no longer
+  heading text — it is chunk *boundaries*, a different cause, uninvestigated. Recovering half a
+  regression is not the same as removing it, and the number moving the right way is not permission
+  to stop measuring.
+- **No re-ingest needed, verified rather than argued.** Every pre-0021 chunk has `heading IS NULL`,
+  so the new expression differs from `content` by a leading space `to_tsvector` discards; legacy
+  re-scored **byte-identically** (0.6487 / 0.8983 / 0.8846). That equality *is* the safety check.
+- **⚠️ The index rebuild is P0-1's exact hazard, so it was re-gated, not assumed.** An expression
+  index serves only the expression it was built from. `make explain-fts` (updated to
+  `ix_chunks_search_fts_english`) reports `Bitmap Index Scan` under `force_generic_plan`. And the
+  test that used to pattern-match an index *definition* now asks the **planner** per config — a
+  definition string can agree with itself while disagreeing with what `fts_statement` renders,
+  which is the only comparison that decides whether keyword retrieval touches an index at all.
+  A second test pins `fts.SEARCHABLE_SQL` against the migration's copy, since a migration cannot
+  import it.
+- **`DOCLING_CHUNK_HEADING_MODE=inline` is now dominated, not merely redundant.** Its only job was
+  getting the heading into the keyword index by pasting it into `content`; the index does that now,
+  both modes land on the same hybrid 0.8817, and `inline` still pays by putting the heading in text
+  a visitor reads. Default stays `embed`; `inline` kept so the comparison is runnable. `.env.example`
+  and `docs/ENV.md` both described the old trade and were corrected — a stale env comment is how
+  the next session picks the wrong default.
+- **docs/14 §0a was dated 2026-08-13 and said "K1–K3 not started".** Rewritten as the first thing a
+  fresh session reads, with the honest headline: **nothing in the Docling path is enabled for
+  anyone** — `DOCLING_ENABLED` off (K1-5), structural chunking off (its own measurement), reranker
+  off (K4-4). "Shipped" here means the code exists and is tested, not that a client's document
+  goes through it.
+- Infra, recorded because it silently reverts: `POSTGRES_HOST_PORT=5433` now lives in `infra/.env`
+  and the root `.env`'s `DATABASE_URL` matches. It was being passed per-command, so the next
+  session would have pointed `alembic upgrade head` at **another project's** Postgres on 5432.
+- Suites: **899 pytest**, ruff + mypy clean. K1-5 / K3-3…K3-6 / K4-4 still blocked, same reasons.
+
 ### 2026-08-17 — docs/14 K1+K2: the eval harness was not reproducible, and that was a product bug
 - **K1 (Docling) shipped behind a converter interface; K2 (real tokens + structural chunking)
   shipped with structural chunking deliberately OFF.** ADR-064, ADR-065. Migration 0020.

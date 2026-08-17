@@ -258,6 +258,10 @@ async def ingest_document(
                     organization_id=document.organization_id,
                     ordinal=chunk.ordinal,
                     content=chunk.content,
+                    # Indexed for FTS alongside `content` (fts.SEARCHABLE_SQL) so the keyword
+                    # half sees the same heading context the embedding does. NULL for chunks
+                    # from the character splitter, which has no notion of a heading.
+                    heading=chunk.heading_path,
                     token_count=chunk.token_count,
                     meta=chunk.metadata,
                     embedding=vector,

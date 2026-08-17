@@ -10,14 +10,20 @@ See `app/rag/fts.py` for the measured EXPLAIN and why a custom plan hides this i
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models import Chunk
 from app.rag import fts
 from app.rag.retrieval import fts_statement
+
+#: The migration that owns the FTS index expression. Named, not globbed, so replacing it means
+#: deciding what the new one is rather than the test quietly following whatever landed last.
+_MIGRATION = "0021_chunk_heading_fts.py"
 
 
 def _compiled(config: str | None = None) -> str:
@@ -224,22 +230,65 @@ def test_the_literal_and_the_frozenset_cannot_drift() -> None:
     assert fts.DEFAULT_CONFIG in fts.SUPPORTED_CONFIGS
 
 
-async def test_a_non_english_config_has_an_index_to_use(db_session: AsyncSession) -> None:
-    """Migration 0019's real job.
+@pytest.mark.parametrize("config", ["english", "simple"])
+async def test_every_indexed_config_is_reachable_by_the_planner(
+    db_session: AsyncSession, config: str
+) -> None:
+    """Migration 0019's job, re-asked after 0021 changed the expression underneath it.
 
-    `migrations/0004` created ONE expression index, on `to_tsvector('english', content)`. An
-    expression index matches only the exact expression, so a knowledge base switched to another
-    configuration renders different SQL and falls back to a sequential scan over every chunk —
-    P0-1 reintroduced through the front door. docs/14 §5.4 warns about precisely this.
+    An expression index matches only the *exact* expression. `migrations/0004` created one, on
+    `to_tsvector('english', content)`; 0019 added `simple` because a knowledge base switched to
+    another configuration renders different SQL and would fall back to a sequential scan over
+    every chunk — P0-1 reintroduced through the front door (docs/14 §5.4). 0021 then moved the
+    expression to `coalesce(heading, '') || ' ' || content` (K2-6), which invalidates both of the
+    original indexes in exactly the same way.
+
+    This asks the **planner**, not `pg_indexes`, because the previous version of this test
+    pattern-matched an index definition — and a definition string can agree with itself while
+    disagreeing with what `fts_statement` renders, which is the only comparison that decides
+    whether keyword retrieval touches an index. `enable_seqscan = off` removes "the table is
+    small" as an explanation, so a Seq Scan here means *cannot use the index*.
+
+    `scripts/explain_fts.py` covers the dimension a test cannot: a pooled asyncpg connection
+    graduating from a custom plan to a generic one.
     """
-    rows = (
-        await db_session.execute(
-            text("SELECT indexdef FROM pg_indexes WHERE tablename = 'chunks'")
+    regconfig = fts.regconfig(config)
+    predicate = fts.searchable(regconfig).op("@@")(fts.any_term_tsquery(regconfig, "refund policy"))
+    sql = str(
+        select(Chunk.id)
+        .where(predicate)
+        .compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    )
+    await db_session.execute(text("SET LOCAL enable_seqscan = off"))
+    plan = "\n".join(
+        str(row[0]) for row in (await db_session.execute(text(f"EXPLAIN {sql}"))).all()
+    )
+    assert f"ix_chunks_search_fts_{config}" in plan, plan
+
+
+def test_the_searchable_expression_and_its_migration_cannot_drift() -> None:
+    """`fts.SEARCHABLE_SQL` is what migration 0021 built the indexes from. One declaration.
+
+    The migration cannot import from `app.rag.fts` — a migration has to keep working against the
+    code as it was when the migration was written — so the string is duplicated on purpose and
+    this test is the seam. Changing `searchable()` without a new migration is the P0-1 failure
+    mode: every keyword query silently becomes a sequential scan over every chunk in the table.
+    """
+    path = Path(__file__).resolve().parents[1] / "migrations" / "versions" / _MIGRATION
+    declared = next(
+        line.split("=", 1)[1].strip().strip('"')
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.startswith("_SEARCHABLE =")
+    )
+    assert declared == fts.SEARCHABLE_SQL
+    # And the helper really does render that expression, rather than the string being decoration.
+    rendered = str(
+        fts.searchable(fts.regconfig("english")).compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
         )
-    ).scalars().all()
-    defs = " ".join(rows)
-    assert "to_tsvector('english'::regconfig, content)" in defs
-    assert "to_tsvector('simple'::regconfig, content)" in defs
+    )
+    assert "coalesce(chunks.heading, '')" in rendered.lower()
+    assert "chunks.content" in rendered
 
 
 async def test_every_supported_config_exists_on_this_postgres(db_session: AsyncSession) -> None:

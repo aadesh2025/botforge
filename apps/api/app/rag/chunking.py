@@ -38,6 +38,23 @@ class TextChunk:
     def embedding_input(self) -> str:
         return self.embed_text or self.content
 
+    @property
+    def heading_path(self) -> str | None:
+        """The heading path as one string, for `chunks.heading` and thus the FTS index.
+
+        Read off `metadata["heading"]` so the chunker has one place to set it. `None` rather
+        than `""` when there is none: the column distinguishes "this chunker knows about
+        headings and this chunk had none" from "chunked before headings existed", and a
+        migration that back-filled empty strings would erase that.
+        """
+        headings = self.metadata.get("heading")
+        if isinstance(headings, list):
+            joined = " > ".join(str(h) for h in headings if h)
+            return joined or None
+        if isinstance(headings, str) and headings.strip():
+            return headings.strip()
+        return None
+
 
 def _split_recursive(text: str, size: int, seps: list[str]) -> list[str]:
     if len(text) <= size:

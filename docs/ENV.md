@@ -192,9 +192,12 @@ docs/14 §12, where every step back is a flag flip because `LegacyConverter` is 
   Checked on the file, URL and re-ingest paths alike, because they converge on one function.
 - `DOCLING_CHUNK_HEADING_MODE` (default `embed`) — `embed` puts the chunk's heading path in the
   embedding input only and leaves the stored chunk raw (docs/14 §4.2's rule); `inline` also
-  prefixes it to the stored chunk. **This is a measured trade, not a style choice** (ADR-065):
-  the FTS index is built over `chunks.content`, so under `embed` the heading is invisible to the
-  keyword half of hybrid retrieval and its NDCG@10 falls. See the K2-5 table in docs/14.
+  prefixes it to the stored chunk. **Leave this on `embed`.** It used to be a real trade —
+  the FTS index was built over `chunks.content` alone, so `embed` hid the heading from the keyword
+  half and cost it NDCG@10 (ADR-065), which is what `inline` bought back. Migration 0021 indexes
+  `coalesce(heading,'') || ' ' || content` instead (K2-6, ADR-067), so the keyword half sees the
+  heading either way and the two modes score identically — `inline` now only adds the heading to
+  the text a visitor is shown in a citation. It is kept so the comparison stays runnable.
 
 **URL ingest deliberately does not go through Docling.** The SSRF controls in
 `loaders.load_url` are what stand between a user-supplied URL and the internal network, and

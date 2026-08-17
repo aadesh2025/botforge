@@ -126,6 +126,31 @@ def regconfig(name: str | None = None) -> ColumnElement[Any]:
     return literal_column(f"'{config}'::regconfig")
 
 
+#: The SQL text the keyword half searches, as a single source of truth shared by the query and
+#: by the migration that indexes it. **An expression index matches only the exact expression**,
+#: so if these two ever diverge by one character the index silently stops being used and
+#: keyword retrieval becomes a sequential scan — P0-1, reintroduced. `scripts/explain_fts.py`
+#: is the thing that would catch it.
+#:
+#: `heading || ' ' || content` rather than `content` alone because of the K2-5 measurement
+#: (ADR-065/ADR-067): the structural chunker moves a chunk's heading path into the *embedding*
+#: input, which improved dense retrieval (+0.0104 NDCG@10) and took the heading out of the text
+#: FTS searches (-0.0206), leaving the fused result net negative. This is the lexical twin of
+#: `TextChunk.embed_text`: the heading informs the search without being pasted into `content`,
+#: which stays the clean citation text a visitor is shown.
+#:
+#: `coalesce(...)` is load-bearing: `NULL || ' ' || content` is NULL in SQL, so without it every
+#: legacy chunk — which has no heading — would index as nothing at all.
+SEARCHABLE_SQL = "coalesce(heading, '') || ' ' || content"
+
+
+def searchable(config: ColumnElement[Any]) -> ColumnElement[Any]:
+    """`to_tsvector` over heading + content. Must render identically to `SEARCHABLE_SQL`."""
+    from app.models import Chunk
+
+    return func.to_tsvector(config, func.coalesce(Chunk.heading, "") + " " + Chunk.content)
+
+
 def any_term_tsquery(config: ColumnElement[Any], query: str | ColumnElement[Any]) -> ColumnElement[Any]:
     """A tsquery matching **any** of the query's terms, ranked — not all of them.
 

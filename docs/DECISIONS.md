@@ -18,6 +18,64 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-067: The keyword index gets the heading too — which fixes the mechanism, and still does not clear the K2-5 gate
+- **Date:** 2026-08-17
+- **Status:** accepted
+- **Context:** docs/14 K2-6, filed by ADR-065 as "the architecturally correct fix". ADR-065
+  measured that moving a chunk's heading path into the embedding input (docs/14 §4.2's
+  embedding-input-only rule) **deletes it from the text the keyword half searches**, because the
+  FTS index is built over `chunks.content`. Dense gained +0.0104; keyword lost 0.0206; the fused
+  path — the one production runs — came out net negative, so structural chunking shipped off.
+- **Decision:** a `chunks.heading` column (migration 0021), and the GIN indexes rebuilt over
+  `coalesce(heading, '') || ' ' || content` — the lexical twin of `TextChunk.embed_text`. The
+  heading now informs *both* retrievers while `content` stays exactly what a citation shows a
+  visitor. One declaration of the expression (`fts.SEARCHABLE_SQL`) with a test pinning it
+  against the migration's copy.
+- **It needs no re-ingest, and that is a property of the expression rather than luck.** Every
+  pre-0021 chunk has `heading IS NULL`, so `coalesce(heading,'') || ' ' || content` differs from
+  `content` by one leading space, which `to_tsvector` discards. Verified rather than argued:
+  legacy chunking re-scored **byte-identically** at fts 0.6487 / dense 0.8983 / hybrid 0.8846.
+- **What it bought, and what it did not.** Same corpus, 40 documents / 54 queries,
+  `ollama:nomic-embed-text`, `score_threshold 0`:
+
+  | chunking | fts | dense | **hybrid** |
+  |---|---|---|---|
+  | legacy (production) | 0.6487 | 0.8983 | **0.8846** |
+  | structural `embed`, before K2-6 | 0.6281 | 0.9087 | **0.8745** |
+  | structural `embed`, **after K2-6** | 0.6388 | 0.9087 | **0.8817** |
+  | structural `inline`, after K2-6 | 0.6400 | 0.9087 | **0.8817** |
+
+  **Dense is unchanged to four decimal places in every row**, which is what makes this a clean
+  experiment: the only thing that moved is the keyword half, which is the only thing that was
+  touched. K2-6 recovers **+0.0107 fts / +0.0072 hybrid** — a little over half the regression
+  ADR-065 attributed to the missing heading.
+- **⚠️ So the mechanism is confirmed and the gate still says no.** Structural hybrid is
+  **0.8817 against legacy's 0.8846**: −0.0029, deterministic (the harness is reproducible since
+  the ADR-065 tie-break fix), and therefore still a measured regression on the path production
+  runs. `DOCLING_ENABLED` and structural chunking **stay off**. The residual is no longer
+  explained by heading text — it is chunk *boundaries*, a different cause that has not been
+  investigated, and saying "K2-6 fixed it" because the number moved the right way would be the
+  same error ADR-065 refused to make.
+- **`inline` mode is now dominated, not merely unnecessary.** Its whole purpose was to get the
+  heading into the FTS index by pasting it into `content`; the index does that now, and the two
+  modes converge on the same hybrid 0.8817. `inline` still pays for it by putting the heading in
+  the text a visitor is shown. `DOCLING_CHUNK_HEADING_MODE` keeps its `embed` default and the
+  `inline` option is retained only so the comparison stays runnable.
+- **Alternatives considered:** *Index a real `tsvector` column maintained by a trigger* —
+  rejected; an expression index needs no write path and cannot fall out of step with the row.
+  *Back-fill `heading` for existing chunks* — nothing to back-fill: the character splitter has no
+  notion of a heading, and `NULL` deliberately means "chunked before headings existed" rather
+  than "had none", so an empty-string back-fill would erase that distinction. *Leave the old
+  `content`-only indexes in place as well* — rejected: they can serve no expression the code
+  renders, and they would cost write time on every ingest plus disk to serve nothing.
+- **Consequences:** the FTS index is rebuilt, which is the thing P0-1 measured, so
+  `make explain-fts` is the gate and it was re-run — `Bitmap Index Scan on
+  ix_chunks_search_fts_english` under `force_generic_plan`. A test now asks the *planner* whether
+  each configuration's index is reachable, replacing one that pattern-matched an index definition
+  string; a definition can agree with itself while disagreeing with what `fts_statement` renders,
+  which is the only comparison that decides whether keyword retrieval touches an index at all.
+  K2-6 is done; **K2-5's gate is not cleared**, and the next lever is chunk boundaries.
+
 ### ADR-066: Uploads are deny-by-default, and email was already ingesting before anyone enabled it
 - **Date:** 2026-08-17
 - **Status:** accepted
@@ -93,7 +151,9 @@ Format each entry as below. Newest at the top.
   rebuilt over `coalesce(heading,'') || ' ' || content`* — the architecturally correct fix, and
   the one to do when structural chunking is actually turned on; rejected **for now** because it
   rebuilds the expression index P0-1 measured, to enable a path that is off and blocked on
-  K1-5 anyway. Recorded as K2-6. *Tune `DOCLING_CHUNK_MAX_TOKENS`* — swept at 160/256/384/512
+  K1-5 anyway. Recorded as K2-6 — and **built the same day in ADR-067**, which halves the
+  keyword loss and still leaves structural hybrid below legacy, so the decision this ADR records
+  stands. *Tune `DOCLING_CHUNK_MAX_TOKENS`* — swept at 160/256/384/512
   and it is not the lever; the first three are identical to four decimal places because every
   section in the corpus already fits inside 160 tokens.
 - **⚠️ The corpus had a second blind spot and this phase found it.** Every seed document was

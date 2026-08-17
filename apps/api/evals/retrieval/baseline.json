@@ -35,29 +35,6 @@
     "ollama:nomic-embed-text|structural": {
       "fts": {
         "name": "fts",
-        "ndcg": 0.6281,
-        "recall": 0.7253,
-        "mrr": 0.5969,
-        "queries": 54
-      },
-      "dense": {
-        "name": "dense",
-        "ndcg": 0.9087,
-        "recall": 0.9074,
-        "mrr": 0.899,
-        "queries": 54
-      },
-      "hybrid": {
-        "name": "hybrid",
-        "ndcg": 0.8745,
-        "recall": 0.9074,
-        "mrr": 0.8613,
-        "queries": 54
-      }
-    },
-    "ollama:nomic-embed-text|structural-inline": {
-      "fts": {
-        "name": "fts",
         "ndcg": 0.6388,
         "recall": 0.7346,
         "mrr": 0.5932,
@@ -77,9 +54,32 @@
         "mrr": 0.8669,
         "queries": 54
       }
+    },
+    "ollama:nomic-embed-text|structural-inline": {
+      "fts": {
+        "name": "fts",
+        "ndcg": 0.64,
+        "recall": 0.7346,
+        "mrr": 0.5918,
+        "queries": 54
+      },
+      "dense": {
+        "name": "dense",
+        "ndcg": 0.9087,
+        "recall": 0.9074,
+        "mrr": 0.899,
+        "queries": 54
+      },
+      "hybrid": {
+        "name": "hybrid",
+        "ndcg": 0.8817,
+        "recall": 0.9074,
+        "mrr": 0.8669,
+        "queries": 54
+      }
     }
   },
-  "generated_at": "2026-08-17T01:43:29+00:00",
+  "generated_at": "2026-08-17T07:10:09+00:00",
   "eval_set": {
     "documents": 40,
     "queries": 54

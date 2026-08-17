@@ -1,6 +1,7 @@
 # docs/14 — Knowledge Pipeline v2: Docling ingestion + four-stage retrieval
 
-> **Status:** design specification. Nothing implemented. Execute phase by phase, on request.
+> **Status:** design specification, **partly implemented** — see §0a for what shipped and what is
+> blocked. Execute the rest phase by phase, on request.
 > **Supersedes:** parts of `docs/13-AI-COOKBOOK-REVIEW.md` — see §0 for a correction.
 > **Revision 2 (2026-08-12):** scope widened after an operator decision — see §1.1. Revision 1
 > covered ~40% of Docling; this covers the agreed set.
@@ -14,23 +15,38 @@
 
 ---
 
-## 0a. Status — 2026-08-13
+## 0a. Status — 2026-08-17 (was 2026-08-13)
 
-**Phase K0 is done, and K4 is built but enabled nowhere.** K1–K3 (Docling) and K5-2/K5-3 are
-untouched.
+**Nothing in the Docling path is enabled for anyone.** The code is built and switched off:
+`DOCLING_ENABLED` is false everywhere (blocked on K1-5), structural chunking is off on its own
+measurement (K2-5/ADR-067), and the reranker is off platform-wide (blocked on K4-4). Read that as
+the honest headline — several phases are "shipped" in the sense that the code exists and is
+tested, not in the sense that a client's document goes through it.
 
 | Task | Status |
 |---|---|
 | **P0-1** FTS literal | ✅ measured and fixed — the `EXPLAIN` is below, and it settles §0 |
 | **P0-2** Eval harness | ✅ `make eval-retrieval`, frozen corpus, two CI gates, baselines committed |
+| **K1-1…K1-4** Docling converter | ✅ ADR-064, behind an interface, outage falls back to the legacy extractor |
+| **K1-5** golden fixtures | ❌ needs three **real** binaries (§11 forbids hand-typed ones) — so K1 is not done and Docling is enabled nowhere |
+| **K2-1** real token counts | ✅ cl100k_base; `len/4` was undercounting Tamil/Devanagari ~3× |
+| **K2-2/3/4** structural chunking | ✅ built, and **disabled** — see K2-5 |
+| **K2-5** measured improvement | ⚠️ ran, and the answer was "not yet": hybrid −0.0029. The gate held; nothing shipped enabled |
+| **K2-6** heading in the FTS index | ✅ migration 0021, ADR-067 — recovers half the loss, still short of legacy |
+| **K3-1** upload allowlist | ✅ ADR-066, deny-by-default. EPUB/ODF/LaTeX deliberately **not** accepted while Docling is off |
+| **K3-2** email gate | ⚠️ shipped, and it was not future work — email had been ingesting for months (ADR-066) |
+| **K3-3…K3-6** charts, media queue, ASR, quota | ❌ blocked: no running docling-serve, no real client audio |
 | **K4-1/2/3** Reranker | ✅ protocol, no-op default, HTTP cross-encoder, platform key, fails open |
 | **K4-5** ADR | ✅ ADR-063 |
 | **K4-4** latency delta | ❌ needs a real deployment running a rerank service |
 | **K5-1** per-KB `fts_config` | ✅ migration 0019, with the per-config GIN index §5.4 demands |
-| **K1–K3** Docling | ❌ not started |
+| **K5-2** PDF page cap | ✅ `MAX_PDF_PAGES`, enforced where upload/URL/re-ingest converge |
+| **K5-3** extraction retention | ⚠️ shipped as a **bug fix**: a deleted document was leaving its full text on disk |
 
 **§0's seq-scan question is answered.** Measured on PostgreSQL 16.14 with `enable_seqscan=off`:
-the literal form reaches `Bitmap Index Scan on ix_chunks_content_fts`; the bind-parameter form
+the literal form reaches `Bitmap Index Scan on ix_chunks_content_fts` (renamed
+`ix_chunks_search_fts_<config>` by migration 0021 — K2-6 changed the indexed expression, and
+`make explain-fts` was re-run against the new one); the bind-parameter form
 under `plan_cache_mode = force_generic_plan` gets `Seq Scan (cost=10000000000.00..)`. So the
 custom-plan escape hatch this section hoped for exists only for the first ~5 executions of a
 prepared statement — asyncpg pools connections, so production graduates to the generic plan and
@@ -714,12 +730,49 @@ the same move docs/11 made with the red-team corpus.
 > again. Read this next to the 2026-08-13 note about the rigged-against-keyword-search sweep:
 > that is twice this corpus has quietly decided an answer before anyone checked it could.
 >
-> **K2-6 (new, not built): give the keyword half the same context the vector half got.** A
+> **K2-6 (new): give the keyword half the same context the vector half got.** A
 > `chunks.heading` column with the GIN index rebuilt over
 > `to_tsvector(config, coalesce(heading,'') || ' ' || content)` — the lexical twin of
-> `embed_text`, keeping `content` clean for citations. This is what makes structural chunking
-> shippable. Deliberately not done in the same commit: it rebuilds the expression index that
-> P0-1 measured, to enable a path that is switched off and blocked on K1-5.
+> `embed_text`, keeping `content` clean for citations. Deliberately its own commit, because it
+> rebuilds the expression index that P0-1 measured, to enable a path that is switched off and
+> blocked on K1-5.
+
+> **Status 2026-08-17 — K2-6 shipped. It fixes the mechanism and does not clear K2-5's gate.**
+> ADR-067. Migration 0021.
+>
+> | chunking | fts | dense | **hybrid** |
+> |---|---|---|---|
+> | legacy (production) | 0.6487 | 0.8983 | **0.8846** |
+> | structural `embed`, before K2-6 | 0.6281 | 0.9087 | **0.8745** |
+> | structural `embed`, **after K2-6** | 0.6388 | 0.9087 | **0.8817** |
+> | structural `inline`, after K2-6 | 0.6400 | 0.9087 | **0.8817** |
+>
+> **Dense is unchanged to four decimals in every row.** Only the keyword half was touched and
+> only the keyword half moved, which is what makes this a controlled result rather than a
+> coincidence: **fts +0.0107, hybrid +0.0072** — a little over half the regression ADR-065
+> attributed to the heading going missing from the index.
+>
+> **⚠️ Structural hybrid is 0.8817 against legacy's 0.8846, so structural chunking stays off.**
+> That −0.0029 is deterministic now (the harness has been reproducible since the tie-break fix),
+> so it is a measured regression on the path production runs, not noise to wave through. The
+> residual is no longer attributable to heading text; what is left is chunk **boundaries** — a
+> different cause, not investigated. Calling K2-6 the fix because the number moved the right way
+> is the error K2-5 exists to prevent.
+>
+> **No re-ingest was needed, and that was verified rather than assumed.** Every pre-0021 chunk
+> has `heading IS NULL`, so the new expression differs from `content` by a leading space that
+> `to_tsvector` discards — legacy re-scored byte-identically at 0.6487 / 0.8983 / 0.8846.
+>
+> **`inline` mode is now dominated.** Its only job was getting the heading into the keyword
+> index by pasting it into `content`; the index does that now, both modes land on the same
+> hybrid 0.8817, and `inline` still pays by putting the heading in the text a visitor is shown.
+> `DOCLING_CHUNK_HEADING_MODE` keeps `embed`; `inline` stays only so the comparison is runnable.
+>
+> **The index rebuild is the risky half, so it was re-gated.** `make explain-fts` reports
+> `Bitmap Index Scan on ix_chunks_search_fts_english` under `force_generic_plan`. The test that
+> used to pattern-match an index *definition* now asks the **planner** whether each config's
+> index is reachable — a definition string can agree with itself while disagreeing with what
+> `fts_statement` renders, and that comparison is the only one P0-1 is about.
 
 ### Phase K3 — Format breadth + media
 

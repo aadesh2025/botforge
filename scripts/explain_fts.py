@@ -30,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps" / "api"))
 
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -40,7 +40,9 @@ from app.rag import fts
 from app.rag.fts import DEFAULT_CONFIG, normalize_config
 from app.rag.retrieval import fts_statement
 
-_INDEX = "ix_chunks_content_fts"
+#: Set per configuration by migration 0021, over `fts.SEARCHABLE_SQL` (heading + content).
+#: The pre-0021 name was `ix_chunks_content_fts`, over `content` alone.
+_INDEX = "ix_chunks_search_fts_english"
 
 # The control. This is what `func.to_tsvector("english", ...)` rendered before P0-1; a
 # comparison with nothing to compare against proves nothing.
@@ -67,7 +69,7 @@ def _match_only_sql(config: str, query: str) -> str:
     the expression index is usable. Stripping them isolates the only question P0-1 asks: can
     Postgres match this expression to `ix_chunks_content_fts` at all?
     """
-    tsvector = func.to_tsvector(fts.regconfig(config), Chunk.content)
+    tsvector = fts.searchable(fts.regconfig(config))
     tsquery = fts.any_term_tsquery(fts.regconfig(config), query)
     return _inline(select(Chunk.id).where(tsvector.op("@@")(tsquery)))
 

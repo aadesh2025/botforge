@@ -76,11 +76,20 @@ error_message, chunk_count (int), storage_path, created_by, created_at, updated_
 
 ### chunks
 `id, document_id→documents, knowledge_base_id, organization_id, ordinal (int),
-content (text), token_count (int), metadata (jsonb: {page, heading, ...}),
+content (text), heading (text, nullable), token_count (int),
+metadata (jsonb: {page, heading, ...}),
 embedding vector(768)  -- dimension = embedding model; make configurable,
 created_at`
 Indexes: ivfflat/hnsw on `embedding` (cosine); btree on (knowledge_base_id); GIN on
-`to_tsvector(content)` for hybrid keyword search.
+`to_tsvector(config, coalesce(heading,'') || ' ' || content)` **per supported text-search
+configuration** for hybrid keyword search.
+- `heading` is the chunk's heading path, denormalised out of `metadata` so the FTS index can
+  reach it (migration 0021, docs/14 K2-6, ADR-067). `NULL` means "chunked by the character
+  splitter, which has no notion of a heading" — deliberately not `''`.
+- **One index per configuration, and the expression must match the query exactly.** An
+  expression index cannot serve a different expression, so changing either the regconfig
+  (migration 0019) or the indexed expression (0021) without rebuilding turns every keyword
+  query into a sequential scan. `make explain-fts` is the gate.
 
 ## Conversations & messages
 
