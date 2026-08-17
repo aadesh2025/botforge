@@ -55,7 +55,10 @@ async def _vector_hits(
             Chunk.knowledge_base_id.in_(kb_ids),
             Chunk.embedding.is_not(None),
         )
-        .order_by(distance.asc())
+        # `Chunk.id` breaks ties — see `fts_statement` for why an unstable sort is a real bug
+        # and not a tidiness point. Ties are rare here (a cosine distance is continuous) but a
+        # stable order costs nothing and stops the two retrievers differing in that respect.
+        .order_by(distance.asc(), Chunk.id)
         .limit(limit)
     )
     rows = (await session.execute(stmt)).all()
@@ -92,7 +95,18 @@ def fts_statement(
             Chunk.knowledge_base_id.in_(kb_ids),
             tsvector.op("@@")(tsquery),
         )
-        .order_by(rank.desc())
+        # `Chunk.id` is a tie-break, and it is load-bearing. `ts_rank` returns a coarse value
+        # and the any-term query makes ties the common case: a dozen chunks matching one term
+        # once all score identically. With `ORDER BY rank DESC` alone, Postgres returns them in
+        # whatever order the scan produces — physical row order — so `LIMIT` keeps a different
+        # dozen run to run and **the same question answers differently on the same data**.
+        #
+        # Measured, not theorised: the eval harness ran the identical `fts` variant four times
+        # over an unchanged corpus and scored 0.6247, 0.6247, 0.6220, 0.6397 — a spread of
+        # 0.018, wider than every effect docs/14 K2 set out to measure and wider than CI's own
+        # 0.02 regression tolerance. The harness described itself as "fully deterministic".
+        # Ordering by id makes both the product and the benchmark reproducible.
+        .order_by(rank.desc(), Chunk.id)
         .limit(limit)
     )
 

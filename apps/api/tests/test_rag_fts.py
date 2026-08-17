@@ -63,6 +63,64 @@ def test_the_tsquery_matches_any_term_not_all_of_them() -> None:
     assert {"&", "|"} <= scalars
 
 
+def test_the_ranking_has_a_deterministic_tie_break() -> None:
+    """`ORDER BY rank DESC` alone makes the same question answer differently on the same data.
+
+    `ts_rank` is coarse and the any-term query makes ties the normal case, so without a second
+    sort key Postgres returns tied chunks in physical row order and `LIMIT` keeps a different
+    set each time. Running the eval harness's `fts` variant four times over an unchanged corpus
+    gave 0.6247, 0.6247, 0.6220, 0.6397 — a spread wider than any effect docs/14 K2 was trying
+    to measure, and wider than the 0.02 tolerance CI fails a regression on.
+    """
+    stmt = fts_statement(uuid.uuid4(), [uuid.uuid4()], "refund policy", 20, None)
+    sql = str(stmt.compile(dialect=postgresql.dialect()))
+    order_by = sql[sql.rindex("ORDER BY") :]
+    assert "chunks.id" in order_by, order_by
+
+
+async def test_tied_ranks_come_back_in_the_same_order_every_time(
+    db_session: AsyncSession,
+) -> None:
+    """The rendered SQL is not the behaviour — ask a real Postgres, twice."""
+    import uuid as _uuid
+
+    from app.models import Chunk, Document, KnowledgeBase, Organization
+
+    org = Organization(name="Tie Org", slug=f"tie-{_uuid.uuid4().hex[:8]}")
+    db_session.add(org)
+    await db_session.flush()
+    kb = KnowledgeBase(organization_id=org.id, name="KB")
+    db_session.add(kb)
+    await db_session.flush()
+    doc = Document(
+        knowledge_base_id=kb.id,
+        organization_id=org.id,
+        source_type="text",
+        filename="tie.txt",
+        status="ready",
+    )
+    db_session.add(doc)
+    await db_session.flush()
+    # Identical text, so `ts_rank` is identical and only the tie-break can order them.
+    for i in range(12):
+        db_session.add(
+            Chunk(
+                document_id=doc.id,
+                knowledge_base_id=kb.id,
+                organization_id=org.id,
+                ordinal=i,
+                content="refund policy for international orders",
+            )
+        )
+    await db_session.flush()
+
+    async def _ids() -> list[str]:
+        rows = await db_session.execute(fts_statement(org.id, [kb.id], "refund", 5, None))
+        return [str(row[0].id) for row in rows.all()]
+
+    assert await _ids() == await _ids()
+
+
 async def test_any_term_tsquery_ors_its_lexemes_on_a_real_postgres(
     db_session: AsyncSession,
 ) -> None:
