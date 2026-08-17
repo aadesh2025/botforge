@@ -127,15 +127,24 @@ class DoclingServiceConverter:
         self._transport = transport
 
     def _options(self) -> dict[str, Any]:
+        """Individual multipart fields — `docling-serve`'s `Body_process_file_v1_convert_file_post`
+        schema has `to_formats`/`do_ocr`/etc. as top-level form fields, not a nested `options`
+        object. Sending them nested under one `options` JSON string (the previous shape here) is
+        silently accepted and silently ignored: the server falls back to its own schema default
+        `to_formats=["md"]`, so `json_content` came back `None` on **every** real conversion —
+        verified live against v2.119.0 (docs/14 K1-5). Booleans are stringified because `httpx`
+        would otherwise render a Python `True` as the multipart literal `"True"`, which is not
+        guaranteed to parse as the boolean form field docling-serve expects.
+        """
         return {
             # Both markdown and JSON in one conversion. Ordering matters to nothing but the
             # response keys; asking for both is what makes re-chunking free later.
             "to_formats": ["md", "json"],
-            "do_ocr": self._do_ocr,
-            "do_table_structure": self._do_table_structure,
+            "do_ocr": "true" if self._do_ocr else "false",
+            "do_table_structure": "true" if self._do_table_structure else "false",
             # docs/14 §3.6: chart understanding is a vision-language model and the single
             # largest RAM contributor. Off here; K3-3 turns it on deliberately.
-            "do_picture_description": False,
+            "do_picture_description": "false",
         }
 
     @staticmethod
@@ -167,7 +176,7 @@ class DoclingServiceConverter:
             resp = await client.post(
                 f"{self.endpoint}/v1/convert/file",
                 files=files,
-                data={"options": json.dumps(self._options())},
+                data=self._options(),
             )
             resp.raise_for_status()
             text, structured = self._read(resp.json())

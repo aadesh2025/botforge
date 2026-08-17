@@ -27,8 +27,8 @@ tested, not in the sense that a client's document goes through it.
 |---|---|
 | **P0-1** FTS literal | ✅ measured and fixed — the `EXPLAIN` is below, and it settles §0 |
 | **P0-2** Eval harness | ✅ `make eval-retrieval`, frozen corpus, two CI gates, baselines committed |
-| **K1-1…K1-4** Docling converter | ✅ ADR-064, behind an interface, outage falls back to the legacy extractor |
-| **K1-5** golden fixtures | ❌ needs three **real** binaries (§11 forbids hand-typed ones) — so K1 is not done and Docling is enabled nowhere |
+| **K1-1…K1-4** Docling converter | ⚠️ ADR-064, behind an interface, outage falls back — **but K1-5 found the service converter was silently sending a malformed request; see below** |
+| **K1-5** golden fixtures | ✅ 2026-08-17 — three real (`reportlab`-generated) PDFs, verified live against a running `docling-serve`, not mocked. `DOCLING_ENABLED` stays `false`; K1-5 proves the converter, enabling for clients is still docs/14 §12 |
 | **K2-1** real token counts | ✅ cl100k_base; `len/4` was undercounting Tamil/Devanagari ~3× |
 | **K2-2/3/4** structural chunking | ✅ built, and **disabled** — see K2-5 |
 | **K2-5** measured improvement | ⚠️ ran, and the answer was "not yet": hybrid −0.0029. The gate held; nothing shipped enabled |
@@ -676,6 +676,70 @@ the same move docs/11 made with the red-team corpus.
 > reproduce that mistake with a green tick on top. **Docling stays disabled for every deployment
 > until K1-5 has real files**, which is the honest reading of "K1-5 is the acceptance test".
 
+> **Status 2026-08-17 (later the same day) — K1-5 closed, and it found a real bug in K1-1…K1-4
+> in the process.** Three `reportlab`-generated PDFs committed to `tests/fixtures/docling/` (not
+> hand-typed — see the folder's README for full provenance and what each one does and doesn't
+> prove), verified against a real, running `docling-serve` v2.119.0 — not mocked, not asserted.
+> New opt-in test file `tests/test_docling_golden_fixtures.py`, skipped by default (no published
+> port on `docling-serve` by design, docs/14 §9), runnable by pointing `DOCLING_ENDPOINT` at a
+> reachable instance. `DOCLING_ENABLED` stays `false` — K1-5 proves the converter works, enabling
+> it for clients is still the staged rollout in §12, a separate decision.
+>
+> **⚠️ The real finding: `DoclingServiceConverter` was silently sending a malformed request, and
+> every real conversion had `has_structure=False` as a result — not caught by any existing test.**
+> It POSTed conversion options as one multipart field named `options` containing a JSON string.
+> `docling-serve`'s actual schema (`Body_process_file_v1_convert_file_post`, read from its own
+> `/openapi.json`, not guessed) wants `to_formats`/`do_ocr`/`do_table_structure` as **individual
+> top-level form fields**. FastAPI accepts the malformed request without complaint and silently
+> falls back to its own schema default, `to_formats=["md"]` — so `json_content` came back `None`
+> on every real call, verified against all three fixtures before the fix and none after. This
+> silently broke K1-4's "persist the `DoclingDocument` JSON" architecture and therefore
+> everything K2 depends on for `DocMeta` (heading/caption/page) — **on the enabled path, which is
+> off everywhere, so no client was affected, but the code has never actually done what K1-4 and
+> K2's own tests believed, because those tests use `MockTransport` and only ever checked that the
+> substrings `"to_formats"`/`"md"`/`"json"` appeared *somewhere* in the raw body — true whether
+> they're nested under `options` or not.** Fixed in `app/rag/converters.py`'s `_options()`; the
+> regression test in `test_converters.py` now parses the multipart body and asserts on actual
+> field names, which is the only check that would have caught this. **Lesson, stated because it
+> generalises: a mock that only checks a substring is present validates that you *tried* to send
+> something, never that the receiving service will *parse* it.**
+>
+> **Real, measured wins, not narrated ones:**
+> - **Table structure** (§3.2 W4): legacy `pypdf` flattens a two-table pricing page to 445 chars
+>   of word-soup, no `|` anywhere. Docling reconstructs both tables as real markdown grids,
+>   912 chars, columns intact.
+> - **OCR** (§3.2 W3): a rasterized page with zero embedded text layer — `pypdf` extracts exactly
+>   0 chars. Docling's OCR reads it and extracts 419 chars of real policy text.
+>
+> **⚠️ Cold-start timeout risk, found by accident, not designed for.** The *first* conversion
+> against a freshly-started `docling-serve` (loading the CPU-only layout model) took **124.6
+> seconds** — past the 120s `DOCLING_TIMEOUT_SECONDS` default — and `convert_with_fallback()`
+> correctly fell back to the legacy extractor. A second, warm request finished in seconds. So
+> **the first document any client uploads after a `docling-serve` restart may legitimately fail
+> over to the legacy path with nothing actually broken.** Not fixed here (a warm-up call at
+> service startup is the likely fix); recorded so it isn't mistaken for a regression later.
+>
+> **⚠️ The original PII fixture had its own bug, found the same way — by actually running
+> `find_pii()` against real output instead of assuming.** Its phone number used five-space digit
+> separators, on a (now known wrong) assumption that `pii._matchable()` collapses whitespace
+> runs. It maps every character 1:1 by design (so `find_pii()`'s offsets stay valid against the
+> original string) and structurally cannot collapse a run without breaking that invariant.
+> Verified in isolation: `PhoneNumberMatcher('+91     93453     27506', ...)` matches nothing,
+> through *either* extraction path — this was never a Docling-vs-legacy question. Fixed by
+> regenerating the fixture with single-space separators (still carrying the `■` phone-icon
+> substitution); phone now detected through both paths. **Separately real and NOT fixed:**
+> `PhoneNumberMatcher` cannot handle wide irregular spacing between digit groups regardless of
+> `_matchable()`, which is a genuine, narrower gap than 2026-08-03's — filed, not silently folded
+> into "fixed the fixture." Full detail in the fixtures README.
+>
+> **K6-A groundwork, captured because it rides on the same call, not required by K1-5:** the raw
+> response carries a **top-level** `confidence` object (sibling of `document`, not nested inside
+> it) with pre-computed `mean_grade`/`low_grade` strings (e.g. `"excellent"`) — K6-A does not need
+> to average component scores itself. `table_score` came back JSON `null` in every real response
+> (not float `NaN` as §K6.1 speculated), and a `null` component did not visibly poison
+> `mean_grade`. Neither `converters.py` nor any consumer reads this field yet — K6-A still has to
+> be built — but the shape is now measured, not assumed.
+
 ### Phase K2 — HybridChunker + real tokens
 
 | # | Task | Done when |
@@ -1044,3 +1108,230 @@ choice. K3-5 must measure, not assume.
 - If media storage or ASR compute cost exceeds its revenue value, K3-4/5/6 should be cut. It is
   the most expensive phase here and the only one that is a **new product capability** rather than
   a fix to an existing one.
+
+---
+
+# Phase K6 — Extraction confidence + structured facts
+
+> **Added 2026-08-17 (revision 3), after a second pass over the Docling repo.** Revisions 1–2
+> treated Docling purely as a text extractor. It also exposes **conversion quality signals** and
+> **structured field extraction**, and neither appears anywhere in K0–K5.
+>
+> **Sequenced after K1-5.** Everything here rides on `DOCLING_ENABLED`, which is off pending
+> three real PDF fixtures. Building K6 first means building on a path no client document travels.
+>
+> K6-A (confidence) is small, cheap and safe. K6-B (facts) is an architecture addition and needs
+> its own ADR.
+
+## K6.0 ⚠️ The constraint that shapes this phase
+
+**`DocumentExtractor` is not reachable through `docling-serve`.** Verified against
+`docling/service_client/client.py` @ v2.119.0:
+
+| Symbol | Occurrences in the service client |
+|---|---|
+| `ConfidenceReport` | **3** — confidence **is** available over the service |
+| `def extract(` | **0** |
+| `DocumentExtractor` | **0** |
+| `ExtractionResult` | **0** |
+
+So the two halves of this phase have **completely different costs**:
+
+- **K6-A (confidence)** rides on the conversion call BotForge already makes. Nearly free.
+- **K6-B (structured extraction)** has no service path. Using Docling's own extractor means
+  running it **in-process**, which puts `torch` + a VLM back into the worker image — and that
+  directly contradicts docs/15's deployment thesis (BotForge images carry zero ML dependencies).
+
+**K6-B therefore does NOT use Docling's extractor.** See K6.2 for what it uses instead.
+
+---
+
+## K6-A — Extraction confidence
+
+### K6.1 What it is
+
+`ConversionResult.confidence` (Docling ≥ v2.34.0). Four component scores, two aggregate grades,
+at page level **and** document level.
+
+| Field | Meaning |
+|---|---|
+| `layout_score` | Quality of element recognition |
+| `ocr_score` | Quality of OCR-extracted content |
+| `parse_score` | 10th percentile of digital text cells — emphasises problem areas |
+| `table_score` | ⚠️ **Docling's own docs say "not yet implemented"** |
+| `mean_grade` | Average of the components |
+| `low_grade` | 5th percentile — highlights the worst pages |
+
+Thresholds, read from `base_models.py:609` (not from documentation):
+
+```python
+score < 0.5  → POOR
+score < 0.8  → FAIR
+score < 0.9  → GOOD
+score >= 0.9 → EXCELLENT
+```
+
+### K6.2 Why BotForge specifically needs it
+
+**Today a badly-extracted document produces garbage chunks, and retrieval serves them with a
+similarity score that looks perfectly healthy.** Nothing anywhere signals that the source was
+mangled. That is precisely how the `\x01`-mangled phone number survived until the manual audit
+of 2026-08-03 — the detector was fixed, but *the extraction quality itself was never measured*,
+so the same class of failure on a different document is still invisible.
+
+Confidence grades close that hole at the only point where it is cheap: ingest.
+
+Docling's own documentation lists the use case verbatim: *"set confidence thresholds for
+unattended batch conversions"* and *"identify documents requiring manual review after the
+conversion."* That is exactly the operator workflow docs/11 §6 has been missing.
+
+### K6.3 Tasks
+
+| # | Task | Done when |
+|---|---|---|
+| K6-A1 | `documents.extraction_confidence` (jsonb: component scores + both grades, doc-level and per-page) | Populated on every Docling conversion; **NULL for legacy-extracted documents** — the ADR-054 distinction between "scanned clean" and "never scanned" applies identically here |
+| K6-A2 | `DOCLING_MIN_CONFIDENCE_GRADE` (default `POOR` = accept everything). Below it → `status=needs_review`, **not** `failed` | A low-confidence document is still ingested and still retrievable; it is flagged, not withheld |
+| K6-A3 | Surface the grade in the document list + detail UI, with the per-page breakdown | An operator can see *which pages* extracted badly, not just that the document did |
+| K6-A4 | Structured log + metric on every `POOR` conversion | A client uploading systematically bad scans is visible without opening the UI |
+| K6-A5 | Feed grade into the docs/11 §6 review queue alongside `pii_flags` | One queue, two reasons a document needs a human |
+
+### K6.4 ⚠️ Cautions
+
+- **`table_score` is not implemented and will be `NaN`.** `mean_grade` averages the four
+  components — **verify what a `NaN` component does to the mean before trusting it.** If it
+  poisons the average, use `low_grade` and the individual scores instead. Do not ship a quality
+  gate whose arithmetic has not been checked.
+- **A new `needs_review` status is a state-machine change.** `status` is currently
+  `queued|processing|ready|failed`. Anything branching on "is it ready" must be audited — this
+  is the ADR-057 lesson (attention is an axis beside `status`, not a value of it). **Strongly
+  consider a separate `review_required` boolean rather than a new `status` value**, for exactly
+  the reason ADR-057 gives.
+- **Confidence is about extraction, not truth.** An `EXCELLENT` grade on a document full of
+  outdated prices is still outdated prices. Never let the grade appear to the model or the
+  visitor as a trust signal.
+- **Do not gate ingest on confidence by default.** Defaulting to reject would refuse documents
+  that retrieve perfectly well. Default `POOR` = accept everything; make the threshold opt-in.
+
+---
+
+## K6-B — Structured facts
+
+### K6.5 The problem it solves
+
+The 2026-08-02 fabrication, reduced to its mechanism:
+
+```
+visitor: "what are your opening hours?"
+   → embed query → similarity search → best chunk scores 0.0318
+   → below the 0.35 threshold → NO context block appended
+   → model fills the gap → "Mon–Fri, 9am–5pm"   (KB says Mon–Sat 10:00–19:00 IST)
+```
+
+The prompt was rewritten and re-measured to 0/3 fabricated. **That is a mitigation.** The
+mechanism — a threshold, a similarity score, and a model with nothing to ground on — is intact,
+and `docs/11 §9` still records grounding as the weakest link at 12/15 with no phase A–G touching
+it.
+
+Two different shapes of question are being served by one mechanism:
+
+| Question | Right mechanism |
+|---|---|
+| *"Explain your return policy"* | **RAG** — fuzzy, discursive, needs prose |
+| *"What is the refund window?"* | **A lookup** — one fact, one value, no similarity involved |
+
+K6-B gives the second kind its own path:
+
+```
+business_hours = "Mon–Sat 10:00–19:00 IST"   ← a row, retrieved by key
+```
+
+**No embedding. No threshold. No similarity. No fabrication surface.** The agent either has the
+fact or says it does not.
+
+### K6.6 ⚠️ How to extract — NOT with Docling
+
+Per K6.0, Docling's extractor is unreachable over `docling-serve` and would drag a VLM into the
+worker. **Use the LLM infrastructure BotForge already has:**
+
+```
+Docling markdown (already produced by K1)
+        │
+        ▼
+small model + Pydantic schema  ← structured output; 13 providers already wired
+        │
+        ▼
+facts table (typed, keyed, cited back to a chunk)
+```
+
+Why this is the better answer regardless of the constraint:
+
+| | Docling `DocumentExtractor` | LLM + Pydantic |
+|---|---|---|
+| Deployment | Needs torch/VLM **in the worker** | **Nothing new** |
+| Contradicts docs/15? | **Yes** | No |
+| Provider choice | Fixed | Any of 13 |
+| Schema | Pydantic | Pydantic (same) |
+| Precedent in repo | None | `ai-cookbook/models/openai/04-structured-output/` |
+
+The ai-cookbook review (docs/13) already covered the structured-output and Instructor patterns
+this needs. This is where they finally earn their place.
+
+### K6.7 Tasks
+
+| # | Task | Done when |
+|---|---|---|
+| K6-B1 | **ADR: facts as a first-class store beside chunks.** Schema, ownership, precedence vs RAG, staleness | Written and accepted **before** any code |
+| K6-B2 | `kb_facts` table: `organization_id`, `knowledge_base_id`, `document_id`, `chunk_id` (citation), `key`, `value`, `confidence`, `extracted_at` | Tenant-filtered at the query layer like every other table |
+| K6-B3 | Per-KB fact schema — operator defines which keys matter (`business_hours`, `refund_window_days`, `support_email`…). **Ships empty** | An unconfigured KB extracts nothing. Deciding which facts matter is not a judgement code should make (the Phase G precedent) |
+| K6-B4 | Extraction at ingest: markdown → small model → validated Pydantic → `kb_facts`. **Every fact carries the `chunk_id` it came from** | A fact with no citation is not stored |
+| K6-B5 | Fact lookup **before** RAG in `retrieve_for_version`; a hit is injected as a distinct, clearly-labelled block | A fact hit is visibly not a retrieved chunk in the assembled prompt |
+| K6-B6 | Conflict policy: two documents, two values for one key | **Surface the conflict to the operator; do not silently pick.** A confidently wrong fact is worse than a missing one |
+| K6-B7 | Re-run P0-2 **plus** a fabrication A/B on the no-context state (the 2026-08-02 protocol) | The number that justifies the phase |
+
+### K6.8 ⚠️ Cautions
+
+- **A wrong fact is worse than no fact, and much worse than a wrong chunk.** A retrieved chunk is
+  hedged by surrounding prose and a visible citation; a fact is stated flatly as truth. **The
+  extraction step needs its own precision measurement, not just K6-B7's recall.**
+- **Facts go stale silently.** A chunk is re-embedded on re-ingest; a fact extracted six months
+  ago sits there until something re-extracts it. **Facts must be deleted and re-extracted with
+  their source document** — the K5-3 lesson, where deletion left orphaned extraction on disk.
+- **This is a new untrusted-content channel.** Facts are model output derived from client
+  documents. A document engineered to produce `support_email = attacker@evil.com` is a stored
+  injection with a straight path into a prompt. **Facts must go through
+  `neutralize_injections()` and the PII allowlist exactly as retrieved chunks do.**
+- **Precedence must be explicit, not emergent.** If a fact and a retrieved chunk disagree, which
+  wins? Decide in K6-B1 and write it down. "Whichever the model happens to weight" is not an
+  answer.
+- **⚠️ Do not let facts silently suppress the fallback message.** If a fact lookup misses, the
+  turn must degrade to exactly today's behaviour — RAG, then fallback. Fail open, like every
+  other layer in docs/11.
+
+---
+
+## K6.9 Priority
+
+| Rank | Task | Effort | Risk | Payoff |
+|---|---|---|---|---|
+| 1 | **K6-A1…A5** confidence | S | Low | Extraction quality stops being invisible |
+| 2 | **K6-B1** the ADR | S | — | Gates the rest |
+| 3 | **K6-B2…B7** facts | L | **Med — a wrong fact states itself as truth** | **The only item in docs/14 that attacks fabrication at its mechanism** |
+
+**K6-A can ship the day K1-5 unblocks.** K6-B should not start until its ADR is accepted.
+
+## K6.10 Confidence
+
+**High** — that `ConfidenceReport` is reachable over the service client and `DocumentExtractor`
+is not. Both counted directly in `docling/service_client/client.py` @ v2.119.0. Grade thresholds
+read from `base_models.py:609`, not from docs.
+
+**High** — that K6-B should not use Docling's extractor. Follows from the counts above plus
+docs/15's deployment constraint; it is an architectural conclusion, not a preference.
+
+**Medium** — the *size* of K6-B's effect on fabrication. The mechanism is sound (a keyed lookup
+has no threshold to fall below), but how many real client questions are fact-shaped rather than
+prose-shaped is **unmeasured**. If most support questions need discursive answers, K6-B is a lot
+of machinery for a thin slice. **K6-B7 must measure this before the phase is called a success.**
+
+**Low** — extraction *precision* on real client documents. Entirely dependent on document
+quality and how well the operator specifies the schema. Untested; K6.8's first caution stands.

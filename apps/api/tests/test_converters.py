@@ -98,21 +98,55 @@ async def test_it_returns_markdown_and_the_structured_document() -> None:
 
 
 async def test_it_asks_for_markdown_and_json_in_one_call() -> None:
-    """A second round trip would re-run the entire ML pipeline for something already computed."""
+    """A second round trip would re-run the entire ML pipeline for something already computed.
+
+    ⚠️ This used to assert only that the substrings "to_formats"/"md"/"json" appeared *somewhere*
+    in the raw multipart body — which stayed true even while the real bug shipped: the previous
+    code nested everything inside one `options` JSON string field, a shape `docling-serve`
+    silently accepts and silently ignores (falling back to its own schema default
+    `to_formats=["md"]`). That meant `json_content` came back `None` on **every real conversion**
+    (docs/14 K1-5, verified live against v2.119.0) while this test stayed green throughout. Fixed
+    by actually parsing the multipart body and asserting on the **field structure**, which is the
+    only check that can tell "nested under `options`" apart from "real top-level fields".
+    """
     seen: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
-        body = request.content.decode("utf-8", errors="replace")
-        seen["has_options"] = "to_formats" in body
-        seen["formats"] = [f for f in ("md", "json") if f'"{f}"' in body]
+        parts = _parse_multipart(request)
+        seen["field_names"] = sorted(parts.keys())
+        seen["to_formats"] = parts.get("to_formats")
+        seen["do_ocr"] = parts.get("do_ocr")
         return httpx.Response(200, json={"document": {"md_content": "text", "json_content": {}}})
 
     converter = DoclingServiceConverter("http://docling:5001", transport=httpx.MockTransport(handler))
     await converter.convert(b"x", filename="a.pdf", mime_type="application/pdf")
     assert seen["url"] == "http://docling:5001/v1/convert/file"
-    assert seen["has_options"] is True
-    assert seen["formats"] == ["md", "json"]
+    # docling-serve's Body_process_file_v1_convert_file_post schema wants these as top-level
+    # multipart fields — never nested under a single "options" field.
+    assert "options" not in seen["field_names"]  # type: ignore[operator]
+    assert seen["to_formats"] == ["md", "json"]
+    assert seen["do_ocr"] == ["true"]  # stringified — see `_options()`'s docstring for why
+
+
+def _parse_multipart(request: httpx.Request) -> dict[str, list[str]]:
+    """Decode a multipart/form-data body into `{field_name: [values...]}`.
+
+    Repeated fields (docling-serve's `to_formats` is `list[str]`) arrive as one part per value
+    with the same name — collected here rather than overwritten, so a list-valued field is
+    distinguishable from a scalar one.
+    """
+    content_type = request.headers["content-type"]
+    boundary = content_type.split("boundary=")[1].encode()
+    body = request.content
+    fields: dict[str, list[str]] = {}
+    for part in body.split(b"--" + boundary):
+        if b'name="' not in part or b"filename=" in part:
+            continue
+        name = part.split(b'name="', 1)[1].split(b'"', 1)[0].decode()
+        value = part.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n", 1)[0].decode()
+        fields.setdefault(name, []).append(value)
+    return fields
 
 
 async def test_json_content_returned_as_a_string_is_still_parsed() -> None:
