@@ -150,11 +150,17 @@ export default function KnowledgeDetailPage() {
 
       {/* Add documents */}
       <div className="rounded-lg border border-border bg-surface p-5">
+        {/*
+          `accept` mirrors `app/rag/formats.ACCEPTED`. It is a courtesy, not the control — a
+          file can still arrive by drag-and-drop or a direct API call, so the server refuses
+          independently (docs/14 K3-1/K3-2). Keep the two in step: a format offered here but
+          refused there reads to the client as a broken upload.
+        */}
         <input
           ref={fileInput}
           type="file"
           className="hidden"
-          accept=".pdf,.docx,.txt,.csv,.md,.markdown,.json"
+          accept=".pdf,.docx,.txt,.csv,.md,.markdown,.json,.html,.htm,.rst,.log,.yaml,.yml"
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) upload.mutate(file);

@@ -111,6 +111,37 @@ async def test_file_upload_ingests(client: AsyncClient, db_session: AsyncSession
     assert got.json()["status"] == "ready"
 
 
+async def test_an_email_upload_is_refused_at_the_endpoint(client: AsyncClient) -> None:
+    """docs/14 K3-2, asserted on the transport a client actually uses.
+
+    `test_upload_formats.py` covers the classifier; this covers the wiring. Both directions on
+    the same endpoint in the same test, because a gate that refuses everything would pass a
+    refusal-only assertion just as happily.
+    """
+    headers = await _headers(client)
+    kb = await _create_kb(client, headers)
+
+    refused = await client.post(
+        f"/v1/knowledge/{kb['id']}/documents/upload",
+        files={"file": ("thread.eml", b"From: a@b.c\n\nmy number is +91 98840 12345", "message/rfc822")},
+        headers=headers,
+    )
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["error"]["code"] == "kb.format_gated"
+
+    allowed = await client.post(
+        f"/v1/knowledge/{kb['id']}/documents/upload",
+        files={"file": ("notes.txt", b"Orion is a constellation.", "text/plain")},
+        headers=headers,
+    )
+    assert allowed.status_code == 201, allowed.text
+
+    # And nothing was stored for the refused upload — a refusal that still writes the row is
+    # the leak with an error message on top.
+    docs = await client.get(f"/v1/knowledge/{kb['id']}/documents", headers=headers)
+    assert [d["filename"] for d in docs.json()] == ["notes.txt"]
+
+
 async def test_reingest_and_delete_document(client: AsyncClient, db_session: AsyncSession) -> None:
     headers = await _headers(client)
     kb = await _create_kb(client, headers)

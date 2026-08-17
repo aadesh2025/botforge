@@ -17,7 +17,7 @@ from app.llm.registry import build_embedding_provider
 from app.models import Agent, AgentVersion, Chunk, Document, KnowledgeBase
 from app.modules.knowledge import schemas
 from app.modules.orgs.deps import OrgContext
-from app.rag import retrieval
+from app.rag import formats, retrieval
 from app.worker.tasks import enqueue_document_ingestion
 
 log = get_logger("knowledge")
@@ -238,6 +238,21 @@ async def upload_document(
     kb = await _get_kb(session, ctx, kb_id)
     if not data:
         raise AppError("kb.empty_file", "Uploaded file is empty.", 400)
+    # Deny-by-default (docs/14 K3-1/K3-2). Before this, anything at all was accepted and
+    # `load_bytes` decoded whatever it did not recognise as UTF-8 text — which meant `.eml`
+    # threads, the highest-PII-density format there is, already ingested whole.
+    decision = formats.classify(filename, mime_type)
+    if not decision.allowed:
+        log.info(
+            "document_upload_refused",
+            organization_id=str(ctx.org.id),
+            outcome=decision.outcome,
+            kind=decision.kind or None,
+            # The name only — never the bytes, and never anything read out of them.
+            filename=filename[:120],
+        )
+        code = "kb.format_gated" if decision.outcome == "gated" else "kb.format_unsupported"
+        raise AppError(code, decision.reason, 400)
     doc = Document(
         knowledge_base_id=kb.id,
         organization_id=ctx.org.id,

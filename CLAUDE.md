@@ -235,7 +235,23 @@ Two standing rules from that spec, repeated here because they are easy to violat
   BotForge at it would have run `alembic upgrade head` on someone else's database). `numpy<2.5`
   is a **typecheck** pin, not a runtime one — its 2.5 stubs use 3.12 syntax and under
   `python_version = "3.11"` (what the Dockerfile ships) mypy stops checking our code entirely.
-- ADR-064/065. Migration 0020. `make rechunk` (re-chunk from persisted JSON, no re-conversion).
+- **⚠️ K3-2: email was already ingesting, months before anything "enabled" it.** docs/14 gates
+  email on Docling's `format-email`. But there was **no upload validation at all** — only
+  "is the file non-empty" — and `load_bytes` ends in *"anything else → decode as text"*. An
+  `.eml` is RFC-822 text, so threads went in whole: headers, signature blocks, direct dials,
+  every third party copied in. docs/14 §3.5 calls email the highest-PII-density format there is
+  and docs/11 §6's review workflow still does not exist. Uploads are now **deny-by-default**
+  (ADR-066) with three outcomes — accepted / gated / unknown — matching email on extension
+  **and** `message/rfc822`, since a saved thread is often `thread.txt`. A test pins that the
+  extractor still reads an `.eml` in full, so the gate cannot be dropped later on the belief
+  that the path underneath is harmless.
+- **K3-1 landed inverted:** the task says *widen* upload validation; widening an allowlist that
+  does not exist means writing one. EPUB/ODF/LaTeX are deliberately **not** accepted — they need
+  Docling, which is off, and accepting them would hand a client a `ready` document that is
+  mojibake and retrieves nothing. **K3-3 to K3-6 not started**, blocked on the same root cause as
+  K1-5 (no running docling-serve, no real client audio); K3-4's own criterion is "tested, not
+  assumed", and there are no media jobs to test with.
+- ADR-064/065/066. Migration 0020. `make rechunk` (re-chunk from persisted JSON, no re-conversion).
 
 ### 2026-08-13 — docs/13 executed: the eval harness went first and immediately found two bugs
 - **`docs/13-AI-COOKBOOK-REVIEW.md` implemented in its own §5 priority order.** R2 (eval harness),

@@ -735,6 +735,39 @@ the same move docs/11 made with the red-team corpus.
 **⚠️ K3-4 before K3-5.** Shipping ASR onto the shared queue is the multi-tenant fairness bug
 described in §3.7 — and it will look fine in dev with one tenant.
 
+> **Status 2026-08-17 — K3-2 shipped and it was not future work; K3-1 shipped inverted; K3-3
+> to K3-6 not started.**
+>
+> **⚠️ K3-2's gate was already needed, and this section had the reason backwards.** §3.5 gates
+> email on Docling's `format-email`. But `upload_document` validated nothing beyond "the file is
+> non-empty", and `loaders.load_bytes` ends in *"anything else → decode as text"*. **An `.eml`
+> is RFC-822 text.** It already ingested whole, with no Docling anywhere — every `From:`,
+> signature block, direct dial and third party copied on the thread — into a product whose
+> docs/11 §6 review workflow still does not exist. Closed now:
+> `app/rag/formats.py` refuses `.eml`/`.msg` by extension *and* by `message/rfc822` mime type
+> (a thread saved out of a mail client is often `thread.txt`), with a message that says which
+> prerequisite is missing. A test pins the extractor behaviour, so the gate cannot be removed
+> later on the belief that the path underneath is harmless.
+>
+> **K3-1 landed as deny-by-default, which is the opposite of "widen".** The task says to widen
+> upload validation; there *was* no upload validation. Widening an allowlist that does not exist
+> means writing the allowlist. EPUB/ODF/LaTeX/images/Box Notes are deliberately **not** on it:
+> they need Docling, Docling is off pending K1-5, and accepting a format the pipeline turns into
+> mojibake is worse than refusing it — the client gets a "ready" document that retrieves
+> nothing. Media extensions are gated with their own message, because their blocker is K3-4, not
+> docs/11 §6, and one shared message would hide that.
+>
+> **K3-3 to K3-6 are blocked on the same root cause as K1-5**, not deferred by preference:
+> - **K3-3** (chart understanding) needs a running docling-serve with Granite Vision loaded; its
+>   acceptance criterion is a *measured* RAM delta, which cannot be invented.
+> - **K3-4** (`q=media` queue) and **K3-6** (media quota) are infrastructure for a feature that
+>   does not exist yet. K3-4's criterion is "a long media job provably does not delay a document
+>   job — **tested**, not assumed", and there are no media jobs to test with. Building the queue
+>   now would be scaffolding three blockers deep, and §3.7 pairs K3-4 with K3-5 for that reason.
+> - **K3-5** (ASR) requires choosing a Whisper model **on real client audio**. There is none in
+>   the repo, and a default picked without that measurement is exactly what §3.7 warns against —
+>   a transcript with wrong product names grounds the agent in falsehoods.
+
 ### Phase K4 — Reranker
 
 | # | Task | Done when |

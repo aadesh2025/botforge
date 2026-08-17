@@ -18,6 +18,37 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-066: Uploads are deny-by-default, and email was already ingesting before anyone enabled it
+- **Date:** 2026-08-17
+- **Status:** accepted
+- **Context:** docs/14 K3-1 says to *widen* upload validation and K3-2 says to *gate* email
+  ingest "until the docs/11 §6 PII workflow ships" — both written as though email becomes
+  reachable when Docling's `format-email` is enabled. Neither premise held. There was **no
+  upload validation at all**: `upload_document` checked only that the file was non-empty, and
+  `loaders.load_bytes` ends with *"anything else → decode as text"*. An `.eml` is RFC-822 text,
+  so email threads already ingested whole — headers, signature blocks, direct dials, and every
+  third party copied on the thread — into a product whose review-and-clean workflow for flagged
+  documents does not exist. docs/14 §3.5 calls email the highest-PII-density format there is.
+- **Decision:** an allowlist in `app/rag/formats.py`, checked in `upload_document` before any
+  row is written. Three outcomes, not two: **accepted**, **gated** (the pipeline could handle it
+  but a named prerequisite has not shipped — email on docs/11 §6, media on K3-4), and
+  **unknown**. Email is matched on extension **and** on `message/rfc822`, because a thread saved
+  out of a mail client is routinely called `thread.txt`. The refusal message names the missing
+  prerequisite.
+- **Alternatives considered:** *Deny-list the formats we do not want* — rejected; that is what
+  the code effectively did, and the failure mode is silent (`.eml` was never on anyone's list
+  because nobody thought it was reachable). *One shared "not supported" message* — rejected: an
+  operator who cannot tell "we will never support this" from "this is waiting on a workflow"
+  files the second as a bug. *Accept EPUB/ODF/LaTeX now, per K3-1's list* — rejected while
+  Docling is off: the decode branch would turn a zip container into mojibake and hand the client
+  a `ready` document that retrieves nothing, which is worse than a refusal.
+- **Consequences:** narrower than before, so a client uploading something previously accepted
+  now sees a clear 400 instead of a document that silently retrieves nothing — the right trade,
+  but it is a behaviour change, not purely an addition. The web picker's `accept` list mirrors
+  `ACCEPTED` and is a courtesy only; drag-and-drop and direct API calls hit the same server-side
+  check. A test asserts the *extractor* still reads an `.eml` in full, so the gate cannot be
+  removed later on the belief that the path underneath is harmless.
+
 ### ADR-065: `contextualize()` helps the vector and *hurts* the keyword half — so structural chunking ships off
 - **Date:** 2026-08-17
 - **Status:** accepted
