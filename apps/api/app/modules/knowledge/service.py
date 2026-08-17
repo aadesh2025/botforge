@@ -183,6 +183,26 @@ def _remove_file(storage_path: str) -> None:
     Path(storage_path).unlink(missing_ok=True)
 
 
+def _remove_document_files(doc: Document) -> None:
+    """Every file this document owns on disk (docs/14 K5-3).
+
+    **The retention policy for the persisted `DoclingDocument` is the document's own lifetime.**
+    Its only purpose is to make re-chunking free (K2-4), which is meaningless once the document
+    is gone — and it is not a derived artefact in any harmless sense: it holds the document's
+    full text, element by element, including whatever `pii_flags` was raised on. Leaving it
+    behind means a client who deleted a document still has its contents on our disk, which is
+    the answer to a data-subject request being wrong.
+
+    No separate expiry job, deliberately. A time-based policy would delete the structured form
+    of documents that are still live, silently turning a free re-chunk into a full
+    re-conversion, and would need its own scheduling to boot.
+    """
+    if doc.storage_path:
+        _remove_file(doc.storage_path)
+    if doc.docling_json_path:
+        _remove_file(doc.docling_json_path)
+
+
 async def _get_document(session: AsyncSession, ctx: OrgContext, document_id: uuid.UUID) -> Document:
     doc = await session.get(Document, document_id)
     if doc is None or doc.organization_id != ctx.org.id:
@@ -289,8 +309,7 @@ async def get_document(session: AsyncSession, ctx: OrgContext, document_id: uuid
 async def delete_document(session: AsyncSession, ctx: OrgContext, document_id: uuid.UUID) -> None:
     rbac.require_permission(ctx.role, rbac.KB_MANAGE)
     doc = await _get_document(session, ctx, document_id)
-    if doc.storage_path:
-        _remove_file(doc.storage_path)
+    _remove_document_files(doc)
     await session.delete(doc)  # chunks cascade via FK
 
 

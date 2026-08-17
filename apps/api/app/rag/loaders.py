@@ -113,6 +113,22 @@ async def load_url(url: str, *, transport: httpx.AsyncBaseTransport | None = Non
     return body.strip()
 
 
+def pdf_page_count(data: bytes) -> int | None:
+    """Page count, or `None` if the file is not a readable PDF.
+
+    Cheap: pypdf reads the cross-reference table, not the page content. Deliberately returns
+    `None` rather than raising on a corrupt file — a page cap has no business being the thing
+    that decides an encrypted or malformed PDF cannot be ingested. The extractor gets to make
+    that call, with its own error message.
+    """
+    try:
+        from pypdf import PdfReader
+
+        return len(PdfReader(io.BytesIO(data)).pages)
+    except Exception:
+        return None
+
+
 def load_pdf(data: bytes) -> str:
     from pypdf import PdfReader
 

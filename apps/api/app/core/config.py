@@ -105,6 +105,17 @@ class Settings(BaseSettings):
     # ADR-065 and the K2-5 table in docs/14. The short version: `embed` improves the dense half
     # and *removes* the heading from the FTS-indexed text, so it makes the keyword half worse.
     docling_chunk_heading_mode: str = "embed"
+    # Page cap for PDF ingest (docs/14 K5-2). 0 disables it.
+    #
+    # A 500-page PDF does not fail cleanly, it fails *slowly*: it occupies the worker for the
+    # whole `DOCLING_TIMEOUT_SECONDS`, times out, falls back to the legacy extractor, and the
+    # client gets a document some minutes later with none of the structure they uploaded it for.
+    # Refusing up front with a message that names the number is a better answer than a timeout,
+    # because "split it into parts" is an action the client can actually take.
+    #
+    # 800 rather than something tighter: this is a backstop against the pathological case, not
+    # a product limit. A real client manual runs to a few hundred pages and must still ingest.
+    max_pdf_pages: int = 800
 
     # --- Reranking (docs/13 R1, docs/14 K4) ---
     # Stage 4: a cross-encoder reorders the fused RRF candidates. OFF platform-wide and off per

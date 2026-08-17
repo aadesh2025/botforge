@@ -185,6 +185,11 @@ docs/14 §12, where every step back is a flag flip because `LegacyConverter` is 
   ~800 of Tamil, and only one of those fits an embedding window predictably. Sweepable without
   re-converting anything — `scripts/eval_retrieval.py --chunk-max-tokens` — which is the whole
   point of persisting the `DoclingDocument`.
+- `MAX_PDF_PAGES` (default `800`, `0` disables) — refuses a PDF longer than this at ingest, with
+  the page count *and* the limit in the failure message. A 500-page PDF otherwise fails slowly
+  rather than cleanly: it holds the worker for the whole `DOCLING_TIMEOUT_SECONDS`, times out,
+  falls back to the legacy extractor, and the client gets a structureless document minutes later.
+  Checked on the file, URL and re-ingest paths alike, because they converge on one function.
 - `DOCLING_CHUNK_HEADING_MODE` (default `embed`) — `embed` puts the chunk's heading path in the
   embedding input only and leaves the stored chunk raw (docs/14 §4.2's rule); `inline` also
   prefixes it to the stored chunk. **This is a measured trade, not a style choice** (ADR-065):

@@ -43,6 +43,30 @@ def _stored_bytes(storage_path: str) -> bytes:
     return path.read_bytes()
 
 
+def _enforce_page_cap(data: bytes, document: Document) -> None:
+    """Refuse a pathologically long PDF up front (docs/14 K5-2, §8).
+
+    Enforced here rather than at upload because every route converges on it — file upload, a
+    re-ingest, and a PDF fetched from a URL — and one check that covers all three cannot drift
+    from the other two.
+
+    The message names the number. "This document is too large" tells the client nothing they can
+    act on; "620 pages, the limit is 800" tells them to split it.
+    """
+    cap = settings.max_pdf_pages
+    if cap <= 0:
+        return
+    name = (document.filename or "").lower()
+    if not (name.endswith(".pdf") or (document.mime_type or "").lower().endswith("pdf")):
+        return
+    pages = loaders.pdf_page_count(data)
+    if pages is not None and pages > cap:
+        raise loaders.LoaderError(
+            f"This PDF has {pages} pages and the limit is {cap}. "
+            f"Split it into smaller documents and upload them separately."
+        )
+
+
 async def _read_source(
     document: Document,
     *,
@@ -63,6 +87,7 @@ async def _read_source(
     if not document.storage_path:
         raise loaders.LoaderError("Document has no stored file.")
     data = _stored_bytes(document.storage_path)
+    _enforce_page_cap(data, document)
     return await converters.convert_with_fallback(
         data,
         filename=document.filename,
@@ -132,6 +157,21 @@ def _chunk(
     return chunk_text(text, kb.chunk_size, kb.chunk_overlap, metadata=metadata)
 
 
+def _discard_docling_json(document: Document) -> None:
+    """Delete a previously persisted `DoclingDocument`. Best-effort, never fails an ingest."""
+    if not document.docling_json_path:
+        return
+    try:
+        Path(document.docling_json_path).unlink(missing_ok=True)
+    except OSError as exc:
+        log.warning(
+            "docling_json_discard_failed",
+            document_id=str(document.id),
+            error=str(exc)[:200],
+            impact="an orphaned extraction file remains on disk",
+        )
+
+
 async def ingest_document(
     session: AsyncSession,
     document_id: uuid.UUID,
@@ -160,9 +200,16 @@ async def ingest_document(
             raise loaders.LoaderError("No extractable text in document.")
         document.extraction_backend = converted.backend
         # Persisted before chunking, so a later re-chunk (K2-4) can skip conversion entirely.
-        document.docling_json_path = (
-            _persist_docling_json(document, converted.document) if converted.document else None
-        )
+        if converted.document:
+            document.docling_json_path = _persist_docling_json(document, converted.document)
+        else:
+            # Re-ingested without structure this time — Docling turned off, or an outage that
+            # fell back to the legacy extractor. Clearing the column is not enough: the file
+            # describes an extraction the chunks are no longer built from, and left on disk it
+            # is an orphan holding the document's full text that nothing will ever delete,
+            # because `delete_document` deletes by the path we just cleared (docs/14 K5-3).
+            _discard_docling_json(document)
+            document.docling_json_path = None
 
         # Scan before chunking, so a contact detail split across a chunk boundary is still
         # counted once against the whole document (docs/11 Phase B, §6).

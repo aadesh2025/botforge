@@ -251,6 +251,19 @@ Two standing rules from that spec, repeated here because they are easy to violat
   mojibake and retrieves nothing. **K3-3 to K3-6 not started**, blocked on the same root cause as
   K1-5 (no running docling-serve, no real client audio); K3-4's own criterion is "tested, not
   assumed", and there are no media jobs to test with.
+- **⚠️ K5-3 was a live retention bug that K1 introduced earlier in the same session.**
+  `delete_document` removed `storage_path` and nothing else, so a deleted document left its
+  `.docling.json` — its full text, element by element, including anything `pii_flags` flagged —
+  on disk forever. A second orphan came from re-ingest: losing structure cleared the column while
+  the file stayed, and deletion works *through* that column, so nothing would ever remove it.
+  Policy: **the JSON's lifetime is the document's**, no expiry job — a time-based one would turn
+  a free re-chunk of a *live* document into a full re-conversion.
+- **K5-2:** `MAX_PDF_PAGES` (default 800, 0 disables), enforced where the upload, URL and
+  re-ingest paths converge. The message names the count *and* the limit, because "too large" is
+  not actionable and "620 pages, the limit is 800" is. `pdf_page_count()` returns `None` rather
+  than raising on a corrupt file — a page cap must not be what decides an encrypted PDF fails.
+- **K4-4 blocked** (needs a running rerank endpoint for the p50/p95 delta ADR-063 demands before
+  enabling it for anyone). K4-1/2/3/5 and K5-1 shipped 2026-08-13.
 - ADR-064/065/066. Migration 0020. `make rechunk` (re-chunk from persisted JSON, no re-conversion).
 
 ### 2026-08-13 — docs/13 executed: the eval harness went first and immediately found two bugs

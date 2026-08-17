@@ -789,6 +789,33 @@ rerank outage degrades to RRF ordering — never an error, never an empty result
 | K5-2 | `document_timeout` tuning (Docling recommends 90–120 s), page-count caps |
 | K5-3 | Retention policy for persisted DoclingDocument JSON (§6) |
 
+> **Status 2026-08-17 — K5-1, K5-2, K5-3 shipped. K4-1/2/3/5 shipped 2026-08-13; K4-4 blocked.**
+>
+> **K5-2.** `MAX_PDF_PAGES` (default 800, `0` disables), enforced in `ingest._enforce_page_cap`
+> where the upload, URL and re-ingest paths converge, so the three cannot drift. The message
+> carries the page count *and* the limit — "too large" is not something a client can act on,
+> "620 pages, the limit is 800" is. `loaders.pdf_page_count()` reads the xref table only, and
+> returns `None` rather than raising on a corrupt file: a page cap has no business being the
+> thing that decides an encrypted PDF cannot be ingested. `DOCLING_TIMEOUT_SECONDS` was already
+> at 120 s, inside Docling's own 90–120 s guidance.
+>
+> **⚠️ K5-3 was a live data-retention bug, introduced by K1 in this same session.**
+> `delete_document` removed `storage_path` and nothing else, so deleting a document left its
+> `.docling.json` — the full text, element by element, including anything `pii_flags` had been
+> raised on — on disk indefinitely. A second orphan came from re-ingest: when a re-run produced
+> no structure the column was cleared while the file stayed, and since deletion works *through*
+> that column, nothing would ever remove it.
+>
+> **The policy is that the JSON's lifetime is the document's** — no separate expiry job. Its only
+> purpose is making a re-chunk free (K2-4), which is meaningless once the document is gone; and a
+> time-based expiry would silently turn a free re-chunk of a *live* document into a full
+> re-conversion. Note `delete_kb` is a **soft** delete, so its documents and their files are
+> retained by design — that is the existing contract, not an oversight of this task.
+>
+> **K4-4 is blocked**, not skipped: it wants a measured NDCG delta **and** p50/p95 latency delta
+> from a real deployment, and no rerank endpoint is running. ADR-063 already refuses to enable
+> the reranker for any client without exactly that measurement.
+
 ---
 
 ## 8. Edge cases
