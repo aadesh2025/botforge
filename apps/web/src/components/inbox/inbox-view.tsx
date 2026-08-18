@@ -261,7 +261,7 @@ function Thread({ cid, onChanged }: { cid: string; onChanged: () => void }) {
   const assigned = Boolean(handoff?.assigned_to);
 
   return (
-    <div className="flex flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-3 border-b border-border p-3">
         <ContactAvatar
           channel={detail?.channel ?? "widget"}

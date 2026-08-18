@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat import variables
 from app.chat.assembly import compose_system_prompt
+from app.chat.handoff import trigger_handoff, wants_handoff
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
 from app.core.config import settings
@@ -23,7 +24,7 @@ from app.core.logging import get_logger
 from app.db.templates import AGENT_TEMPLATES, get_template
 from app.llm.base import ChatProvider
 from app.llm.registry import get_chat_provider, get_chat_provider_chain
-from app.llm.types import ChatRequest, Message
+from app.llm.types import ChatRequest, Message, StreamEvent
 from app.models import PLAYGROUND_CHANNEL, Agent, AgentVersion, Conversation, WidgetConfig
 from app.models import Message as DBMessage
 from app.modules.agents import schemas
@@ -660,6 +661,30 @@ async def playground_stream(
     rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
     agent = await _get_agent(session, ctx, agent_id)
     version = await _latest_version(session, agent.id)
+
+    # Keyword handoff (mirrors app.chat.inbound.InboundTurn — the real widget/channel path).
+    # Checked before resolving a provider or spending a retrieval call, same ordering reason
+    # as inbound.py: an operator testing "can you hand me off to a human" should see the same
+    # behavior in the Playground that a real visitor gets, not a conversational guess from the
+    # model with no Handoff record behind it.
+    features = version.features or {}
+    if features.get("handoff_enabled") and wants_handoff(data.message):
+        conv = await _playground_conversation(session, ctx, agent, data.conversation_id)
+        yield f'data: {{"type": "conversation", "conversation_id": "{conv.id}"}}\n\n'
+        await trigger_handoff(session, conv, requested_by="user", reason="keyword")
+        canned = (
+            version.fallback_message
+            or "Let me connect you with a teammate — someone will be with you shortly."
+        )
+        result = TurnResult()
+        result.content = canned
+        result.provider = "system"
+        result.finish_reason = "handoff"
+        await _persist_playground_turn(session, conv, data.message, result, 0)
+        yield f"data: {StreamEvent(type='token', delta=canned).model_dump_json()}\n\n"
+        yield f"data: {StreamEvent(type='done', finish_reason='handoff').model_dump_json()}\n\n"
+        return
+
     provider_name = (version.model_config_json or {}).get("provider", "fake")
     provider = await _resolve_playground_provider(
         session, ctx, agent, provider_name, version.model_config_json or {}
@@ -697,6 +722,33 @@ async def playground_once(
     rbac.require_permission(ctx.role, rbac.AGENTS_WRITE)
     agent = await _get_agent(session, ctx, agent_id)
     version = await _latest_version(session, agent.id)
+
+    # Keyword handoff — see the matching block in playground_stream() for why this must not
+    # be skipped just because this is the non-streaming path.
+    features = version.features or {}
+    if features.get("handoff_enabled") and wants_handoff(data.message):
+        conv = await _playground_conversation(session, ctx, agent, data.conversation_id)
+        await trigger_handoff(session, conv, requested_by="user", reason="keyword")
+        canned = (
+            version.fallback_message
+            or "Let me connect you with a teammate — someone will be with you shortly."
+        )
+        result = TurnResult()
+        result.content = canned
+        result.provider = "system"
+        result.finish_reason = "handoff"
+        await _persist_playground_turn(session, conv, data.message, result, 0)
+        return {
+            "conversation_id": str(conv.id),
+            "content": canned,
+            "citations": [],
+            "tool_runs": [],
+            "provider": "system",
+            "model": None,
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "cost_micros": 0},
+            "finish_reason": "handoff",
+        }
+
     provider_name = (version.model_config_json or {}).get("provider", "fake")
     provider = await _resolve_playground_provider(
         session, ctx, agent, provider_name, version.model_config_json or {}

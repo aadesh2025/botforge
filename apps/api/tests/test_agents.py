@@ -283,6 +283,77 @@ async def test_playground_stream_announces_its_conversation_first(
     assert body.index("conversation_id") < body.index('"type":"token"')
 
 
+# ── Playground keyword handoff (parity with app.chat.inbound.InboundTurn) ─────
+# Before this, `playground_stream`/`playground_once` never imported `wants_handoff` /
+# `trigger_handoff` at all, so "can you hand me off to a human" in the Playground just
+# produced an ordinary model reply with no Handoff record behind it — even with the
+# Model tab's "Human handoff" toggle on. These pin that the Playground now takes the same
+# branch the real widget/channel path does.
+async def _handoff_playground_agent(client: AsyncClient, headers: dict[str, str]) -> str:
+    agent = await _create_agent(client, headers, name="HO Bot")
+    await client.patch(
+        f"/v1/agents/{agent['id']}/versions/1",
+        json={
+            "fallback_message": "Connecting you to a teammate now.",
+            "model_config": {"provider": "fake", "model": "fake-1"},
+            "features": {"tools_enabled": False, "memory_enabled": True, "handoff_enabled": True},
+        },
+        headers=headers,
+    )
+    return agent["id"]
+
+
+async def test_playground_non_stream_triggers_handoff(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    aid = await _handoff_playground_agent(client, headers)
+
+    resp = await client.post(
+        f"/v1/agents/{aid}/playground/chat",
+        json={"message": "can I talk to a real person please", "stream": False},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["content"] == "Connecting you to a teammate now."
+    assert body["finish_reason"] == "handoff"
+
+    cid = body["conversation_id"]
+    detail = await client.get(f"/v1/conversations/{cid}", headers=headers)
+    assert detail.json()["status"] == "handoff", "must actually flip the conversation, not just reply"
+
+    inbox = await client.get("/v1/inbox/conversations?status=handoff", headers=headers)
+    assert cid in {c["id"] for c in inbox.json()}, "must be a real Handoff record, visible in the inbox"
+
+
+async def test_playground_stream_triggers_handoff(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    aid = await _handoff_playground_agent(client, headers)
+
+    resp = await client.post(
+        f"/v1/agents/{aid}/playground/chat",
+        json={"message": "speak to a live agent", "stream": True},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Connecting you to a teammate now." in body
+    assert '"finish_reason":"handoff"' in body or '"finish_reason": "handoff"' in body
+
+
+async def test_playground_without_handoff_feature_does_not_trigger(client: AsyncClient) -> None:
+    """The keyword branch must stay gated on the Model tab's toggle — this is the control."""
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)  # handoff_enabled defaults to False
+
+    resp = await client.post(
+        f"/v1/agents/{agent['id']}/playground/chat",
+        json={"message": "can I talk to a real person please", "stream": False},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["content"] == "echo: can I talk to a real person please"
+
+
 # ── Creation-time role templates ──────────────────────────────────────────────
 async def test_list_agent_templates(client: AsyncClient) -> None:
     headers, _ = await _headers(client)

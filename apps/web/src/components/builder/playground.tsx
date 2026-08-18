@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CornerDownLeft, FileText, RotateCcw, Sparkles, Wrench } from "lucide-react";
+import { CornerDownLeft, FileText, Headphones, RotateCcw, Sparkles, Wrench } from "lucide-react";
 import { useBuilder } from "@/lib/store/builder";
 import { useSession } from "@/lib/store/session";
 import { playgroundStream } from "@/lib/api/agents";
@@ -16,6 +16,7 @@ interface Msg {
   streaming?: boolean;
   citation?: string;
   tool?: string;
+  handoff?: boolean;
 }
 
 export function Playground() {
@@ -80,6 +81,11 @@ export function Playground() {
         } else if (type === "tool_call") {
           const tc = event.tool_call as { name?: string } | null;
           setMessages((m) => m.map((msg) => (msg.id === botId ? { ...msg, tool: tc?.name } : msg)));
+        } else if (type === "done" && event.finish_reason === "handoff") {
+          // The bot paused itself here — same trigger a real visitor's "talk to a human"
+          // hits in app/chat/inbound.py. Flag it so the transcript shows what actually
+          // happened instead of reading like an ordinary reply.
+          setMessages((m) => m.map((msg) => (msg.id === botId ? { ...msg, handoff: true } : msg)));
         } else if (type === "error") {
           setMessages((m) =>
             m.map((msg) =>
@@ -136,6 +142,11 @@ export function Playground() {
             </div>
           ) : (
             <div key={m.id} className="flex flex-col gap-1.5">
+              {m.handoff && (
+                <div className="inline-flex w-fit items-center gap-1.5 rounded-md border border-accent/25 bg-accent/[0.07] px-2 py-1 text-[11px] text-accent-soft">
+                  <Headphones className="size-3" /> Handed off to a human — status set to "handoff"
+                </div>
+              )}
               {m.tool && (
                 <div className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-surface-2 px-2 py-1 text-[11px] text-muted">
                   <Wrench className="size-3 text-accent-soft" />
