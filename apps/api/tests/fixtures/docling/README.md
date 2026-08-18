@@ -17,13 +17,27 @@ grid structure in the PDF content stream, not text made to look tabular.
 structure). Docling reconstructs both as real markdown tables with columns intact (912 chars,
 `has_structure=True`). **Confidence: high, and now measured, not assumed.**
 
-⚠️ **Cold-start note.** The first real conversion against a freshly-started `docling-serve` took
-**124.6 seconds** (loading the CPU-only layout/object-detection model) and blew past the 120s
-`DOCLING_TIMEOUT_SECONDS` default, so `convert_with_fallback()` correctly fell back to the legacy
-extractor and logged `docling_unavailable`. A second, warm request finished in a few seconds. This
-means **the very first document a client uploads after a `docling-serve` restart may legitimately
-fail over to the legacy extractor even though nothing is actually broken** — worth a startup
-warm-up call or a documented expectation in docs/14 §12's rollout, not fixed here.
+⚠️ **Cold-start note — fixed 2026-08-17 (docs/14 K1-5 follow-up task 1).** The first real
+conversion against a freshly-started `docling-serve` took **124.6 seconds** (loading the CPU-only
+layout/object-detection model), past the 120s `DOCLING_TIMEOUT_SECONDS` default, so
+`convert_with_fallback()` correctly fell back to the legacy extractor and logged
+`docling_unavailable`. `app/rag/converters.py::probe_reachable()` now fires a real (not
+health-check) conversion at API startup to absorb that cost before any client upload can hit it —
+called from `app/main.py`'s `lifespan`, gated by `docling_enabled` exactly like real conversion.
+**Verified live, end to end, on a genuinely fresh container:** the probe gives up client-side
+after 5s (`docling_warmup_kicked_off` logged) while `docling-serve`'s own job worker keeps
+processing in the background — confirmed in its logs, finishing 81.8s later — and the next real
+client-shaped conversion then took **8.1s instead of 124.6s**. This narrows the window; it does
+not close it — a `docling-serve` crash/restart independent of the API's own lifecycle, or a
+restart during live traffic, still hits a cold instance.
+
+**⚠️ The warm-up must send a real, valid PDF with `do_ocr`/`do_table_structure` matching
+production, or it barely helps — measured, not assumed.** `docling-serve` initializes pipelines
+lazily, keyed by an options hash. A warm-up using a plain `.txt` file with `do_ocr=false,
+do_table_structure=false` only warmed the layout model and cut the next real conversion to 86.5s,
+not 6-8s — the OCR and table-structure models still loaded cold. Garbage bytes with a `.pdf`
+filename fail `docling-parse` in ~2s, *before* any model loads at all, so they warm nothing.
+`probe_reachable()` embeds a genuinely valid minimal PDF for exactly this reason.
 
 ## 2. `scanned-refund-policy.pdf`
 

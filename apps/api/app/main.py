@@ -53,6 +53,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # seconds and it swallows everything — see `embeddings.probe_reachable`. Off in the suite via
     # `EMBEDDING_PROBE_ENABLED`, which conftest clears.
     await embeddings.probe_reachable()
+    # Same shape, different reason: not a reachability check but a real conversion kicked off so
+    # the first real client upload isn't the one that pays for a cold model load (docs/14 K1-5
+    # follow-up). Gated by `docling_enabled` exactly like real conversion — a no-op when off,
+    # which is every deployment today. `conftest.py` sets `docling_enabled = False` for the suite.
+    await converters.probe_reachable()
     # Bridge the realtime hub over Redis so operator↔widget delivery works across API replicas.
     await hub.connect(settings.redis_url)
     yield

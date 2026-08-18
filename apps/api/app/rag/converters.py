@@ -219,6 +219,93 @@ def warn_if_misconfigured() -> None:
     )
 
 
+#: A minimal but genuinely valid single-page PDF, generated once with `reportlab` and pasted in
+#: rather than a runtime dependency. **Must be a real, parseable PDF** — verified live (docs/14
+#: K1-5 follow-up) that garbage bytes with a `.pdf` filename fail fast in `docling-parse` *before*
+#: any model loads, so they warm nothing. This one round-trips through the real pipeline.
+_WARMUP_PDF = (
+    b"%PDF-1.3\n%\x93\x8c\x8b\x9e ReportLab Generated PDF document (opensource)\n1 0 obj\n<<\n"
+    b"/F1 2 0 R\n>>\nendobj\n2 0 obj\n<<\n/BaseFont /Helvetica /Encoding /WinAnsiEncoding "
+    b"/Name /F1 /Subtype /Type1 /Type /Font\n>>\nendobj\n3 0 obj\n<<\n/Contents 7 0 R "
+    b"/MediaBox [ 0 0 595.2756 841.8898 ] /Parent 6 0 R /Resources <<\n/Font 1 0 R "
+    b"/ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]\n>> /Rotate 0 /Trans <<\n\n>> \n"
+    b"  /Type /Page\n>>\nendobj\n4 0 obj\n<<\n/PageMode /UseNone /Pages 6 0 R /Type /Catalog\n"
+    b">>\nendobj\n5 0 obj\n<<\n/Author (warmup) /Creator (botforge) /Keywords () "
+    b"/Producer (ReportLab PDF Library - \\(opensource\\)) \n  /Subject (warmup) "
+    b"/Title (warmup) /Trapped /False\n>>\nendobj\n6 0 obj\n<<\n/Count 1 /Kids [ 3 0 R ] "
+    b"/Type /Pages\n>>\nendobj\n7 0 obj\n<<\n/Filter [ /ASCII85Decode /FlateDecode ] "
+    b"/Length 95\n>>\nstream\nGapQh0E=F,0U\\H3T\\pNYT^QKk?tc>IP,;W#U1^23ihPEM_?CW4KISi<!"
+    b"[7`#OB_sKo#.9XdK3-sO=Z(s/W_^k/c_o<&Vg~>endstream\nendobj\nxref\n0 8\n"
+    b"0000000000 65535 f \n0000000061 00000 n \n0000000092 00000 n \n0000000199 00000 n \n"
+    b"0000000402 00000 n \n0000000470 00000 n \n0000000731 00000 n \n0000000790 00000 n \n"
+    b"trailer\n<<\n/ID \n[<93523608fbca7eed71bcb38a233fea23><93523608fbca7eed71bcb38a233fea23>]\n"
+    b"/Info 5 0 R\n/Root 4 0 R\n/Size 8\n>>\nstartxref\n974\n%%EOF\n"
+)
+
+#: Deliberately NOT `settings.docling_timeout_seconds` (120s, sized for a real client document).
+#: This only has to survive long enough for the HTTP request to be accepted and enqueued by
+#: docling-serve's own job worker — verified live that the worker keeps processing after the
+#: client gives up (docs/14 K1-5 follow-up), so a short client-side wait is enough to "kick off"
+#: the warm-up without holding API startup hostage on a slow or unreachable service.
+_WARMUP_TIMEOUT = 5.0
+
+
+async def probe_reachable(*, transport: httpx.AsyncBaseTransport | None = None) -> tuple[bool, str | None]:
+    """Kick off a real conversion at startup so the *first real client upload* isn't the one that
+    pays for a cold model load (docs/14 K1-5 follow-up task 1).
+
+    **Why this has to be a real conversion, not a health-check ping** — measured, not assumed:
+    hitting `/health` never triggers model loading (confirmed against the container's own logs
+    across many routine healthcheck pings with zero model-loading activity nearby). Only a real
+    `/v1/convert/file` call does, because `docling-serve` initializes pipelines lazily, keyed by
+    an **options hash** — `do_ocr`/`do_table_structure` have to match what `DoclingServiceConverter`
+    actually sends, or this warms the wrong pipeline. Measured on a cold instance: a `do_ocr=False,
+    do_table_structure=False` warm-up against a plain text file cut a real PDF conversion from
+    124.6s to 86.5s (only the layout model got warm) — matching options against a real PDF cut it
+    to 6.1s. Garbage bytes with a `.pdf` filename fail `docling-parse` in ~2s, before any model
+    loads at all, so `_WARMUP_PDF` has to be genuinely valid.
+
+    Returns `(ok, reason)` and **never raises** — same contract as `embeddings.probe_reachable()`.
+    A diagnostic must not be able to stop the API from starting. `docling_enabled` gates this
+    exactly like it gates real conversion: if Docling is off, this makes no network call at all.
+    """
+    if not is_enabled():
+        return True, None
+    endpoint = settings.docling_endpoint.strip().rstrip("/")
+    options = {
+        "to_formats": ["md"],
+        "do_ocr": "true" if settings.docling_do_ocr else "false",
+        "do_table_structure": "true" if settings.docling_do_table_structure else "false",
+        "do_picture_description": "false",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_WARMUP_TIMEOUT, transport=transport) as client:
+            await client.post(
+                f"{endpoint}/v1/convert/file",
+                files={"files": ("warmup.pdf", _WARMUP_PDF, "application/pdf")},
+                data=options,
+            )
+        log.info("docling_warmup_ok", endpoint=endpoint)
+        return True, None
+    except httpx.TimeoutException:
+        # Expected, and not a failure: the client gave up but docling-serve's own job worker
+        # keeps processing after the connection ends (verified live). This is a hint, not a
+        # guarantee — a docling-serve crash/restart independent of the API's lifecycle, or a
+        # restart mid-traffic, still hits a cold instance. It narrows the window; it does not
+        # close it.
+        log.info("docling_warmup_kicked_off", endpoint=endpoint, timeout=_WARMUP_TIMEOUT)
+        return True, None
+    except Exception as exc:  # a startup probe must survive everything httpx can raise
+        reason = f"{type(exc).__name__}: {str(exc)[:120]}"
+        (log.error if settings.is_prod else log.warning)(
+            "docling_warmup_failed",
+            endpoint=endpoint,
+            error=reason,
+            impact="the first real conversion may pay the full cold-start cost instead of this probe",
+        )
+        return False, reason
+
+
 def build_converter(
     *, transport: httpx.AsyncBaseTransport | None = None
 ) -> DocumentConverter:

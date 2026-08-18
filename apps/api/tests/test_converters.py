@@ -220,3 +220,71 @@ async def test_the_backend_is_recorded_so_a_regression_is_attributable() -> None
     assert via_docling.backend == BACKEND_DOCLING
     assert via_legacy.backend == BACKEND_LEGACY
     assert via_docling.text != via_legacy.text
+
+
+# ── the startup warm-up probe (docs/14 K1-5 follow-up) ───────────────────────────────────
+
+
+async def test_warmup_makes_no_network_call_when_docling_is_off() -> None:
+    """`docling_enabled` gates the probe exactly like it gates real conversion."""
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"document": {"md_content": "x"}})
+
+    # Docling disabled is the default in every test via conftest.py — assert it explicitly here
+    # rather than relying on ambient state, since this test is the one that would catch a
+    # regression in that default.
+    assert not settings.docling_enabled
+    ok, reason = await converters.probe_reachable(transport=httpx.MockTransport(handler))
+    assert ok is True
+    assert reason is None
+    assert called is False
+
+
+async def test_warmup_never_raises_when_the_service_is_unreachable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    with _enabled():
+        ok, reason = await converters.probe_reachable(transport=httpx.MockTransport(handler))
+    assert ok is False
+    assert reason is not None and "ConnectError" in reason
+
+
+async def test_a_slow_docling_does_not_hang_the_probe() -> None:
+    """The probe must give up within its own short window, not `DOCLING_TIMEOUT_SECONDS` (120s)
+    — a startup diagnostic that can hold the process hostage on a slow service is worse than the
+    cold start it exists to avoid."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("still loading the layout model", request=request)
+
+    with _enabled():
+        ok, reason = await converters.probe_reachable(transport=httpx.MockTransport(handler))
+    # A timeout is treated as "kicked off, not a failure" — the server-side job worker keeps
+    # processing after the client gives up (verified live, docs/14 K1-5 follow-up).
+    assert ok is True
+    assert reason is None
+
+
+async def test_warmup_sends_a_real_pdf_with_matching_options() -> None:
+    """The whole point is hitting the same options-hash pipeline cache `DoclingServiceConverter`
+    uses for real conversions — mismatched `do_ocr`/`do_table_structure` warms the wrong one
+    (measured: cut a cold conversion from 124.6s to only 86.5s instead of 6.1s)."""
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        parts = _parse_multipart(request)
+        seen["do_ocr"] = parts.get("do_ocr")
+        seen["do_table_structure"] = parts.get("do_table_structure")
+        seen["filename"] = "warmup.pdf" in request.content.decode("utf-8", errors="replace")
+        return httpx.Response(200, json={"document": {"md_content": "x"}})
+
+    with _enabled():
+        await converters.probe_reachable(transport=httpx.MockTransport(handler))
+    assert seen["do_ocr"] == ["true" if settings.docling_do_ocr else "false"]
+    assert seen["do_table_structure"] == ["true" if settings.docling_do_table_structure else "false"]
+    assert seen["filename"] is True
