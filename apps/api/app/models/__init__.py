@@ -42,6 +42,7 @@ from app.models.platform import (
 )
 from app.models.tools import Tool, ToolRun
 from app.models.widget_configs import WidgetConfig
+from app.models.workflows import Workflow, WorkflowRun, WorkflowStep, WorkflowVersion
 
 __all__ = [
     "PLAYGROUND_CHANNEL",
@@ -84,4 +85,8 @@ __all__ = [
     "WebhookDelivery",
     "WebhookEndpoint",
     "WidgetConfig",
+    "Workflow",
+    "WorkflowRun",
+    "WorkflowStep",
+    "WorkflowVersion",
 ]

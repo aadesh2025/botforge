@@ -38,6 +38,68 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **docs/17 Phase 2 — Visual Workflow Builder, backend slice (2026-08-19).** Triggered by name
+  per CLAUDE.md §10b, immediately after Phase 1. **This is a backend/API foundation, not a
+  finished Phase 2** — see ADR-074's Consequences for the explicit list of what's deferred
+  (Celery wiring, the React Flow canvas, 4 of 11 CORE+ node types, draft-version test runs, and
+  Approval→Handoff inbox integration). Framed honestly rather than claimed complete.
+
+  **What shipped.** `app/workflows/graph.py` — a pure-Python execution engine: `run_workflow()`
+  walks a `{"nodes":[...], "edges":[...]}` graph one node at a time, synchronously, reusing
+  `app.chat.budget.AgentBudget` as its bounding mechanism (steps/tool-calls/runtime/cost) —
+  the same instance a caller can share with a future nested call, inheriting Phase 1's
+  never-reset rule for free rather than re-implementing it. Seven node types: start, end,
+  message, condition, set_variable, approval, tool. `evaluate_condition()` is a narrow
+  hand-rolled `var OP literal` parser (five operators, no boolean chaining) — never `eval()`,
+  per docs/17 §11's ban on arbitrary code execution. `render_workflow_template()` reuses Phase
+  F's `escape_value()` (`app/chat/variables.py`) for the same single-pass, unknown-vars-render-
+  empty discipline, applied to workflow-defined variables rather than the fixed system-prompt
+  allowlist. A `tool` node's result gets the IDENTICAL treatment `run_turn` already gives chat
+  tool results — `neutralize_injections()` before it can reach a variable or a later node's
+  rendered text, no exception for the result being "one of ours."
+
+  **Data model** (`app/models/workflows.py`, migration `0023`): `Workflow`/`WorkflowVersion`
+  deliberately mirror `Agent`/`AgentVersion`'s draft-publish shape rather than inventing a
+  second pattern (ADR-074). `WorkflowRun.budget` persists a serialized `AgentBudget` so a
+  paused-on-approval run resumes with what it already spent, not a fresh ceiling —
+  `test_workflow_graph.py::test_resume_shares_and_accumulates_the_same_budget` proves this
+  against the real engine, mirroring Phase 1's own nested-budget test. `WorkflowStep.output`
+  is sanitized-only, same rule as `agent_steps.tool_output`.
+
+  **API** (`app/workflows/{service,router}.py`, new `WORKFLOWS_WRITE`/`WORKFLOWS_PUBLISH` RBAC
+  permissions mirroring `AGENTS_WRITE`/`AGENTS_PUBLISH`'s split): 9 endpoints — workflow CRUD
+  under `/v1/agents/{agent_id}/workflows` + `/v1/workflows/{id}`, versioning + publish, `POST
+  /v1/workflows/{id}/run` (synchronous — see the async caveat below), and
+  `/v1/workflow-runs/{id}/{resume,cancel,steps}`. Tool nodes reuse the exact `Tool`-row
+  dispatch chat's `run_turn` uses (`execute_tool_call`), not a second tool-execution path.
+
+  **⚠️ Execution is synchronous-in-request; there is no Celery wiring yet.** A long-running
+  workflow blocks the HTTP call for up to `max_cost_usd`'s effective runtime cap (`AgentBudget`
+  default `max_runtime_s=30`). The `WorkflowRun` row already externalizes all resumable state
+  (variables/budget/current_node_id read from Postgres, not kept in process memory), so wiring
+  a Celery task to drive the same `run_workflow_now`/`resume_workflow_run` functions is additive
+  — but it is not done, and nothing async/queued runs today.
+
+  **Verification — re-run against the real dev stack; the migration gap above is closed.**
+  `ruff check` and `mypy app/` clean (206 source files — the initial draft needed four unused
+  `type: ignore` comments removed and two `bool()` casts added on `evaluate_condition()`'s
+  `==`/`!=` branches once mypy actually ran against it). Migration `0023` applied to the real
+  Postgres (`botforge-postgres-1`, port 5433), then downgraded and re-upgraded — clean both
+  directions, same check migration `0022` got. All 9 workflow paths confirmed in the live
+  OpenAPI schema. `tests/test_workflow_graph.py`'s 27 tests (graph validation, the no-`eval()`
+  condition parser incl. a direct code-injection regression case, template escaping,
+  linear/branching execution, approval pause/resume with real shared-budget accumulation,
+  tool-result sanitization at both the write and read point) plus `test_db.py` (needed
+  `workflows`/`workflow_versions`/`workflow_runs`/`workflow_steps` added to `EXPECTED_TABLES`)
+  all green. Full suite: **977 passed, 4 skipped, 1 pre-existing unrelated failure** (the same
+  `test_playground_without_handoff_feature_does_not_trigger` 502 Phase 1's entry already
+  documented and confirmed via `git stash` predates this track). **Still genuinely open, not
+  silently fixed:** no DB-backed integration test exists yet for the CRUD service/router layer
+  — `create_workflow`/`publish_version`/`run_workflow_now` have never been exercised over the
+  real HTTP client with RBAC/ownership checks, only the execution engine itself has coverage.
+
+  Tag: `agentic-phase-2-backend-complete`.
+
 - **docs/17 Phase 1 — Agentic Runtime (2026-08-19).** The first phase of the agentic
   runtime/builder track (`docs/17-AGENTIC-RUNTIME-AND-BUILDER.md`, triggered by name per
   CLAUDE.md §10b — not autonomous). Closes the biggest gap the repo-comparison analysis

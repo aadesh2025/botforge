@@ -18,6 +18,80 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-074: Visual Workflow Builder backend — mirror Agent/AgentVersion, reuse AgentBudget, no eval()
+- **Date:** 2026-08-19
+- **Status:** accepted (backend slice only — see Consequences for what is explicitly deferred)
+- **Context:** docs/17 Phase 2 (`docs/17-AGENTIC-RUNTIME-AND-BUILDER.md` §3, §7) calls for a
+  graph-based workflow engine: `workflows`/`workflow_versions`/`workflow_runs`/`workflow_steps`
+  in Postgres, executed via Celery, with pause/resume on an Approval node. Four design
+  questions had no single obviously-correct answer and are recorded here rather than picked
+  silently: (1) how to model draft/publish for a workflow, (2) how to bound a run's cost/steps,
+  (3) how to evaluate a Condition node's expression, (4) whether workflow execution needs its
+  own rollout flag the way Phase 1's agentic loop did.
+- **Decision.**
+  1. **`Workflow`/`WorkflowVersion` mirror `Agent`/`AgentVersion` exactly** — a stable identity
+     row with a `current_version_id` pointer, and immutable versioned rows underneath
+     (`status: draft|in_review|published|archived`, `UniqueConstraint(workflow_id, version)`).
+     Rejected inventing a different shape: the codebase already has one battle-tested
+     draft-publish pattern (`app/modules/agents/service.py`'s `publish_version`/`rollback`) and
+     a second one would be a second thing to maintain for no product benefit.
+  2. **A workflow run's budget IS an `app.chat.budget.AgentBudget`** (`WorkflowRun.budget`
+     persists it as JSON, reconstructed on resume), not a second bounding mechanism. This
+     wasn't just convenient — it gets docs/17 §2 rule 3's inheritance guarantee for free: a
+     future Sub-Agent node sharing the run's own budget object inherits the exact same
+     never-reset semantics `test_agent_budget.py` proved for chat in Phase 1, rather than
+     needing that rule re-implemented and re-proven for workflows.
+  3. **`evaluate_condition()` is a hand-rolled `var OP literal` parser — never `eval()`.**
+     docs/17 §11 rules out arbitrary code execution outright, and a Condition node is exactly
+     where a shortcut implementation reaches for `eval(expression, variables)`. Five operators
+     (`== != > < >= <= contains`), no boolean chaining; a malformed expression raises rather
+     than silently evaluating false, so an author sees their mistake instead of every branch
+     quietly taking the same path.
+  4. **No second rollout flag.** Phase 1's `agentic_loop_enabled` dual-gate exists because
+     Phase 1 changed the default behavior of every existing agent's chat turn. A workflow is a
+     brand-new object type nobody has until an org with `WORKFLOWS_WRITE` creates one — RBAC is
+     already the opt-in. Every run still gets a real, non-optional `AgentBudget` regardless.
+- **Alternatives considered:** Convex/LangGraph-style external state machine — rejected per
+  docs/17 §7's own instruction to reuse Postgres/Celery/SQLAlchemy, not adopt the reference
+  repos' vendor stack. A generic `eval()`-based condition node — rejected outright, see (3).
+  A `.child()`-style budget constructor for nested calls — rejected for the same reason ADR-070
+  rejected it in Phase 1: it is the exact mechanism that lets a nested call escape its parent's
+  ceiling.
+- **Consequences — explicitly NOT built in this slice, recorded so it isn't assumed done:**
+  - **No Celery wiring.** `run_workflow_now`/`resume_workflow_run` call
+    `app.workflows.graph.run_workflow` synchronously inside the request; a long-running graph
+    blocks the HTTP request for up to `max_runtime_s` (default 30s). The `WorkflowRun` row is
+    already the resumability boundary (variables/budget/current_node_id read from the DB, not
+    kept in process memory), so wiring a Celery task to call the same functions is additive,
+    not a rewrite — but it is not done, and nothing async/queued exists yet.
+  - **No React Flow canvas.** Backend + API only; docs/17's visual builder UI is unbuilt.
+  - **Seven node types shipped** (start, end, message, condition, set_variable, approval,
+    tool) of docs/17 §3.1's full CORE+TOOLS+AI+HUMAN catalog. Not built: switch, loop,
+    transform, delay, agent, sub-agent, get_variable (redundant — any node already reads a
+    variable by name via `{{path}}`). Adding one is a registry entry in
+    `graph.py`'s `_HANDLERS` plus an edge-selection case, not a rearchitecture.
+  - **No test-mode execution against a draft version** — `run_workflow_now` only runs a
+    workflow's *published* version. A builder needs to run an unpublished draft to test it
+    before publishing; that endpoint does not exist yet.
+  - **No Approval → `Handoff` integration.** docs/17 §1.1 says the Approval node should route
+    through the existing attention-queue model (ADR-057) so a paused workflow shows up
+    alongside conversation handoffs. It does not yet — an approval today is only visible via
+    `GET /v1/workflow-runs/{id}` returning `status: "paused_approval"`, not in the inbox.
+  - **Verification — re-run against the real dev stack, migration gap closed.** `ruff check`
+    and `mypy app/` clean (206 source files; the graph.py/service.py drafts needed four
+    `type: ignore` comments removed as genuinely unused and two `bool()` casts added on the
+    condition parser's `==`/`!=` branches once mypy was run for real). Migration `0023` applied
+    to the real Postgres (`botforge-postgres-1`, port 5433), then downgraded and re-upgraded —
+    clean both directions. All 9 workflow paths confirmed present in the live OpenAPI schema.
+    `test_workflow_graph.py`'s 27 tests plus `test_db.py` (which needed `workflows`/
+    `workflow_versions`/`workflow_runs`/`workflow_steps` added to `EXPECTED_TABLES`) all green,
+    and the full suite passes with them included. **Still genuinely missing, not silently
+    fixed:** no DB-backed integration test exists yet for the CRUD service/router layer
+    (`create_workflow`, `publish_version`, `run_workflow_now` over the real HTTP client, etc.)
+    — `test_workflow_graph.py` covers the execution engine thoroughly but never goes through
+    `app/workflows/router.py` or `service.py`'s RBAC/ownership checks. That gap is real and
+    open, unlike the migration gap this paragraph used to describe.
+
 ### ADR-073: Agentic loop rollout gate — platform AND org, both explicit, off by default; default budget numbers
 - **Date:** 2026-08-19
 - **Status:** accepted

@@ -17,22 +17,29 @@ TOOLS_MANAGE = "tools:manage"  # tools / channels / API keys
 ANALYTICS_VIEW = "analytics:view"
 READ = "read"  # read agents / KB
 INBOX_HANDLE = "inbox:handle"
+# docs/17 Phase 2 — the same split AGENTS_WRITE/AGENTS_PUBLISH already encodes: editing a
+# workflow draft is reversible and private, publishing changes what a live agent actually runs.
+WORKFLOWS_WRITE = "workflows:write"  # create/edit workflow drafts, run in test mode
+WORKFLOWS_PUBLISH = "workflows:publish"  # publish a workflow version / roll back
 
 ROLES = ("owner", "admin", "editor", "viewer", "operator")
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "owner": {
         ORG_MANAGE, MEMBERS_MANAGE, AGENTS_WRITE, AGENTS_PUBLISH, KB_MANAGE,
-        TOOLS_MANAGE, ANALYTICS_VIEW, READ, INBOX_HANDLE,
+        TOOLS_MANAGE, ANALYTICS_VIEW, READ, INBOX_HANDLE, WORKFLOWS_WRITE, WORKFLOWS_PUBLISH,
     },
     "admin": {
         MEMBERS_MANAGE, AGENTS_WRITE, AGENTS_PUBLISH, KB_MANAGE,
-        TOOLS_MANAGE, ANALYTICS_VIEW, READ, INBOX_HANDLE,
+        TOOLS_MANAGE, ANALYTICS_VIEW, READ, INBOX_HANDLE, WORKFLOWS_WRITE, WORKFLOWS_PUBLISH,
     },
     # The client role. Everything needed to shape, test and connect their own agent —
     # edit drafts, manage knowledge, wire up their own WhatsApp/Instagram credentials,
-    # work the inbox — but **not** AGENTS_PUBLISH: what goes live stays a staff decision.
-    "editor": {AGENTS_WRITE, KB_MANAGE, TOOLS_MANAGE, ANALYTICS_VIEW, READ, INBOX_HANDLE},
+    # work the inbox — but **not** AGENTS_PUBLISH / WORKFLOWS_PUBLISH: what goes live stays a
+    # staff decision.
+    "editor": {
+        AGENTS_WRITE, KB_MANAGE, TOOLS_MANAGE, ANALYTICS_VIEW, READ, INBOX_HANDLE, WORKFLOWS_WRITE,
+    },
     "viewer": {ANALYTICS_VIEW, READ},
     "operator": {ANALYTICS_VIEW, READ, INBOX_HANDLE},
 }

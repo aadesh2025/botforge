@@ -41,6 +41,9 @@ from app.realtime.hub import hub
 from app.tools.mcp_router import router as mcp_router
 from app.tools.router import router as tools_router
 from app.webhooks.router import router as webhooks_router
+from app.workflows.router import agent_workflows_router
+from app.workflows.router import router as workflows_router
+from app.workflows.router import runs_router as workflow_runs_router
 
 log = get_logger("app")
 
@@ -174,6 +177,9 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router)
     app.include_router(tools_router)
     app.include_router(mcp_router)
+    app.include_router(agent_workflows_router)
+    app.include_router(workflows_router)
+    app.include_router(workflow_runs_router)
     app.include_router(public_router)
     app.include_router(channels_router)
     app.include_router(inbox_router)
