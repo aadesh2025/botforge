@@ -18,6 +18,182 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-073: Agentic loop rollout gate — platform AND org, both explicit, off by default; default budget numbers
+- **Date:** 2026-08-19
+- **Status:** accepted
+- **Context:** docs/17-AGENTIC-RUNTIME-AND-BUILDER.md §12 open question 2 asked what the
+  default `max_steps`/`max_tool_calls`/`max_runtime_s`/`max_cost_usd` should be, and how the
+  loop should be rolled out — this is new attack surface (a multi-step tool loop) and new,
+  unbounded-until-capped cost exposure (a live model call per step), so it could not ship with
+  the same "on unless an org opts out" polarity `Organization.guard_injection_enabled` uses.
+  That polarity is correct for a guardrail (safer to default on) and wrong for a cost/attack-
+  surface feature (safer to default off).
+- **Decision.** Two independent, both-must-be-true switches: `settings.agentic_loop_enabled`
+  (platform-wide, defaults `False`) AND `Organization.agentic_loop_enabled` (per-org, `NULL`/
+  `False` both mean off — an org must be explicitly flipped `True`). Implemented as
+  `app.chat.budget.agentic_loop_enabled(org_enabled)`, called from `turn_budget()`, which
+  itself returns `None` (today's unbounded/untraced behavior) whenever either switch is off or
+  the turn has no tools to loop over. Default budget: `max_steps=5`, `max_tool_calls=5`,
+  `max_runtime_s=30.0`, `max_cost_usd=0.05` — one flat default for every org (no free/paid
+  tiering yet, since billing itself is still deferred per CLAUDE.md §7/Phase 18), sized so
+  `max_cost_usd` alone already bounds a trial org's worst case per turn regardless of how
+  generous the other three limits turn out to be in practice.
+- **Alternatives considered:** (1) mirror `guard_injection_enabled`'s on-by-default-with-opt-out
+  polarity — rejected, a safety filter and a new autonomous-loop capability should not share a
+  default-on stance. (2) let the org's flag alone gate it (no platform switch) — rejected, a
+  single org accidentally opting in should not be able to turn on a capability the platform
+  itself has not decided to support yet across every org's infrastructure/cost budget.
+  (3) per-plan-tier defaults — deferred until there are plan tiers to key off; the flat default
+  is deliberately conservative rather than wrong-and-tier-specific.
+- **Consequences:** every existing turn is completely unaffected (`budget=None` path, unchanged
+  behavior, per `run_turn`'s own docstring) until an operator explicitly flips both switches for
+  a specific org — matches docs/17-IMPLEMENTATION-PROMPT.md Step 0's instruction to stop and
+  ask the human before enabling this for the live `aurozenai` agent. Follow-up: once real usage
+  data exists, revisit whether `max_cost_usd` should scale with plan tier rather than staying a
+  single platform-wide constant.
+
+### ADR-072: botpress SDK/CLI — the typed `IntegrationDefinition` contract (Phase 5 reference only, nothing built)
+- **Date:** 2026-08-19
+- **Status:** accepted (reference decision — no code changes; Phase 5 is deferred per docs/17 §7)
+- **Context:** docs/17-IMPLEMENTATION-PROMPT.md Step 0 requires reading
+  `github.com/botpress/botpress` (the public integration SDK/Hub/CLI monorepo — **not** the
+  closed-source chatbot engine) before Phase 1 starts, to inform §8's future
+  `IntegrationDefinition` contract. Read `packages/sdk/src/package.ts`,
+  `integrations/telegram/integration.definition.ts`,
+  `integrations/gmail/integration.definition.ts` + its sibling `src/index.ts`,
+  `interfaces/hitl/interface.definition.ts`, and `packages/cli/src/command-implementations/
+  deploy-command.ts`.
+- **Decision — borrow the shape, not the platform.** An `IntegrationDefinition` is
+  `{name, version, configuration(s), actions, events, channels, states, identifier/auth,
+  interfaces}` where every leaf (action input/output, event payload, config field) is a typed
+  schema (Zod in botpress; Pydantic for BotForge) that doubles as both the validator and the
+  UI-form generator (`.title()/.describe()/.secret()/.hidden()` annotations in
+  `package.ts`) — the schema *is* the contract, authored once. Borrow the **definition/
+  implementation split** seen in `gmail/integration.definition.ts` (a thin file importing a
+  sibling `./definitions` module) vs. `src/index.ts` (handlers keyed by the same action/channel
+  names) — BotForge's version keeps a typed contract module separate from its handlers so a
+  deploy-time check can prove an implementation actually satisfies its declared contract.
+  Borrow the `interfaces/` mechanism (`interfaces/hitl/interface.definition.ts`: a shared
+  contract an integration opts into via `interfaces: {...}` in its own definition) as the
+  eventual path to one "messaging channel" interface instead of bespoke WhatsApp/Instagram/
+  Messenger/Telegram modules — confirmed this is **not** a Phase 1–4 refactor; existing
+  channels migrate opportunistically, per docs/17 §8. Borrow the CLI's deploy-visibility rule
+  for a future `bf deploy`: private-by-default, `--visibility <public|private|unlisted>`, and —
+  the detail worth keeping — `_deployIntegration` **refuses to silently overwrite a
+  publicly-visible version**, forcing a version bump instead. That "publishing is a one-way,
+  must-be-explicit door" instinct is the same one already encoded in `AGENTS_WRITE` /
+  `AGENTS_PUBLISH` (`app/core/rbac.py`) and should carry over to `WORKFLOWS_PUBLISH`.
+- **Alternatives considered:** none evaluated in depth — Phase 5 is explicitly deferred behind
+  Phases 1–4 proving themselves against a real client workflow (docs/17 §7), and behind the
+  human's answer to Step 0 question 4 (is Phase 5 in scope for v1 at all).
+- **Consequences:** none yet — no code changes this session. **Explicitly left behind:**
+  Botpress Cloud's hosted control plane (`ApiClient`, workspace-scoped auth, a central Hub that
+  stores/versions/serves integrations) — BotForge has no equivalent and Phase 5 does not invent
+  one; and the three-way `bots`/`plugins`/`integrations` package-kind split — BotForge's spec
+  only needs the integration + interface split, not a third "plugin" concept.
+
+### ADR-071: open-agent-builder — node/state-machine shape, and why BotForge's MCP client must never use Anthropic's native connector
+- **Date:** 2026-08-19
+- **Status:** accepted — informs Phase 2 design (not built this session) and one Phase 1 requirement (item 4 below)
+- **Context:** docs/17-IMPLEMENTATION-PROMPT.md Step 0 requires reading
+  `github.com/firecrawl/open-agent-builder`. Read `lib/workflow/types.ts`,
+  `lib/workflow/langgraph.ts` (`LangGraphExecutor`), `lib/mcp/mcp-registry.ts`, and
+  `lib/workflow/executors/agent.ts`.
+- **Decision, four parts.**
+  1. **Node config:** their `NodeData` is one flat interface with ~40 optional fields shared by
+     every node type, switched on by a string `type` at runtime (`lib/workflow/types.ts`).
+     Explicitly **not** copying this — BotForge's `workflow_steps.node_config` stays free-form
+     jsonb per row (per docs/17 §3.1), but the code that reads it type-narrows per `node_type`
+     rather than sharing one giant struct.
+  2. **State/event vocabulary:** borrow their per-node status vocabulary — `pending | running |
+     completed | failed | pending-approval` — as the direct model for `workflow_steps.status`,
+     adding `awaiting_approval` (already in the docs/17 §3 schema) and dropping their
+     Arcade-specific `pending-authorization` (no OAuth-broker equivalent exists in BotForge).
+     Borrow the **loop-node shape**: an iteration counter held in run-scoped variables, read by
+     a conditional router each pass, clamped by a **code-level ceiling below the
+     user-configurable default** (`parseMaxIterations()` clamps to `ABSOLUTE_MAX=100`
+     regardless of a configured default of 10, confirmed in source) — reuse this two-tier cap
+     (org-configurable default, hard platform ceiling) for BotForge's `Loop` node and for
+     `max_steps` generally (§5).
+  3. **Approval/pause state:** the minimum durable fields their `interrupt()` call persists are
+     `{authId, nodeId, toolName, status, message, threadId, executionId}`. Map this onto
+     `workflow_runs.status = 'paused_approval'` plus a `Handoff` row (ADR-057's existing
+     attention-severity axis) carrying the workflow context — **not** a second
+     human-in-the-loop primitive, exactly as docs/17 §1.1 instructs. Resume = Celery re-entering
+     at the `workflow_steps` row with `status='awaiting_approval'`; Postgres rows are the
+     checkpoint, no LangGraph `thread_id`/`MemorySaver` equivalent needed.
+  4. **MCP must be provider-agnostic — confirmed why theirs isn't.** Read
+     `lib/workflow/executors/agent.ts:123-152`: their Anthropic-only MCP path calls
+     `client.beta.messages.create({..., mcp_servers: [...], betas: ['mcp-client-2025-04-04']})`
+     — Anthropic's own server-side remote-MCP-connector beta, where Anthropic's API talks to the
+     MCP server directly. Every other provider instead flattens MCP tools into OpenAI-style
+     function schemas and runs its own client-side call/execute/append loop. **Decision:
+     `app/tools/mcp_client.py` always uses the client-side loop, uniformly across every
+     provider in `app/llm/catalog.py`, never Anthropic's native connector** — so MCP
+     tool-calling behaves identically regardless of which provider an org's agent runs on. This
+     is the direct fix for the limitation docs/17 §1.1 flags by name.
+- **Alternatives considered:** LangGraph's `interrupt()`/`Command(resume=...)`/`MemorySaver` —
+  rejected per docs/17 §1.1, and their own code agrees: a comment reads *"TODO: Save approval
+  state to database... should be handled by the API route"* — `MemorySaver` is in-process and
+  does not survive a restart, exactly the gap Phase 2's DoD closes with a
+  kill-the-worker-mid-run resume test.
+- **Consequences:** none yet — Phase 2 is not being built this session; this ADR is design
+  input for when it is. Their "MCP Registry" is a static hardcoded catalog with no working
+  connection test (`lib/mcp/mcp-registry.ts`), which confirms docs/17 §4's registration +
+  test-connection API is genuinely new work, not something to port.
+
+### ADR-070: OpenManus — the think→act→observe loop and MCP client shape, and the sub-agent budget gap BotForge must not repeat
+- **Date:** 2026-08-19
+- **Status:** accepted
+- **Context:** docs/17-IMPLEMENTATION-PROMPT.md Step 0 requires reading
+  `github.com/FoundationAgents/OpenManus` before Phase 1. Read `app/agent/base.py`,
+  `app/agent/manus.py`, `app/agent/toolcall.py`, `app/tool/mcp.py`, `app/tool/base.py`, and
+  `app/flow/base.py` + `app/flow/planning.py`. BotForge already has a bounded tool loop —
+  `run_turn()` in `app/chat/runtime.py` (shipped under ADR-024): an iteration-capped loop with a
+  pluggable `ToolExecutor` callback, where every tool result is passed through
+  `neutralize_injections()` before re-entering model context as a `role="tool"` message. Phase 1
+  extends this existing mechanism; it does not replace it.
+- **Decision — borrow the loop shape and the tool-interface shape, explicitly do not borrow the
+  (missing) sanitization or budget propagation.**
+  - `BaseAgent.run()` drives `while current_step < max_steps: step()`; `ToolCallAgent.think()`
+    calls the model and appends the assistant's tool-call message to memory, `act()` executes
+    each call and appends the result — structurally the same shape as `run_turn`'s
+    iteration loop (`for iteration in range(iters): ... messages.append(...); continue`).
+    `max_steps=20` / `max_observe=10000` are literal class attributes on `Manus`, not config —
+    BotForge's equivalents are `Organization`-scoped overridable settings per §5, following the
+    existing `guard_injection_enabled` per-org-override pattern (sibling of ADR-055).
+  - Borrow `MCPClientTool`'s tool shape (name + JSON-schema `parameters` + async `execute()`
+    returning a structured result) as the calling convention `app/tools/mcp_client.py` uses so
+    n8n/built-in/MCP tools share one interface — consistent with ADR-024's existing "tools as
+    rows, decoupled executor" design. Borrow `MCPClients`' explicit dual-transport model —
+    `connect_sse(url, server_id)` vs. `connect_stdio(command, args, server_id, env)`, chosen per
+    registered server (not autodetected), one teardown scope per server — directly for the new
+    `mcp_servers` table's `transport` column.
+  - **Explicitly improve on, not copy: sanitization.** Confirmed by reading `act()` in
+    `app/agent/toolcall.py` — the raw tool-output string goes straight into
+    `Message.tool_message(content=result, ...)` with **zero sanitization anywhere in the path**.
+    BotForge's `neutralize_injections()` step is mandatory and already shipped (docs/11 Phase A);
+    Phase 1 extends it to cover MCP tool results and sub-agent results too, per docs/17 §6 — no
+    exceptions, as that section states outright.
+- **The gap that matters most: sub-agent budgets are not inherited, confirmed in source, not
+  assumed.** `app/flow/base.py`'s `BaseFlow` holds a `Dict[str, BaseAgent]` with **zero**
+  budget-related fields — nothing passed at construction, nothing propagated to child agents.
+  `grep max_steps app/flow/planning.py` returns nothing. Each agent in a flow keeps whatever
+  `max_steps` it was individually constructed with (`BaseAgent`=10, `ToolCallAgent`=30,
+  `Manus`=20 — independent class defaults). **A sub-agent spawned mid-flow gets a fresh,
+  independent budget, never a remainder deducted from the parent's.** This is precisely the
+  failure mode docs/17 §2 rule 3 pre-emptively bans ("budgets are inherited, never reset"), and
+  is why the Phase 1 Definition of Done requires a test proving a nested call decrements the
+  *parent's* `workflow_runs.budget`/turn budget rather than allocating its own.
+- **Alternatives considered:** OpenManus's Pydantic-`BaseModel`-as-agent-state — rejected,
+  conflates config schema with mutable runtime state and has no persistence path beyond
+  in-process `Memory` (a run's trace dies with the process); BotForge's state is Postgres rows
+  (`agent_steps`) from the start.
+- **Consequences:** none yet — this ADR sets the Phase 1 implementation direction; no runtime
+  code changed in this session. Confirms Phase 1's budget-inheritance test and its MCP/n8n/
+  sub-agent sanitization test (docs/17-IMPLEMENTATION-PROMPT.md Phase 1 DoD) are targeting real,
+  observed gaps in the reference pattern, not hypothetical ones.
+
 ### ADR-069: Memory ceilings everywhere, reservations on the datastores, and no CPU cap on the latency path
 - **Date:** 2026-08-17
 - **Status:** accepted

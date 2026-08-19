@@ -14,7 +14,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat import variables
+from app.chat.agent_trace import persist_agent_steps
 from app.chat.assembly import compose_system_prompt
+from app.chat.budget import agentic_loop_enabled, turn_budget
 from app.chat.handoff import trigger_handoff, wants_handoff
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
@@ -625,21 +627,27 @@ async def _persist_playground_turn(
             content=user_message,
         )
     )
-    session.add(
-        DBMessage(
-            conversation_id=conv.id,
-            organization_id=conv.organization_id,
-            role="assistant",
-            content=(result.content or "").strip() or None,
-            citations=result.citations,
-            provider=result.provider or None,
-            model=result.model or None,
-            tokens_prompt=result.prompt_tokens,
-            tokens_completion=result.completion_tokens,
-            cost_micros=result.cost_micros,
-            latency_ms=latency_ms,
-            error=result.error,
-        )
+    assistant_msg = DBMessage(
+        conversation_id=conv.id,
+        organization_id=conv.organization_id,
+        role="assistant",
+        content=(result.content or "").strip() or None,
+        citations=result.citations,
+        provider=result.provider or None,
+        model=result.model or None,
+        tokens_prompt=result.prompt_tokens,
+        tokens_completion=result.completion_tokens,
+        cost_micros=result.cost_micros,
+        latency_ms=latency_ms,
+        error=result.error,
+    )
+    session.add(assistant_msg)
+    # `id` is a Python-side UUIDv7 default, already set on the instance before flush — an
+    # operator testing the agentic loop from the Playground gets a trace too, same as a real
+    # conversation (see conversations/service.py `_finalize_turn`).
+    await persist_agent_steps(
+        session, result,
+        conversation_id=conv.id, organization_id=conv.organization_id, message_id=assistant_msg.id,
     )
     conv.last_message_at = now
     conv.last_inbound_at = now
@@ -649,7 +657,10 @@ async def _persist_playground_turn(
 async def _playground_tooling(
     session: AsyncSession, ctx: OrgContext, agent: Agent, version: AgentVersion, provider: ChatProvider
 ) -> tuple[list[Any], ToolExecutor | None]:
-    specs, executor = await build_tooling(session, ctx.org.id, agent, version, None)
+    include_mcp = agentic_loop_enabled(ctx.org.agentic_loop_enabled)
+    specs, executor = await build_tooling(
+        session, ctx.org.id, agent, version, None, include_mcp=include_mcp
+    )
     if specs and executor is not None and provider.supports_tools():
         return specs, executor
     return [], None
@@ -697,6 +708,7 @@ async def playground_stream(
     specs, executor = await _playground_tooling(session, ctx, agent, version, provider)
     if specs:
         req.tools = specs
+    budget = turn_budget(ctx.org.agentic_loop_enabled, has_tools=executor is not None)
     conv = await _playground_conversation(session, ctx, agent, data.conversation_id)
     # Emitted before the first token so the client can thread the *next* turn onto this
     # conversation even if the stream is abandoned halfway.
@@ -705,7 +717,7 @@ async def playground_stream(
     t0 = time.perf_counter()
     async for ev in run_turn(
         provider, req, [c.model_dump(mode="json") for c in citations], result,
-        executor=executor, max_iters=settings.tool_max_iterations,
+        executor=executor, max_iters=settings.tool_max_iterations, budget=budget,
         # The Playground shows the operator what the model actually said — same reason it
         # withholds `fallback_message` and re-raises provider errors (docs/11 §4-L5).
         guard_output=False,
@@ -761,12 +773,13 @@ async def playground_once(
     specs, executor = await _playground_tooling(session, ctx, agent, version, provider)
     if specs:
         req.tools = specs
+    budget = turn_budget(ctx.org.agentic_loop_enabled, has_tools=executor is not None)
     conv = await _playground_conversation(session, ctx, agent, data.conversation_id)
     result = TurnResult()
     t0 = time.perf_counter()
     async for _ev in run_turn(
         provider, req, [c.model_dump(mode="json") for c in citations], result,
-        executor=executor, max_iters=settings.tool_max_iterations,
+        executor=executor, max_iters=settings.tool_max_iterations, budget=budget,
         # The Playground shows the operator what the model actually said — same reason it
         # withholds `fallback_message` and re-raises provider errors (docs/11 §4-L5).
         guard_output=False,

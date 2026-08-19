@@ -144,7 +144,8 @@ with what shipped, tag git, and **immediately start the next phase**. Do not wai
 10. `docs/09-DEPLOYMENT.md`
 11. `docs/10-TESTING.md`
 12. `docs/11-SAFETY-GUARDRAILS.md` ← **read for context, do NOT execute unprompted.** See below.
-13. `docs/08-PHASES.md` ← then execute this, task by task, no stopping.
+13. `docs/17-AGENTIC-RUNTIME-AND-BUILDER.md` ← **read for context, do NOT execute unprompted.** See §10b.
+14. `docs/08-PHASES.md` ← then execute this, task by task, no stopping.
 
 ### 10a. The safety track (`docs/11-*`) is read-always, execute-on-request
 
@@ -169,6 +170,34 @@ The three files and what each is for:
 
 Order from here: **A.1 → B → C → D → E → F → G.** Do not start E before D is green; without the
 red-team corpus there is no way to tell a real improvement from luck.
+
+### 10b. The agentic runtime / builder track (`docs/17-*`) is read-always, execute-on-request
+
+`docs/17-AGENTIC-RUNTIME-AND-BUILDER.md` is the spec for BotForge's three biggest identified
+product/backend gaps — a multi-step agentic tool loop, an in-app visual workflow builder, and
+a pluggable integration contract — each modeled on a specific open-source reference repo
+(`firecrawl/open-agent-builder`, `FoundationAgents/OpenManus`, `botpress/botpress`) but built
+natively on BotForge's existing stack, not by adopting theirs. **Read it before touching
+`app/chat/runtime.py`, adding any tool-calling capability, or building anything under a
+`workflows`/`agent_steps` table** — it explains why the security rules in its §2 and §6 exist
+and references the exact prior incidents (ADR-055, ADR-044) that justify them.
+
+Like the safety track, it is **deliberately outside the §1 autonomous contract.** This adds a
+new attack surface (multi-step tool use), new cost exposure (autonomous loops), and touches
+`app/chat/` — the file docs/11 §10a already flags as needing this exact caution. Do not start
+Phase 1 on your own initiative. Execute a phase only when asked for it by name.
+
+The two files and what each is for:
+
+| File | Role |
+|---|---|
+| `docs/17-AGENTIC-RUNTIME-AND-BUILDER.md` | The spec: reference-repo study notes, data model, security rules, phased scope, open questions for the human. |
+| `docs/17-IMPLEMENTATION-PROMPT.md` | Master prompt, Phases 1–5. **Step 0 requires reading the three reference repos' actual source (not just READMEs) and asking the human 5 specific questions before Phase 1 starts** — do not skip this step. |
+
+Order: **Phase 1 (Agentic Runtime) → Phase 2 (Visual Builder) → Phase 3 (Agent Testing) →
+Phase 4 (Version/Approval) → Phase 5 (Integration SDK).** Do not start Phase 2 before Phase
+1's red-team fixtures (new tool-result-injection cases) are green, for the same reason docs/11
+gates Phase E on Phase D.
 
 Two standing rules from that spec, repeated here because they are easy to violate by accident:
 

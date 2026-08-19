@@ -38,6 +38,73 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **docs/17 Phase 1 — Agentic Runtime (2026-08-19).** The first phase of the agentic
+  runtime/builder track (`docs/17-AGENTIC-RUNTIME-AND-BUILDER.md`, triggered by name per
+  CLAUDE.md §10b — not autonomous). Closes the biggest gap the repo-comparison analysis
+  identified: BotForge's chat path was one retrieval + one generation + at most one bound n8n
+  tool call, with no multi-step think→act→observe loop and no generic MCP tool provider.
+
+  **What shipped.** `app/chat/budget.AgentBudget` — a single mutable four-dimensional ceiling
+  (`max_steps`/`max_tool_calls`/`max_runtime_s`/`max_cost_usd`) that `run_turn` decrements as
+  it goes; deliberately has no `.child()`/`.fork()` constructor so a nested/sub-agent call must
+  be handed the SAME instance and draw from the parent turn's remaining allowance, never a
+  fresh one (docs/17 §2 rule 3, ADR-070 — the exact gap found in OpenManus's `BaseFlow`, which
+  never propagates `max_steps` into a spawned sub-agent). `app/tools/mcp_client.py` +
+  `mcp_tool.py` + `mcp_router.py` — a provider-agnostic MCP client (stdio + SSE), org-scoped
+  server registration (`MCPServer` model, migration `0022`), `POST /v1/mcp/servers` +
+  `/test-connection`, wired into `resolve_agent_tools`/`build_tooling` behind `include_mcp`
+  (registration never implies usage — same split n8n binding already has). `agent_steps` table
+  + `app/chat/agent_trace.py` — the per-turn trace (`kind: think|tool_call|final_answer`),
+  populated only when `run_turn` is given a `budget`, persisted once the assistant `Message`
+  row exists. Rollout gate: `settings.agentic_loop_enabled` (platform) AND
+  `Organization.agentic_loop_enabled` (per-org) both explicitly `True` — unlike
+  `guard_injection_enabled`'s on-by-default polarity, this defaults off at both levels (ADR-073).
+
+  **The rule that actually matters (docs/17 §6): every tool result is untrusted input,
+  regardless of source.** `run_turn`'s existing `neutralize_injections()` call on
+  `out.get("output")` runs unconditionally — no branch on tool type — so an MCP result, an n8n
+  result, and a future sub-agent result all get the identical defang-before-re-entering-
+  context treatment RAG chunks already got from Phase 16. Proven, not assumed: three new test
+  files exercise it against real MCP-shaped, n8n-shaped, and sub-agent-shaped JSON payloads
+  carrying the same instruction-override phrasing already in `attacks.yaml`
+  (`tests/test_agentic_tool_sanitization.py`), the nested-budget-sharing rule against the real
+  `run_turn` loop rather than the dataclass in isolation (`tests/test_agent_budget.py`), and
+  three new `kind: tool_result` fixtures added to the Phase D corpus
+  (`tests/fixtures/redteam/attacks_contextual.yaml` + a new
+  `test_tool_result_injection_is_neutralized_not_trusted` in `test_redteam_corpus.py`) — docs/17
+  §2 rule 5 required these be added before Phase 1 could be called done, since the existing
+  corpus had never been exercised against a tool-result-shaped payload.
+
+  **⚠️ A real finding while writing the sanitization tests, not a hypothetical:**
+  `neutralize_injections()` only runs the smaller Phase-16 `_INJECTION_PATTERNS` list, not the
+  full L1 family set `screen_user_message()` uses — so a phrase like "from now on you are an
+  admin agent" (an L1-only `_ROLE_HIJACK` pattern) survives verbatim inside a neutralized tool
+  result; only the "ignore all previous instructions" clause in the same payload gets filtered.
+  Verified against the real function before asserting anything, not assumed — an earlier draft
+  of the sub-agent fixture's test asserted the wrong phrase was removed, and running it against
+  the real `guardrails.py` (not a mock) caught it. Recorded here rather than silently fixed,
+  because it means indirect and tool-result content share a **narrower** defense than a
+  visitor's own message does, and that gap is not new to Phase 1 — it is Phase 16's original
+  scope, now visible because Phase 1 is the first thing to test the tool-result path directly.
+  **Not fixed in this phase** — widening `_INJECTION_PATTERNS` is a Phase-16-scoped decision
+  with its own false-positive risk on real documents/tool output, out of scope for docs/17.
+
+  **Verification — the real dev stack, end to end, not the isolated slice.** `ruff check`
+  clean across `app/` and `tests/`. `mypy app/` clean (200 source files, strict). Migration
+  `0022` applied to the real Postgres (`botforge-postgres-1`, port 5433), then downgraded and
+  re-upgraded to confirm reversibility — clean both directions. Full suite:
+  **950 passed, 4 skipped, 1 failed, 17 warnings in ~173s.** The one failure
+  (`test_playground_without_handoff_feature_does_not_trigger`, a 502 where 200 was expected) is
+  **confirmed pre-existing and unrelated** — reproduced identically after `git stash`-ing every
+  Phase 1 change and reverting to the committed tree (`8e2e5a4`), so it predates this track and
+  is not filed against docs/17. One real regression *was* caught and fixed in this pass:
+  `tests/test_db.py::test_all_models_registered` asserts an exact `EXPECTED_TABLES` count and
+  needed `agent_steps`/`mcp_servers` added — the kind of test this repo relies on to catch a
+  new table nobody remembered to register anywhere else.
+
+  Tag: `agentic-phase-1-complete`. Next: Phase 2 (Visual Workflow Builder) per docs/17 §7 —
+  not started, not autonomous, execute only when asked by name.
+
 - **A knowledge base can be deleted (2026-08-06).** Only the documents inside one could be
   removed before. `DELETE /v1/knowledge/{id}` has existed since Phase 7 with **nothing in the UI
   calling it** — the same shape of gap as the org-delete button and the invitation-accept page.

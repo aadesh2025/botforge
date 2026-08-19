@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat import attention, guard_models, guardrails, policy_guard, variables
 from app.chat.assembly import build_messages, compose_system_prompt
+from app.chat.budget import agentic_loop_enabled, turn_budget
 from app.chat.handoff import trigger_handoff, wants_handoff
 from app.chat.pii import build_allowlist
 from app.chat.runtime import TurnResult, run_turn
@@ -226,21 +227,31 @@ class InboundTurn:
             provider = RefusalProvider(guardrails.INJECTION_REDIRECT)
             citations = []
             executor = None
+            budget = None
         elif topics and guardrails.matches_blocked_topic(self.message, topics):
             provider = RefusalProvider(self.version.fallback_message or _DEFAULT_REFUSAL)
             citations = []
             executor = None
+            budget = None
         else:
-            specs, executor = await build_tooling(session, org_id, self.agent, self.version, conv.id)
+            org_for_flags = await self._org()
+            include_mcp = agentic_loop_enabled(org_for_flags.agentic_loop_enabled if org_for_flags else None)
+            specs, executor = await build_tooling(
+                session, org_id, self.agent, self.version, conv.id, include_mcp=include_mcp
+            )
             if specs and executor is not None and provider.supports_tools():
                 req.tools = specs
             else:
                 executor = None
+            budget = turn_budget(
+                org_for_flags.agentic_loop_enabled if org_for_flags else None,
+                has_tools=executor is not None,
+            )
 
         t0 = time.perf_counter()
         async for ev in run_turn(
             provider, req, [c.model_dump(mode="json") for c in citations], self.result,
-            executor=executor, max_iters=settings.tool_max_iterations,
+            executor=executor, max_iters=settings.tool_max_iterations, budget=budget,
             fallback_message=self.version.fallback_message or _DEFAULT_PROVIDER_FAILURE,
             protected_prompt=system_prompt,
             pii_allowlist=await self._pii_allowlist(),

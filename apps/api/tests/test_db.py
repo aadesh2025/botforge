@@ -24,6 +24,8 @@ EXPECTED_TABLES = {
     "api_keys", "webhook_endpoints", "webhook_deliveries",
     "audit_logs", "usage_records", "quotas", "subscriptions",
     "feature_flags", "help_articles", "campaigns", "widget_configs",
+    # docs/17 Phase 1 (agentic runtime): the per-turn trace and org-scoped MCP registry.
+    "agent_steps", "mcp_servers",
 }
 
 

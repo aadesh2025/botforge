@@ -38,6 +38,7 @@ from app.modules.orgs.router import router as orgs_router
 from app.modules.public.router import router as public_router
 from app.rag import converters, rerank
 from app.realtime.hub import hub
+from app.tools.mcp_router import router as mcp_router
 from app.tools.router import router as tools_router
 from app.webhooks.router import router as webhooks_router
 
@@ -172,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router)
     app.include_router(conversations_router)
     app.include_router(tools_router)
+    app.include_router(mcp_router)
     app.include_router(public_router)
     app.include_router(channels_router)
     app.include_router(inbox_router)

@@ -13,7 +13,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat import guard_models, guardrails, memory, variables
+from app.chat.agent_trace import persist_agent_steps
 from app.chat.assembly import build_messages, compose_system_prompt, instruction_prompt_of
+from app.chat.budget import AgentBudget, agentic_loop_enabled, turn_budget
 from app.chat.pii import build_allowlist
 from app.chat.runtime import ToolExecutor, TurnResult, run_turn
 from app.core import rbac
@@ -241,7 +243,9 @@ async def _maybe_summarize(session: AsyncSession, org_id: uuid.UUID, conv: Conve
 # ── Chat runtime ─────────────────────────────────────────────────────────────────
 async def _prepare_turn(
     session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID, data: schemas.ChatRequest, stream: bool
-) -> tuple[Conversation, ChatProvider, ChatRequest, list[dict[str, Any]], ToolExecutor | None]:
+) -> tuple[
+    Conversation, ChatProvider, ChatRequest, list[dict[str, Any]], ToolExecutor | None, AgentBudget | None
+]:
     agent = await _get_agent(session, ctx, agent_id)
     version = await _live_version(session, agent)
     conv = await _get_or_create_conversation(session, ctx, agent, data.conversation_id)
@@ -316,25 +320,37 @@ async def _prepare_turn(
     # blocked topic uses the agent's own refusal line.
     topics = guardrails.blocked_topics_for(version.persona)
     if guard.blocked or l2_blocked:
-        return conv, RefusalProvider(guardrails.INJECTION_REDIRECT), req, [], None
+        return conv, RefusalProvider(guardrails.INJECTION_REDIRECT), req, [], None, None
     if topics and guardrails.matches_blocked_topic(data.message, topics):
         provider = RefusalProvider(_refusal_text(version))
-        return conv, provider, req, [], None
+        return conv, provider, req, [], None, None
 
     # Tool calling: attach the agent's enabled tools when the provider supports them.
-    specs, executor = await build_tooling(session, ctx.org.id, agent, version, conv.id)
+    # MCP tools are only attached (and a budget only built) when the agentic runtime is on
+    # for this org — docs/17 Phase 1's platform-and-per-org flag, off by default.
+    include_mcp = agentic_loop_enabled(ctx.org.agentic_loop_enabled)
+    specs, executor = await build_tooling(
+        session, ctx.org.id, agent, version, conv.id, include_mcp=include_mcp
+    )
     if specs and executor is not None and provider.supports_tools():
         req.tools = specs
     else:
         executor = None
-    return conv, provider, req, [c.model_dump(mode="json") for c in citations], executor
+    budget = turn_budget(ctx.org.agentic_loop_enabled, has_tools=executor is not None)
+    return conv, provider, req, [c.model_dump(mode="json") for c in citations], executor, budget
 
 
 async def _finalize_turn(
     session: AsyncSession, conv: Conversation, result: TurnResult, latency_ms: int, first_text: str
 ) -> Message:
-    """Persist the assistant message, bump the conversation, and maybe summarize. Reused by public chat."""
+    """Persist the assistant message, bump the conversation, and maybe summarize. Reused by
+    the widget/channel path (chat/inbound.py) as well as the dashboard chat below — one place
+    to also persist `result.agent_steps`, so every turn-finishing path traces identically."""
     msg = _persist_assistant_message(session, conv, result, latency_ms)
+    await persist_agent_steps(
+        session, result,
+        conversation_id=conv.id, organization_id=conv.organization_id, message_id=msg.id,
+    )
     conv.last_message_at = _now()
     if not conv.title:
         conv.title = first_text[:80]
@@ -354,7 +370,9 @@ async def chat_events(
 ) -> AsyncIterator[StreamEvent]:
     """Yield StreamEvents for one turn, persisting user + assistant messages. SSE/WS format upstream."""
     rbac.require_permission(ctx.role, rbac.READ)
-    conv, provider, req, citations, executor = await _prepare_turn(session, ctx, agent_id, data, stream=True)
+    conv, provider, req, citations, executor, budget = await _prepare_turn(
+        session, ctx, agent_id, data, stream=True
+    )
 
     # Tell the client which conversation this is (esp. for a freshly created one).
     yield StreamEvent(type="conversation", conversation_id=str(conv.id))
@@ -363,7 +381,7 @@ async def chat_events(
     t0 = time.perf_counter()
     async for ev in run_turn(
         provider, req, citations, result, executor=executor,
-        max_iters=settings.tool_max_iterations,
+        max_iters=settings.tool_max_iterations, budget=budget,
         protected_prompt=instruction_prompt_of(req.messages),
         pii_allowlist=build_allowlist(list(ctx.org.public_contacts or [])),
     ):
@@ -385,13 +403,15 @@ async def chat_once(
     session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID, data: schemas.ChatRequest
 ) -> dict[str, Any]:
     rbac.require_permission(ctx.role, rbac.READ)
-    conv, provider, req, citations, executor = await _prepare_turn(session, ctx, agent_id, data, stream=False)
+    conv, provider, req, citations, executor, budget = await _prepare_turn(
+        session, ctx, agent_id, data, stream=False
+    )
 
     result = TurnResult()
     t0 = time.perf_counter()
     async for _ev in run_turn(
         provider, req, citations, result, executor=executor,
-        max_iters=settings.tool_max_iterations,
+        max_iters=settings.tool_max_iterations, budget=budget,
         protected_prompt=instruction_prompt_of(req.messages),
         pii_allowlist=build_allowlist(list(ctx.org.public_contacts or [])),
     ):

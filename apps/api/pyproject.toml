@@ -53,6 +53,9 @@ dependencies = [
     # compatibility checking for a third-party stub's convenience. Revisit when the API image
     # moves off 3.11.
     "numpy<2.5",
+    # Generic MCP tool provider (docs/17 Phase 1, ADR-070). Official SDK — gives us the
+    # stdio and SSE ClientSession transports rather than hand-rolling the wire protocol.
+    "mcp>=1.0",
 ]
 
 [dependency-groups]

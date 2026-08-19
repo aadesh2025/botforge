@@ -17,7 +17,10 @@ class BuiltinToolOut(BaseModel):
 
 class CreateToolRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
-    type: str = Field(pattern="^(builtin|http)$")
+    # "mcp" requires config.server_id + config.tool_name (an already-registered MCP server —
+    # see POST /v1/mcp/servers). Live discovery happens via the server's test-connection
+    # endpoint, not here, so creating a tool never makes an outbound call of its own.
+    type: str = Field(pattern="^(builtin|http|mcp)$")
     agent_id: uuid.UUID | None = None
     description: str | None = None
     enabled: bool = True
@@ -90,3 +93,38 @@ class ToolRunOut(BaseModel):
     latency_ms: int | None
     error: str | None
     created_at: dt.datetime
+
+
+# ── MCP servers (docs/17 Phase 1 §4) ────────────────────────────────────────────────────
+
+
+class CreateMCPServerRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    transport: str = Field(pattern="^(stdio|sse)$")
+    # stdio: the command to spawn. sse: the server URL.
+    url_or_command: str = Field(min_length=1)
+    args: list[str] | None = None
+    env: dict[str, str] | None = None
+    headers: dict[str, str] | None = None
+    enabled: bool = True
+
+
+class MCPServerOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    transport: str
+    url_or_command: str
+    enabled: bool
+    created_at: dt.datetime
+
+
+class MCPToolInfo(BaseModel):
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+class MCPTestConnectionResponse(BaseModel):
+    ok: bool
+    tools: list[MCPToolInfo] = Field(default_factory=list)
+    error: str | None = None

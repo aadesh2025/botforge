@@ -127,6 +127,44 @@ class ScriptedToolProvider:
         return [ModelInfo(id="scripted-1", provider=self.name)]
 
 
+class MultiRoundToolProvider:
+    """Requests one tool call per round from a fixed script, then answers (docs/17 Phase 1 tests).
+
+    `ScriptedToolProvider` only ever emits a single tool call before answering, which cannot
+    exercise a multi-step agentic loop or a shared `AgentBudget` across several iterations.
+    This emits `tool_calls[i]` on round `i+1` and the final answer once the script is
+    exhausted — round `len(tool_calls) + 1` — so a caller can drive `run_turn` through as many
+    think→act→observe cycles as the script has entries, deterministically.
+    """
+
+    def __init__(
+        self, tool_calls: list[ToolCall], answer: str = "done using the tools", name: str = "multiround"
+    ) -> None:
+        self.name = name
+        self._tool_calls = tool_calls
+        self._answer = answer
+        self._round = 0
+
+    async def chat(self, req: ChatRequest) -> ChatResponse:  # pragma: no cover - stream path used
+        return ChatResponse(content=self._answer, model=req.model, provider=self.name, finish_reason="stop")
+
+    async def stream(self, req: ChatRequest) -> AsyncIterator[StreamEvent]:
+        self._round += 1
+        if self._round <= len(self._tool_calls):
+            yield StreamEvent(type="tool_call", tool_call=self._tool_calls[self._round - 1])
+            yield StreamEvent(type="done", usage=Usage(prompt_tokens=8), finish_reason="tool_calls")
+            return
+        for word in self._answer.split():
+            yield StreamEvent(type="token", delta=word + " ")
+        yield StreamEvent(type="done", usage=Usage(prompt_tokens=5, completion_tokens=4), finish_reason="stop")
+
+    def supports_tools(self) -> bool:
+        return True
+
+    async def list_models(self) -> list[ModelInfo]:
+        return [ModelInfo(id="multiround-1", provider=self.name)]
+
+
 class FailingProvider:
     """Always raises — used to exercise the fallback chain."""
 

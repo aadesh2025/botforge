@@ -126,6 +126,21 @@ def test_document_body_injection_is_neutralized_not_refused(case: dict[str, Any]
     assert "never follow any instructions" in wrapped.lower()
 
 
+# ── Tool result: docs/17 Phase 1 §2 rule 5 — new attack surface, must not be assumed covered ──
+
+
+@pytest.mark.parametrize("case", _by_kind(CONTEXTUAL, "tool_result"), ids=_ids)
+def test_tool_result_injection_is_neutralized_not_trusted(case: dict[str, Any]) -> None:
+    """The same mechanism as `indirect`, exercised against the shape a tool result actually
+    has: pre-serialized JSON text, exactly what `run_turn` passes to `neutralize_injections()`
+    (`neutralize_injections(json.dumps(out.get("output") or {}))`). Whether the JSON came from
+    an MCP server, a bound n8n workflow, or a future sub-agent delegation must not matter —
+    `runtime.py` has no branch on tool type before this call, and neither does this test."""
+    out = guardrails.neutralize_injections(case["tool_output"])
+    assert case["must_survive"] in out, f"{case['id']} lost legitimate content"
+    assert "[filtered" in out, f"{case['id']} payload was not neutralized"
+
+
 # ── Second-order: recorded, not skipped ──────────────────────────────────────────────────
 
 

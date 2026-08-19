@@ -126,6 +126,11 @@ class Organization(Base, UUIDPrimaryKey, TimestampMixin, SoftDeleteMixin):
     #: rather than being pinned to whatever it was the day their org was created. `False` is an
     #: explicit opt-out for a client on a plan that does not carry the per-turn cost.
     guard_injection_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    #: Per-org opt-in for the agentic runtime (docs/17 Phase 1). Unlike
+    #: `guard_injection_enabled`, `None`/`False` both mean "off" here — an org must be
+    #: explicitly flipped to `True`, and even then only runs the loop if the platform-wide
+    #: `settings.agentic_loop_enabled` is also on (app.chat.budget.agentic_loop_enabled).
+    agentic_loop_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
 
 

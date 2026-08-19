@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from typing import Any
@@ -10,16 +11,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import rbac
+from app.core.crypto import encrypt
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.integrations.n8n_client import get_client
 from app.llm.types import ToolCall, ToolSpec
-from app.models import Agent, AgentVersion, Tool, ToolRun
+from app.models import Agent, AgentVersion, MCPServer, Tool, ToolRun
 from app.modules.orgs.deps import OrgContext
 from app.tools import schemas
 from app.tools.base import ToolContext, ToolResult
 from app.tools.builtins import BUILTINS
 from app.tools.http_tool import execute_http_tool
+from app.tools.mcp_client import MCPToolError
+from app.tools.mcp_client import list_tools as mcp_list_tools
+from app.tools.mcp_tool import execute_mcp_tool
+from app.tools.mcp_tool import server_config as mcp_server_config
 from app.tools.n8n_tool import execute_n8n_tool, n8n_args_schema, relax_n8n_schema
 
 log = get_logger("tools")
@@ -67,8 +73,24 @@ async def create_tool(session: AsyncSession, ctx: OrgContext, data: schemas.Crea
             raise AppError("tools.unknown_builtin", f"Unknown built-in tool '{data.name}'.", 400)
         description = description or builtin.description
         input_schema = builtin.parameters  # always mirror the canonical schema
-    elif not config.get("url"):
-        raise AppError("tools.url_required", "HTTP tools require a config.url.", 400)
+    elif data.type == "http":
+        if not config.get("url"):
+            raise AppError("tools.url_required", "HTTP tools require a config.url.", 400)
+    elif data.type == "mcp":
+        if not config.get("server_id") or not config.get("tool_name"):
+            raise AppError(
+                "tools.mcp_config_required",
+                "MCP tools require config.server_id and config.tool_name — "
+                "use POST /v1/mcp/servers/{id}/test-connection to discover tool names first.",
+                400,
+            )
+        try:
+            server_uuid = uuid.UUID(str(config["server_id"]))
+        except ValueError as exc:
+            raise AppError("tools.mcp_server_not_found", "MCP server not found.", 404) from exc
+        mcp_server = await session.get(MCPServer, server_uuid)
+        if mcp_server is None or mcp_server.organization_id != ctx.org.id:
+            raise AppError("tools.mcp_server_not_found", "MCP server not found.", 404)
 
     tool = Tool(
         organization_id=ctx.org.id,
@@ -123,12 +145,21 @@ async def delete_tool(session: AsyncSession, ctx: OrgContext, tool_id: uuid.UUID
 
 # ── Resolution + execution ─────────────────────────────────────────────────────────
 async def resolve_agent_tools(
-    session: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID
+    session: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID, *, include_mcp: bool = False
 ) -> tuple[list[ToolSpec], dict[str, Tool]]:
-    """Return (ToolSpecs, name→Tool) for the agent's enabled tools."""
+    """Return (ToolSpecs, name→Tool) for the agent's enabled tools.
+
+    `include_mcp` is off by default (docs/17 Phase 1): even an org that has registered MCP
+    servers and bound `Tool` rows to them never has those rows attached to a turn unless the
+    agentic runtime is on for that org (see `app.chat.budget.agentic_loop_enabled`) — the same
+    "registration doesn't imply usage" split n8n binding already has, just gated on a
+    different flag. Registration/CRUD is unaffected either way.
+    """
     stmt = select(Tool).where(
         Tool.organization_id == org_id, Tool.agent_id == agent_id, Tool.enabled.is_(True)
     )
+    if not include_mcp:
+        stmt = stmt.where(Tool.type != "mcp")
     tools = list((await session.execute(stmt)).scalars().all())
     specs = [
         ToolSpec(
@@ -151,17 +182,19 @@ async def build_tooling(
     agent: Agent,
     version: AgentVersion,
     conversation_id: uuid.UUID | None,
+    *,
+    include_mcp: bool = False,
 ) -> tuple[list[ToolSpec], Any]:
     """Return (ToolSpecs, executor) for an agent's enabled tools, or ([], None) when disabled.
 
     Takes `org_id` (not an OrgContext) so the public/widget chat can reuse it. `executor(call)`
     runs the tool and returns a plain dict {output, status, error} (the runtime stays decoupled
-    from the tools package).
+    from the tools package). `include_mcp` — see `resolve_agent_tools`.
     """
     features = version.features or {}
     if not features.get("tools_enabled"):
         return [], None
-    specs, by_name = await resolve_agent_tools(session, org_id, agent.id)
+    specs, by_name = await resolve_agent_tools(session, org_id, agent.id, include_mcp=include_mcp)
     if not specs:
         return [], None
 
@@ -190,6 +223,8 @@ async def _dispatch(tool: Tool, ctx: ToolContext, args: dict[str, Any]) -> ToolR
         return await execute_http_tool(tool.config, args)
     if tool.type == "n8n":
         return await execute_n8n_tool(tool.config, args, ctx)
+    if tool.type == "mcp":
+        return await execute_mcp_tool(ctx.session, ctx.org_id, tool.config, args)
     return ToolResult(output={}, status="error", error=f"unsupported tool type '{tool.type}'")
 
 
@@ -409,6 +444,83 @@ async def resolve_n8n_callback(
     run.status = status
     run.error = error
     return True
+
+
+# ── MCP servers (docs/17 Phase 1 §4) ────────────────────────────────────────────────
+def _mcp_server_out(server: MCPServer) -> schemas.MCPServerOut:
+    return schemas.MCPServerOut(
+        id=server.id,
+        name=server.name,
+        transport=server.transport,
+        url_or_command=server.url_or_command,
+        enabled=server.enabled,
+        created_at=server.created_at,
+    )
+
+
+async def create_mcp_server(
+    session: AsyncSession, ctx: OrgContext, data: schemas.CreateMCPServerRequest
+) -> schemas.MCPServerOut:
+    """Register an org-scoped MCP server. Registration alone never attaches it to any agent —
+    a `Tool` row of type `mcp` still has to be created (POST /v1/tools), and even then it is
+    only usable in a turn once the agentic runtime is on for this org (docs/17 §2)."""
+    rbac.require_permission(ctx.role, rbac.TOOLS_MANAGE)
+    auth: dict[str, Any] = {}
+    if data.args:
+        auth["args"] = data.args
+    if data.env:
+        auth["env"] = data.env
+    if data.headers:
+        auth["headers"] = data.headers
+    server = MCPServer(
+        organization_id=ctx.org.id,
+        name=data.name,
+        transport=data.transport,
+        url_or_command=data.url_or_command,
+        auth_config_enc=encrypt(json.dumps(auth)) if auth else None,
+        enabled=data.enabled,
+        created_by=ctx.user.id,
+    )
+    session.add(server)
+    await session.flush()
+    return _mcp_server_out(server)
+
+
+async def list_mcp_servers(session: AsyncSession, ctx: OrgContext) -> list[schemas.MCPServerOut]:
+    rbac.require_permission(ctx.role, rbac.READ)
+    stmt = (
+        select(MCPServer)
+        .where(MCPServer.organization_id == ctx.org.id)
+        .order_by(MCPServer.created_at.desc())
+    )
+    return [_mcp_server_out(s) for s in (await session.execute(stmt)).scalars().all()]
+
+
+async def _get_mcp_server(session: AsyncSession, ctx: OrgContext, server_id: uuid.UUID) -> MCPServer:
+    server = await session.get(MCPServer, server_id)
+    if server is None or server.organization_id != ctx.org.id:
+        raise AppError("tools.mcp_server_not_found", "MCP server not found.", 404)
+    return server
+
+
+async def test_mcp_server_connection(
+    session: AsyncSession, ctx: OrgContext, server_id: uuid.UUID
+) -> schemas.MCPTestConnectionResponse:
+    """Connect, list the server's tools, and disconnect. Never raises — a bad connection is a
+    normal test result, not a 5xx."""
+    rbac.require_permission(ctx.role, rbac.TOOLS_MANAGE)
+    server = await _get_mcp_server(session, ctx, server_id)
+    try:
+        tools = await mcp_list_tools(mcp_server_config(server))
+    except MCPToolError as exc:
+        return schemas.MCPTestConnectionResponse(ok=False, error=str(exc))
+    return schemas.MCPTestConnectionResponse(
+        ok=True,
+        tools=[
+            schemas.MCPToolInfo(name=t["name"], description=t["description"], input_schema=t["input_schema"])
+            for t in tools
+        ],
+    )
 
 
 async def list_runs(

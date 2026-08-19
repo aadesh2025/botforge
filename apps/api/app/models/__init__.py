@@ -1,6 +1,7 @@
 """SQLAlchemy models. Importing this package registers every table on Base.metadata
 (used by Alembic autogenerate and by tests)."""
 
+from app.models.agent_steps import AgentStep
 from app.models.agents import Agent, AgentVersion, ProviderCredential
 from app.models.campaigns import Campaign
 from app.models.canned_responses import CannedResponse
@@ -28,6 +29,7 @@ from app.models.identity import (
 from app.models.inbox import Handoff
 from app.models.knowledge import Chunk, Document, KnowledgeBase
 from app.models.macros import Macro
+from app.models.mcp_servers import MCPServer
 from app.models.platform import (
     ApiKey,
     AuditLog,
@@ -44,6 +46,7 @@ from app.models.widget_configs import WidgetConfig
 __all__ = [
     "PLAYGROUND_CHANNEL",
     "Agent",
+    "AgentStep",
     "AgentVersion",
     "ApiKey",
     "AuditLog",
@@ -62,6 +65,7 @@ __all__ = [
     "HelpArticle",
     "Invitation",
     "KnowledgeBase",
+    "MCPServer",
     "Macro",
     "MagicLinkToken",
     "Membership",

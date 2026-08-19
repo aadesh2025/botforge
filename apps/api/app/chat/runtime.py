@@ -7,11 +7,13 @@ tool calls, execute them (via `executor`), append the results, and loop — up t
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.chat import output_guard
+from app.chat.budget import AgentBudget
 from app.chat.guardrails import neutralize_injections
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -38,6 +40,10 @@ class TurnResult:
     error: str | None = None
     citations: list[dict[str, Any]] = field(default_factory=list)
     tool_runs: list[dict[str, Any]] = field(default_factory=list)
+    # The agentic-loop trace (docs/17 §3), populated only when `run_turn` is given a
+    # `budget` — i.e. only for orgs with the agentic runtime on. Persisted to `agent_steps`
+    # by the caller once the assistant `Message` row exists (see conversations/service.py).
+    agent_steps: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def cost_micros(self) -> int:
@@ -56,6 +62,7 @@ async def run_turn(
     *,
     executor: ToolExecutor | None = None,
     max_iters: int = 1,
+    budget: AgentBudget | None = None,
     fallback_message: str | None = None,
     protected_prompt: str | None = None,
     guard_output: bool = True,
@@ -77,6 +84,14 @@ async def run_turn(
     `guard_output=False` disables L5 entirely. The Playground passes it for the same reason it
     withholds `fallback_message`: an operator asking "is my agent behaving?" must be shown what
     the model actually said, and a silently regenerated persona break hides the answer.
+
+    `budget` (docs/17 §5, Phase 1) is the agentic runtime's multi-dimensional ceiling — steps,
+    tool calls, wall-clock runtime, and cost. `None` (the default) is today's behavior
+    unchanged: only `max_iters` bounds the loop, and nothing is traced to `result.agent_steps`.
+    Passed, it additionally bounds the loop and every iteration is traced. It is a single
+    mutable object the caller owns: pass the SAME instance into a nested/delegated `run_turn`
+    call to make that call draw from the parent's remaining allowance rather than a fresh one
+    (docs/17 §2 rule 3) — never construct a new `AgentBudget` for a nested call.
     """
     result.provider = provider.name
     result.model = req.model
@@ -85,12 +100,26 @@ async def run_turn(
         yield StreamEvent(type="citations", citations=citations)
 
     messages = list(req.messages)
-    iters = max_iters if (executor is not None and req.tools) else 1
+    base_iters = max_iters if (executor is not None and req.tools) else 1
+    if budget is not None:
+        # `can_continue()` checks all four dimensions and sets `.tripped` if any is already
+        # exhausted — matters for a nested/delegated call sharing a budget another call has
+        # already spent from (docs/17 §2 rule 3): if there is nothing left, this call must run
+        # zero further model passes, not silently get one free iteration before the first
+        # budget check further down. Bounding by *remaining* steps (not the raw ceiling) keeps
+        # a partially-consumed shared budget from being treated as a fresh one.
+        iters = 0 if not budget.can_continue() else min(base_iters, budget.max_steps - budget.consumed_steps)
+    else:
+        iters = base_iters
+    step_index = 0
 
     for iteration in range(iters):
         req_i = req.model_copy(update={"messages": messages})
         tool_calls: list[ToolCall] = []
         pass_content = ""
+        iter_t0 = time.perf_counter()
+        iter_prompt_tokens = 0
+        iter_completion_tokens = 0
         try:
             async for ev in provider.stream(req_i):
                 if ev.type == "token" and ev.delta:
@@ -103,6 +132,8 @@ async def run_turn(
                 elif ev.usage is not None:
                     result.prompt_tokens += ev.usage.prompt_tokens
                     result.completion_tokens += ev.usage.completion_tokens
+                    iter_prompt_tokens += ev.usage.prompt_tokens
+                    iter_completion_tokens += ev.usage.completion_tokens
                 if ev.finish_reason:
                     result.finish_reason = ev.finish_reason
         except ProviderError as exc:
@@ -119,8 +150,42 @@ async def run_turn(
             yield StreamEvent(type="error", error=str(exc))
             break
 
-        # Continue the loop only if the model asked for tools and we have budget left.
-        if tool_calls and executor is not None and iteration < iters - 1:
+        iter_cost_usd = 0.0
+        if budget is not None:
+            iter_cost_usd = compute_cost_micros(
+                provider.name, req.model,
+                Usage(prompt_tokens=iter_prompt_tokens, completion_tokens=iter_completion_tokens),
+            ) / 1_000_000
+            budget.record_step(cost_usd=iter_cost_usd)
+            result.agent_steps.append({
+                "step_index": step_index, "kind": "think", "tool_name": None,
+                "tool_input": None, "tool_output": None,
+                "latency_ms": int((time.perf_counter() - iter_t0) * 1000),
+                "tokens_in": iter_prompt_tokens, "tokens_out": iter_completion_tokens,
+                "cost_usd": iter_cost_usd, "status": "completed", "error": None,
+            })
+            step_index += 1
+
+        # Continue the loop only if the model asked for tools, we have iterations left, and
+        # (when an agentic budget is in play) there's budget left to spend on them.
+        proceed = bool(tool_calls) and executor is not None and iteration < iters - 1
+        if proceed and budget is not None and not budget.can_continue():
+            # Never hang the turn (docs/17 §5): stop calling tools and let whatever content
+            # has accumulated so far stand as the answer, same fallback shape as ADR-044.
+            log.warning(
+                "agent_budget_exceeded",
+                tripped=budget.tripped,
+                provider=provider.name,
+                model=req.model,
+                consumed_steps=budget.consumed_steps,
+                consumed_tool_calls=budget.consumed_tool_calls,
+                consumed_cost_usd=round(budget.consumed_cost_usd, 4),
+            )
+            proceed = False
+
+        if proceed and executor is not None:
+            if budget is not None:
+                budget.record_tool_calls(len(tool_calls))
             messages.append(Message(role="assistant", content=pass_content or None, tool_calls=tool_calls))
             for call in tool_calls:
                 out = await executor(call)
@@ -134,8 +199,10 @@ async def run_turn(
                         "error": out.get("error"),
                     },
                 )
-                # Tool output is untrusted: neutralize instruction-override attempts before
-                # feeding it back to the model as a tool message (treat it as data, not commands).
+                # Tool output is untrusted — MCP, n8n, and any future sub-agent result alike
+                # (docs/17 §6, no exceptions): neutralize instruction-override attempts before
+                # feeding it back to the model as a tool message (treat it as data, not
+                # commands). This line is the one docs/17 §6 calls merge-blocking to bypass.
                 tool_content = neutralize_injections(json.dumps(out.get("output") or {}))
                 messages.append(
                     Message(
@@ -145,8 +212,27 @@ async def run_turn(
                         content=tool_content,
                     )
                 )
+                if budget is not None:
+                    # Sanitized only (rule §2.4) — the same post-guard-only discipline
+                    # `documents.pii_flags` follows, never the raw tool output "for debugging".
+                    result.agent_steps.append({
+                        "step_index": step_index, "kind": "tool_call", "tool_name": call.name,
+                        "tool_input": call.arguments, "tool_output": {"sanitized_text": tool_content},
+                        "latency_ms": None, "tokens_in": None, "tokens_out": None, "cost_usd": None,
+                        "status": out.get("status") or "completed", "error": out.get("error"),
+                    })
+                    step_index += 1
             continue
         break
+
+    if budget is not None:
+        result.agent_steps.append({
+            "step_index": step_index, "kind": "final_answer", "tool_name": None,
+            "tool_input": None, "tool_output": None, "latency_ms": None,
+            "tokens_in": None, "tokens_out": None, "cost_usd": None,
+            "status": "budget_exceeded" if budget.tripped else ("failed" if result.error else "completed"),
+            "error": result.error,
+        })
 
     # L5 output guard (docs/11 §4-L5). Runs on the accumulated reply, so a streaming client
     # has already rendered it — hence the `replace` event rather than pre-emptive suppression

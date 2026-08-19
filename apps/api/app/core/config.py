@@ -231,6 +231,25 @@ class Settings(BaseSettings):
     # Per-tool execution timeout (seconds) for HTTP / built-in tools.
     tool_timeout_seconds: float = 15.0
 
+    # --- Agentic runtime (docs/17 Phase 1, ADR-070/ADR-073) ---
+    # Platform-wide gate. Deliberately off-by-default at BOTH levels — unlike
+    # guard_injection_enabled's "on unless an org opts out" polarity, this switch and
+    # Organization.agentic_loop_enabled must *both* be explicitly true before any turn uses
+    # the budgeted multi-step loop or MCP tools (see app.chat.budget.agentic_loop_enabled).
+    # This is new attack surface (docs/17 §2) and new cost exposure, so nothing is on by a
+    # single flip either way.
+    agentic_loop_enabled: bool = False
+    # docs/17 §5 defaults, shipped as one global default (ADR-073): no free/paid tiering yet
+    # — max_cost_usd alone already bounds a trial org's worst case per turn.
+    agentic_max_steps: int = 5
+    agentic_max_tool_calls: int = 5
+    agentic_max_runtime_s: float = 30.0
+    agentic_max_cost_usd: float = 0.05
+    # MCP calls involve a subprocess spawn or a network round trip to a third-party server,
+    # materially slower than an HTTP/builtin tool — a separate, wider timeout rather than
+    # sharing tool_timeout_seconds.
+    mcp_tool_timeout_seconds: float = 20.0
+
     # How often (seconds) the Celery beat sweep re-enqueues due `pending` webhook deliveries.
     webhook_sweep_interval_seconds: float = 60.0
 
