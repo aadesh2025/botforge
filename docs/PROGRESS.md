@@ -101,6 +101,22 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
     `react/no-unescaped-entities`, predating this session per `git log` — not touched by anything
     in docs/17). Fixed as the trivial one-line correction it is, not filed as a tracked gap.
 
+- **docs/17 Phase 5 (Integration SDK) — gate checked, deliberately held (2026-08-24).**
+  `docs/17-AGENTIC-RUNTIME-AND-BUILDER.md` §7 gates Phase 5 on Phases 1-4 "running against at
+  least one real client workflow without a Sev-1/Sev-2 incident" — a factual claim about
+  production state, not a permission a task instruction can waive by naming Phase 5. **Checked
+  honestly: the gate is not met.** Every workflow that exists anywhere in this project's history
+  is a test fixture or a manually-created object in this session's own dev/test database —
+  `Workflow`/`WorkflowVersion` shipped THIS SESSION (Phase 2 backend 2026-08-19, canvas + gap
+  closure 2026-08-24). No client org has a published workflow serving real traffic; there is no
+  production deployment this session has visibility into at all, only local dev and the
+  tx-rollback test Postgres. Per docs/17 §7's own instruction ("do not pull it forward"),
+  **Phase 5 was not started** — no `IntegrationDefinition` contract, no `bf init`/`bf deploy`
+  CLI, nothing under §8. This is the expected, documented outcome, not a shortfall: workflows are
+  too new to have a real integration to validate a contract against, and building one now would
+  be exactly the premature-abstraction risk the gate exists to prevent. Revisit once a real
+  client is running a published workflow in production.
+
 - **Workflow regression testing + WORKFLOWS_PUBLISH test-failure gate (2026-08-24).** Closes the
   first item flagged (not fixed) in the Phase 4 report: Phase 3's own DoD wanted the
   test-failure publish gate on both `AGENTS_PUBLISH` and `WORKFLOWS_PUBLISH`, but no "workflow
