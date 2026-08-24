@@ -103,6 +103,26 @@ class ConversationFlagOut(BaseModel):
     resolved_at: dt.datetime | None
 
 
+class WorkflowApprovalOut(BaseModel):
+    """A workflow paused on an Approval node, surfaced in the inbox (docs/17 Phase 2 item 4) —
+    the same `Handoff` model a chat escalation uses, read through a workflow-shaped lens."""
+
+    handoff_id: uuid.UUID
+    workflow_run_id: uuid.UUID
+    workflow_id: uuid.UUID
+    workflow_name: str
+    #: The approval node's own message (`config.message`, rendered) — what a human is being
+    #: asked to approve or reject. Falls back to a generic line if the node set none.
+    message: str | None
+    run_status: str
+    assigned_to: uuid.UUID | None
+    created_at: dt.datetime
+
+
+class WorkflowApprovalDecisionRequest(BaseModel):
+    decision: str = Field(pattern="^(approved|rejected)$")
+
+
 class AttentionItemOut(InboxItemOut):
     """A row in the Attention queue.
 

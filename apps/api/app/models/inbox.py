@@ -19,10 +19,19 @@ class Handoff(Base, UUIDPrimaryKey):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), index=True
     )
-    conversation_id: Mapped[uuid.UUID] = mapped_column(
+    # Nullable — a workflow-approval handoff (docs/17 Phase 2 item 4) may have no conversation
+    # at all, since `WorkflowRun.conversation_id` is itself nullable (a standalone workflow
+    # with no chat agent behind it). Every chat handoff still always sets this.
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), index=True
     )
-    requested_by: Mapped[str] = mapped_column(String(16), nullable=False)  # bot|user
+    # Set instead of `conversation_id` when this handoff exists because a workflow paused on
+    # an Approval node, not because a chat conversation was escalated. `requested_by` is
+    # `"workflow"` in that case (not `bot|user`) — see `app.workflows.service`.
+    workflow_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workflow_runs.id", ondelete="CASCADE"), index=True
+    )
+    requested_by: Mapped[str] = mapped_column(String(16), nullable=False)  # bot|user|workflow
     reason: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), default="open", nullable=False)  # open|assigned|resolved
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))

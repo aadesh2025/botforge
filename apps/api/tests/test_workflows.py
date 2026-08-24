@@ -556,3 +556,150 @@ def test_resumed_budget_wall_clock_restarts_per_process() -> None:
     reconstructed = _budget_from_dict(serialized)
     assert reconstructed.consumed_steps == 3  # spend carried over...
     assert reconstructed.elapsed_s() < 1.0  # ...but the runtime clock did not
+
+
+# ── Approval → Handoff/inbox integration (docs/17 Phase 2 item 4) ─────────────
+async def test_approval_pause_surfaces_in_the_inbox(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    await _publish_graph(client, headers, workflow["id"], APPROVAL_GRAPH)
+
+    run = (await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)).json()
+    assert run["status"] == "paused_approval"
+
+    approvals = await client.get("/v1/inbox/workflow-approvals", headers=headers)
+    assert approvals.status_code == 200
+    items = approvals.json()
+    assert len(items) == 1
+    assert items[0]["workflow_run_id"] == run["id"]
+    assert items[0]["workflow_id"] == workflow["id"]
+    assert items[0]["message"] == "Approve refund?"  # the approval node's own config.message
+    assert items[0]["run_status"] == "paused_approval"
+
+
+async def test_deciding_via_inbox_resumes_the_run_and_clears_the_queue(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    await _publish_graph(client, headers, workflow["id"], APPROVAL_GRAPH)
+    run = (await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)).json()
+    handoff_id = (await client.get("/v1/inbox/workflow-approvals", headers=headers)).json()[0]["handoff_id"]
+
+    decided = await client.post(
+        f"/v1/inbox/workflow-approvals/{handoff_id}/decide", json={"decision": "approved"}, headers=headers
+    )
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["run_status"] == "completed"
+
+    # Resolved: no longer in the queue.
+    approvals = await client.get("/v1/inbox/workflow-approvals", headers=headers)
+    assert approvals.json() == []
+
+    # And the run really did take the "approved" branch.
+    steps = (await client.get(f"/v1/workflow-runs/{run['id']}/steps", headers=headers)).json()
+    assert [s["node_id"] for s in steps][-1] == "e_ok"
+
+
+async def test_deciding_rejected_takes_the_rejected_branch(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    await _publish_graph(client, headers, workflow["id"], APPROVAL_GRAPH)
+    run = (await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)).json()
+    handoff_id = (await client.get("/v1/inbox/workflow-approvals", headers=headers)).json()[0]["handoff_id"]
+
+    await client.post(
+        f"/v1/inbox/workflow-approvals/{handoff_id}/decide", json={"decision": "rejected"}, headers=headers
+    )
+    steps = (await client.get(f"/v1/workflow-runs/{run['id']}/steps", headers=headers)).json()
+    assert [s["node_id"] for s in steps][-1] == "e_no"
+
+
+async def test_cancelling_a_paused_run_also_clears_the_inbox_queue(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    await _publish_graph(client, headers, workflow["id"], APPROVAL_GRAPH)
+    run = (await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)).json()
+
+    await client.post(f"/v1/workflow-runs/{run['id']}/cancel", headers=headers)
+    approvals = await client.get("/v1/inbox/workflow-approvals", headers=headers)
+    assert approvals.json() == []
+
+
+async def test_deciding_unknown_handoff_returns_404(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    import uuid
+
+    r = await client.post(
+        f"/v1/inbox/workflow-approvals/{uuid.uuid4()}/decide", json={"decision": "approved"}, headers=headers
+    )
+    assert r.status_code == 404
+
+
+async def test_deciding_already_resolved_handoff_returns_400(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    await _publish_graph(client, headers, workflow["id"], APPROVAL_GRAPH)
+    await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)
+    handoff_id = (await client.get("/v1/inbox/workflow-approvals", headers=headers)).json()[0]["handoff_id"]
+
+    first = await client.post(
+        f"/v1/inbox/workflow-approvals/{handoff_id}/decide", json={"decision": "approved"}, headers=headers
+    )
+    assert first.status_code == 200
+    second = await client.post(
+        f"/v1/inbox/workflow-approvals/{handoff_id}/decide", json={"decision": "approved"}, headers=headers
+    )
+    assert second.status_code == 400
+    assert second.json()["error"]["code"] == "inbox.workflow_approval_already_resolved"
+
+
+async def test_operator_can_decide_via_inbox_without_workflows_write(client: AsyncClient) -> None:
+    """The point of the split: `operator` has INBOX_HANDLE but NOT WORKFLOWS_WRITE, so the raw
+    resume endpoint refuses them while the inbox decide endpoint — the intended path for this
+    role — accepts them."""
+    owner_headers, org = await _headers(client, "owner4@example.com")
+    agent = await _create_agent(client, owner_headers)
+    workflow = await _create_workflow(client, owner_headers, agent["id"])
+    await _publish_graph(client, owner_headers, workflow["id"], APPROVAL_GRAPH)
+    run = (await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=owner_headers)).json()
+    handoff_id = (
+        await client.get("/v1/inbox/workflow-approvals", headers=owner_headers)
+    ).json()[0]["handoff_id"]
+
+    operator_headers = await _invite_and_join(client, owner_headers, org, "operator4@example.com", "operator")
+
+    denied = await client.post(
+        f"/v1/workflow-runs/{run['id']}/resume", json={"decision": "approved"}, headers=operator_headers
+    )
+    assert denied.status_code == 403
+
+    decided = await client.post(
+        f"/v1/inbox/workflow-approvals/{handoff_id}/decide",
+        json={"decision": "approved"}, headers=operator_headers,
+    )
+    assert decided.status_code == 200, decided.text
+
+
+async def test_viewer_cannot_list_or_decide_workflow_approvals(client: AsyncClient) -> None:
+    owner_headers, org = await _headers(client, "owner5@example.com")
+    agent = await _create_agent(client, owner_headers)
+    workflow = await _create_workflow(client, owner_headers, agent["id"])
+    await _publish_graph(client, owner_headers, workflow["id"], APPROVAL_GRAPH)
+    run = (await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=owner_headers)).json()
+    handoff_id = (
+        await client.get("/v1/inbox/workflow-approvals", headers=owner_headers)
+    ).json()[0]["handoff_id"]
+
+    viewer_headers = await _invite_and_join(client, owner_headers, org, "viewer5@example.com", "viewer")
+
+    assert (await client.get("/v1/inbox/workflow-approvals", headers=viewer_headers)).status_code == 403
+    denied = await client.post(
+        f"/v1/inbox/workflow-approvals/{handoff_id}/decide",
+        json={"decision": "approved"}, headers=viewer_headers,
+    )
+    assert denied.status_code == 403
+    assert run["status"] == "paused_approval"  # untouched

@@ -174,3 +174,22 @@ async def resolve_attention(
 ) -> schemas.InboxItemOut:
     """Clear the flags — the only way a conversation's severity goes down."""
     return await service.resolve_attention(session, ctx, cid)
+
+
+@router.get("/workflow-approvals", response_model=list[schemas.WorkflowApprovalOut])
+async def list_workflow_approvals(
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> list[schemas.WorkflowApprovalOut]:
+    """Workflows paused on an Approval node, waiting on a human (docs/17 Phase 2 item 4)."""
+    return await service.list_workflow_approvals(session, ctx)
+
+
+@router.post("/workflow-approvals/{handoff_id}/decide", response_model=schemas.WorkflowApprovalOut)
+async def decide_workflow_approval(
+    handoff_id: uuid.UUID,
+    data: schemas.WorkflowApprovalDecisionRequest,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.WorkflowApprovalOut:
+    return await service.decide_workflow_approval(session, ctx, handoff_id, data.decision)

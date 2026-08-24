@@ -18,6 +18,73 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-075: docs/17 Phase 2 gap closure — Handoff reuse, loop/call-depth caps, is_test, eager-mode dispatch
+- **Date:** 2026-08-24
+- **Status:** accepted
+- **Context:** finishing docs/17 Phase 2 (items 1–4 of the gap-closure pass) surfaced four
+  decisions with no single obviously-correct answer, plus one correctness trap already fixed
+  once elsewhere in this codebase that a new caller could easily reintroduce.
+- **Decisions.**
+  1. **Approval nodes reuse the existing `Handoff` model — `conversation_id` made nullable,
+     a new nullable `workflow_run_id` added — rather than a parallel "workflow approval"
+     table.** `status` (open/assigned/resolved), `assigned_to`, `notes` and `tags` mean the
+     same thing for a paused workflow as for a chat escalation, and the operator inbox is
+     already built around this one model. `conversation_id` has to become nullable because
+     `WorkflowRun.conversation_id` already is — a standalone workflow with no chat agent
+     behind it can still pause on an Approval node. Rejected: a second `workflow_approvals`
+     table — it would duplicate `status`/`assigned_to`/`notes`/`tags` for no product benefit
+     and give the inbox two places to look for "something needs a human." The conversation-
+     shaped `InboxItemOut` (channel, message_count, contact...) doesn't fit a bare workflow
+     run, so listing/deciding got its own two endpoints
+     (`GET/POST /v1/inbox/workflow-approvals[/…]`) rather than being squeezed into
+     `/v1/inbox/conversations`.
+  2. **Deciding a workflow approval requires `INBOX_HANDLE`, not `WORKFLOWS_WRITE`** — an
+     operational inbox action, not a workflow-editing one, mirroring the split docs/17 already
+     draws between `AGENTS_WRITE`/`AGENTS_PUBLISH`. Concretely: `operator` (has `INBOX_HANDLE`,
+     lacks `WORKFLOWS_WRITE`) can act on an approval through the inbox but is correctly
+     refused by the raw `POST /v1/workflow-runs/{id}/resume`. To avoid duplicating the resume
+     logic under two different permission checks, `resume_workflow_run` was split into an
+     RBAC-checked wrapper and `resume_workflow_run_unchecked(session, run, data)`, which the
+     inbox's decide endpoint calls directly after its own `INBOX_HANDLE` check — one execution
+     path, two legitimate entry points with different gates.
+  3. **`sub_agent` call depth lives on `AgentBudget` itself** (`call_depth`/`max_call_depth`,
+     new `WORKFLOW_MAX_CALL_DEPTH` env var, default 5) rather than a separate parameter
+     threaded through every nested call. The budget is already the one object every level of
+     nesting shares (docs/17 §2 rule 3), so a self-referential or indirectly cyclic chain of
+     `sub_agent` nodes fails loudly once the cap is hit — depth doesn't care whether the cycle
+     is direct or goes through several workflows first, so one counter catches both. Rejected:
+     tracking visited workflow ids to detect cycles specifically — a depth cap is simpler and
+     bounds resource use regardless of whether the graph is actually cyclic or just very deep.
+  4. **`loop` nodes get no separate hard cap by default — `AgentBudget.max_steps` already is
+     one.** A `loop` node iterates via a graph cycle (the loop body's last node edges back to
+     the loop node itself), so every revisit is an ordinary node visit that
+     `run_workflow`'s existing `budget.can_continue()` check already bounds. `config
+     .max_iterations` is an optional second, loop-local cap for when the shared step budget is
+     too coarse for one specific loop, not the primary enforcement mechanism.
+  5. **A test run persists a real `WorkflowRun` row with `is_test=True`** (migration 0024)
+     rather than an ephemeral, non-persisted execution. "Can't see what happened on my last
+     test run" is a worse default than one extra column, and every other field on
+     `workflow_runs`/`workflow_steps` (steps, budget spend, error) is equally useful for a test
+     run. No side-effect sandboxing: a test run makes real tool calls and real agent turns,
+     the same trade-off the Agent Playground already makes and documents in its own code.
+  6. **Async dispatch (item 2) does not use Celery's own built-in eager mode.** Every task in
+     `app.worker.tasks` drives its coroutine with `asyncio.run()`, which raises inside a loop
+     that's already running — exactly what a request handler's event loop is. This exact trap
+     is why `app.core.email.queue_email` special-cases `settings.celery_task_always_eager` and
+     runs its coroutine in-process instead of calling `.delay()` at all (see CLAUDE.md §12);
+     `app.workflows.service._dispatch_run` follows the same pattern rather than trusting
+     Celery's own eager flag, which is snapshotted into `celery_app.conf` once at import and
+     cannot be toggled per-test via `monkeypatch` anyway.
+- **Consequences.** The dispatch-before-enqueue race already accepted for
+  `enqueue_document_ingestion` (flush, then `.delay()`, no explicit commit) now also applies to
+  workflow runs — a worker could in principle pick up a task before the enqueuing request's
+  transaction commits. Not fixed here; matches existing convention rather than introducing an
+  inconsistent stricter guarantee only for workflows (an explicit `session.commit()` inside a
+  request-scoped service function would also break the test harness's transaction-rollback
+  isolation — see `tests/conftest.py`). A nested workflow (`sub_agent`) that itself pauses on
+  approval is surfaced as a failed node, not a real nested pause — synchronous cross-run
+  approval propagation is out of scope this pass.
+
 ### ADR-074: Visual Workflow Builder backend — mirror Agent/AgentVersion, reuse AgentBudget, no eval()
 - **Date:** 2026-08-19
 - **Status:** accepted (backend slice only — see Consequences for what is explicitly deferred)

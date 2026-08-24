@@ -24,6 +24,9 @@ from app.models import (
     CrmContact,
     Handoff,
     Message,
+    Workflow,
+    WorkflowRun,
+    WorkflowVersion,
 )
 from app.modules.conversations.schemas import MessageOut
 from app.modules.conversations.service import _message_out
@@ -31,6 +34,8 @@ from app.modules.inbox import schemas
 from app.modules.orgs.deps import OrgContext
 from app.realtime.hub import conv_topic, hub, inbox_topic
 from app.webhooks.dispatch import emit_event
+from app.workflows.schemas import ResumeWorkflowRequest
+from app.workflows.service import resume_workflow_run_unchecked
 
 log = get_logger("inbox")
 
@@ -512,3 +517,85 @@ async def resolve_attention(
     conv = await _get_conversation(session, ctx, cid)
     await attention.resolve_flags(session, conv, user_id=ctx.user.id)
     return await _item_out(session, conv)
+
+
+# ── Workflow approvals (docs/17 Phase 2 item 4) ─────────────────────────────────────────────
+# A workflow paused on an Approval node is a `Handoff` row with `workflow_run_id` set instead
+# of `conversation_id` (see `app.workflows.service`, which owns creating/resolving these). This
+# is a separate query and pair of endpoints from the conversation-shaped inbox above — an
+# `InboxItemOut` assumes a `Conversation` (channel, message_count, contact...), which a
+# standalone workflow run may not have at all.
+
+
+async def _workflow_approval_out(
+    session: AsyncSession, handoff: Handoff, run: WorkflowRun
+) -> schemas.WorkflowApprovalOut | None:
+    version = await session.get(WorkflowVersion, run.workflow_version_id)
+    workflow = await session.get(Workflow, version.workflow_id) if version is not None else None
+    if workflow is None:
+        # Data inconsistency (a workflow/version deleted out from under a live run) — skip
+        # rather than surface a row the UI can't usefully act on.
+        return None
+    return schemas.WorkflowApprovalOut(
+        handoff_id=handoff.id, workflow_run_id=run.id, workflow_id=workflow.id,
+        workflow_name=workflow.name, message=handoff.reason, run_status=run.status,
+        assigned_to=handoff.assigned_to, created_at=handoff.created_at,
+    )
+
+
+async def list_workflow_approvals(
+    session: AsyncSession, ctx: OrgContext
+) -> list[schemas.WorkflowApprovalOut]:
+    rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
+    stmt = (
+        select(Handoff)
+        .where(
+            Handoff.organization_id == ctx.org.id,
+            Handoff.workflow_run_id.is_not(None),
+            Handoff.status != "resolved",
+        )
+        .order_by(Handoff.created_at.asc())
+    )
+    handoffs = (await session.execute(stmt)).scalars().all()
+    if not handoffs:
+        return []
+    run_ids = [h.workflow_run_id for h in handoffs if h.workflow_run_id is not None]
+    runs = {
+        r.id: r
+        for r in (
+            await session.execute(select(WorkflowRun).where(WorkflowRun.id.in_(run_ids)))
+        ).scalars().all()
+    }
+    items: list[schemas.WorkflowApprovalOut] = []
+    for h in handoffs:
+        run = runs.get(h.workflow_run_id) if h.workflow_run_id is not None else None
+        if run is None:
+            continue
+        item = await _workflow_approval_out(session, h, run)
+        if item is not None:
+            items.append(item)
+    return items
+
+
+async def decide_workflow_approval(
+    session: AsyncSession, ctx: OrgContext, handoff_id: uuid.UUID, decision: str
+) -> schemas.WorkflowApprovalOut:
+    """Approve or reject a paused workflow run. Requires `INBOX_HANDLE` — an operational inbox
+    action, deliberately NOT `WORKFLOWS_PUBLISH` — and drives the exact same
+    `resume_workflow_run_unchecked` the direct `/v1/workflow-runs/{id}/resume` API uses, so
+    there is exactly one place that knows how to resume a paused run.
+    """
+    rbac.require_permission(ctx.role, rbac.INBOX_HANDLE)
+    handoff = await session.get(Handoff, handoff_id)
+    if handoff is None or handoff.organization_id != ctx.org.id or handoff.workflow_run_id is None:
+        raise AppError("inbox.workflow_approval_not_found", "Workflow approval not found.", 404)
+    if handoff.status == "resolved":
+        raise AppError("inbox.workflow_approval_already_resolved", "This approval was already handled.", 400)
+    run = await session.get(WorkflowRun, handoff.workflow_run_id)
+    if run is None:
+        raise AppError("inbox.workflow_approval_not_found", "Workflow approval not found.", 404)
+
+    await resume_workflow_run_unchecked(session, run, ResumeWorkflowRequest(decision=decision))
+    item = await _workflow_approval_out(session, handoff, run)
+    assert item is not None  # the workflow/version existed a moment ago to get this far
+    return item

@@ -44,6 +44,7 @@ from app.llm.types import ChatRequest, Message, ToolCall
 from app.models import (
     Agent,
     AgentVersion,
+    Handoff,
     Organization,
     Workflow,
     WorkflowRun,
@@ -51,6 +52,7 @@ from app.models import (
     WorkflowVersion,
 )
 from app.modules.orgs.deps import OrgContext
+from app.realtime.hub import hub, inbox_topic
 from app.tools.base import ToolContext
 from app.tools.service import execute_tool_call, resolve_agent_tools
 from app.workflows import schemas
@@ -296,6 +298,51 @@ async def _sub_workflow_executor_for(session: AsyncSession, org: Organization) -
     return executor
 
 
+# ── Approval → Handoff/inbox (docs/17 Phase 2 item 4) ──────────────────────────────────────
+# Approval nodes reuse the existing Handoff model rather than a parallel "workflow approval"
+# concept — `status`/`assigned_to`/`notes`/`tags` all mean the same thing for a paused
+# workflow as for a chat handoff. See the ADR in docs/DECISIONS.md for why, and
+# `app.modules.inbox.service` for the operator-facing list/decide endpoints that read these.
+
+
+async def _resolve_run_handoffs(session: AsyncSession, run_id: uuid.UUID, organization_id: uuid.UUID) -> None:
+    """Resolves any still-open handoff for this run. A no-op (no publish) when there is
+    nothing open — called unconditionally on every non-paused outcome and before dispatching a
+    resume, so it must not spam the inbox topic when there was never anything to resolve."""
+    stmt = select(Handoff).where(Handoff.workflow_run_id == run_id, Handoff.status != "resolved")
+    rows = (await session.execute(stmt)).scalars().all()
+    if not rows:
+        return
+    now = dt.datetime.now(tz=dt.UTC)
+    for h in rows:
+        h.status = "resolved"
+        h.resolved_at = now
+    await session.flush()
+    await hub.publish(
+        inbox_topic(organization_id),
+        {"type": "workflow_approval.resolved", "workflow_run_id": str(run_id)},
+    )
+
+
+async def _create_approval_handoff(session: AsyncSession, run: WorkflowRun, result: WorkflowRunResult) -> None:
+    message = None
+    if result.steps:
+        last = result.steps[-1]
+        if last.get("status") == "awaiting_approval":
+            message = (last.get("output") or {}).get("message")
+    handoff = Handoff(
+        organization_id=run.organization_id, conversation_id=run.conversation_id,
+        workflow_run_id=run.id, requested_by="workflow",
+        reason=message or "A workflow is waiting on your approval.", status="open",
+    )
+    session.add(handoff)
+    await session.flush()
+    await hub.publish(
+        inbox_topic(run.organization_id),
+        {"type": "workflow_approval.created", "workflow_run_id": str(run.id), "handoff_id": str(handoff.id)},
+    )
+
+
 async def _persist_one_step(
     session: AsyncSession, run: WorkflowRun, step: dict[str, Any], *, commit: bool
 ) -> None:
@@ -352,6 +399,13 @@ async def _execute_and_persist(
     run.budget = _budget_to_dict(budget)
     if result.status in ("completed", "failed", "budget_exceeded"):
         run.completed_at = dt.datetime.now(tz=dt.UTC)
+    if result.status == "paused_approval":
+        await _create_approval_handoff(session, run, result)
+    else:
+        # Also the correctness backstop for the resume path: `_resume_workflow_run_core`
+        # already resolves the handoff being acted on before dispatch, but this covers a run
+        # reaching a terminal state any other way, and is a no-op when there was nothing open.
+        await _resolve_run_handoffs(session, run.id, run.organization_id)
     await session.flush()
     if commit_each_step:
         await session.commit()
@@ -579,11 +633,16 @@ async def run_workflow_test(
     return await _create_and_dispatch_run(session, ctx, workflow, version, data, is_test=True)
 
 
-async def resume_workflow_run(
-    session: AsyncSession, ctx: OrgContext, run_id: uuid.UUID, data: schemas.ResumeWorkflowRequest
+async def resume_workflow_run_unchecked(
+    session: AsyncSession, run: WorkflowRun, data: schemas.ResumeWorkflowRequest
 ) -> schemas.WorkflowRunOut:
-    rbac.require_permission(ctx.role, rbac.WORKFLOWS_WRITE)
-    run = await _get_run(session, ctx, run_id)
+    """The actual resume logic, with NO RBAC check — `run` must already have been fetched and
+    ownership-verified by the caller. Exists so `app.modules.inbox.service`'s approval-decide
+    endpoint can drive the exact same execution path under `INBOX_HANDLE` instead of
+    `WORKFLOWS_WRITE` (docs/17 Phase 2 item 4: approving/rejecting is an operational inbox
+    action, not a workflow-editing one) without duplicating this logic. `resume_workflow_run`
+    below is the RBAC-checked entry point every other caller should use.
+    """
     if run.status != "paused_approval":
         raise AppError("workflows.not_paused", "This run is not waiting on approval.", 400)
     version = await session.get(WorkflowVersion, run.workflow_version_id)
@@ -591,12 +650,23 @@ async def resume_workflow_run(
     workflow = await session.get(Workflow, version.workflow_id)
     assert workflow is not None
 
-    # Reflects the decision was accepted immediately, before a real worker picks it up —
-    # a poller must never see the stale "paused_approval" once a decision has been made.
+    # Reflects the decision was accepted immediately, before a real worker picks it up — a
+    # poller (and the inbox list) must never see the stale "paused_approval"/open-handoff once
+    # a decision has been made. `_execute_and_persist` resolves it again once execution
+    # actually finishes, a harmless no-op by then.
     run.status = "running"
+    await _resolve_run_handoffs(session, run.id, run.organization_id)
     await session.flush()
     await _dispatch_run(session, run, workflow, version, resume_input={"decision": data.decision})
     return _run_out(run)
+
+
+async def resume_workflow_run(
+    session: AsyncSession, ctx: OrgContext, run_id: uuid.UUID, data: schemas.ResumeWorkflowRequest
+) -> schemas.WorkflowRunOut:
+    rbac.require_permission(ctx.role, rbac.WORKFLOWS_WRITE)
+    run = await _get_run(session, ctx, run_id)
+    return await resume_workflow_run_unchecked(session, run, data)
 
 
 async def cancel_workflow_run(session: AsyncSession, ctx: OrgContext, run_id: uuid.UUID) -> schemas.WorkflowRunOut:
@@ -604,6 +674,7 @@ async def cancel_workflow_run(session: AsyncSession, ctx: OrgContext, run_id: uu
     run = await _get_run(session, ctx, run_id)
     if run.status in ("completed", "failed", "cancelled", "budget_exceeded"):
         return _run_out(run)
+    await _resolve_run_handoffs(session, run.id, run.organization_id)
     run.status = "cancelled"
     run.completed_at = dt.datetime.now(tz=dt.UTC)
     return _run_out(run)
