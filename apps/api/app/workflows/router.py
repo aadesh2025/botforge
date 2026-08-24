@@ -97,6 +97,16 @@ async def publish_version(
     return await service.publish_version(session, ctx, workflow_id, version)
 
 
+@router.get("/{workflow_id}/runs", response_model=list[schemas.WorkflowRunOut])
+async def list_workflow_runs(
+    workflow_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> list[schemas.WorkflowRunOut]:
+    """Every run against this workflow, newest first — the canvas's run-history picker."""
+    return await service.list_workflow_runs(session, ctx, workflow_id)
+
+
 @router.post("/{workflow_id}/run", response_model=schemas.WorkflowRunOut, status_code=status.HTTP_201_CREATED)
 async def run_workflow(
     workflow_id: uuid.UUID,

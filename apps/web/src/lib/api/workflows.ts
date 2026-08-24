@@ -88,3 +88,8 @@ export function cancelWorkflowRun(runId: string) {
 export function listWorkflowRunSteps(runId: string) {
   return api<ApiWorkflowStep[]>(`/v1/workflow-runs/${runId}/steps`, { orgScoped: true });
 }
+
+/** Every run against this workflow, newest first — the canvas's run-history picker. */
+export function listWorkflowRuns(workflowId: string) {
+  return api<ApiWorkflowRun[]>(`/v1/workflows/${workflowId}/runs`, { orgScoped: true });
+}

@@ -717,6 +717,37 @@ async def resume_workflow_run(
     return await resume_workflow_run_unchecked(session, run, data)
 
 
+async def list_workflow_runs(
+    session: AsyncSession, ctx: OrgContext, workflow_id: uuid.UUID, *, limit: int = 20
+) -> list[schemas.WorkflowRunOut]:
+    """Every run across every version of this workflow, newest first — the canvas's run-
+    history picker (docs/17 Phase 2 gap-closure item 3) reads this so an author can reopen a
+    PAST run's step-by-step overlay without it needing to still be live or polled. `WorkflowRun`
+    has no direct `workflow_id` column (only `workflow_version_id`), so this joins through every
+    version of the workflow rather than just its current one — an author reviewing history
+    reasonably expects a run against an older draft to still show up.
+
+    Orders by `id DESC` as well as `started_at DESC`: within one Postgres transaction
+    `func.now()` (the column's `server_default`) is frozen at transaction start, so two runs
+    created moments apart in the same transaction can get an IDENTICAL `started_at` — sorting
+    on that column alone leaves ties in an arbitrary, not-reliably-newest-first order.
+    `WorkflowRun` uses UUIDv7 primary keys (time-ordered), so `id DESC` is a correct, cheap
+    tiebreak for exactly this case — same fix shape as `ORDER BY ts_rank DESC, chunks.id` in
+    the RAG retrieval path (docs/14 K1+K2).
+    """
+    rbac.require_permission(ctx.role, rbac.READ)
+    await _get_workflow(session, ctx, workflow_id)  # 404s + ownership check
+    version_ids_stmt = select(WorkflowVersion.id).where(WorkflowVersion.workflow_id == workflow_id)
+    stmt = (
+        select(WorkflowRun)
+        .where(WorkflowRun.workflow_version_id.in_(version_ids_stmt))
+        .order_by(WorkflowRun.started_at.desc(), WorkflowRun.id.desc())
+        .limit(limit)
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return [_run_out(r) for r in rows]
+
+
 async def get_workflow_run(session: AsyncSession, ctx: OrgContext, run_id: uuid.UUID) -> schemas.WorkflowRunOut:
     """The run's own status — the canvas's "Test run" polling reads this (docs/17 Phase 2
     item 6) rather than inferring completion from the step list, which has no dedicated

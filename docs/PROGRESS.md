@@ -111,12 +111,33 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
      pre-existing bug on the way: the agent page's Playground-visibility check was hardcoded to
      `tab !== "channels"` rather than deriving from `FULL_WIDTH_TABS`, which the new
      "workflows" tab would otherwise have inherited (a stray Playground stacked below an
-     already-tall canvas). **⚠️ Deferred, called out rather than skipped silently:** read-only
-     overlay of a run's history is live-only (a completed run reopened later shows no overlay,
-     only a run actively polled while its tab is open does); a Tool node's `arguments` aren't
-     yet editable from the properties panel (only `tool_name`/`result_variable` are); native
-     HTML5 drag-and-drop from the palette is exercised by Playwright but the jsdom unit suite
-     stubs the whole canvas out and covers only the list/create screen around it.
+     already-tall canvas). Native HTML5 drag-and-drop from the palette is exercised by
+     Playwright but the jsdom unit suite stubs the whole canvas out and covers only the
+     list/create screen around it — unchanged, still true.
+     **✅ CLOSED 2026-08-24 (Stage 1 of the same-day gap-closure follow-up), both deferrals
+     named above:**
+     - **Run-history overlay.** New `GET /v1/workflows/{id}/runs` (newest first, joined through
+       every version — an author reviewing history reasonably expects a run against an older
+       draft to still show up) backs a history picker in the canvas toolbar. Reopening a PAST
+       completed run reuses the exact same `runId`/`run`/`steps` polling state a live test run
+       already drives — no second code path; the existing `refetchInterval` already stops
+       polling on a terminal run's first fetch, so a finished historical run "just works."
+       Found and fixed a real ordering bug the first time the newest-first test ran against
+       real Postgres: two runs created moments apart in the same transaction get an IDENTICAL
+       `started_at` (`func.now()` freezes at transaction start, not per-statement) — added
+       `id DESC` as a tiebreak (`WorkflowRun` uses time-ordered UUIDv7 keys), same fix shape as
+       the FTS `ts_rank`/`chunks.id` tiebreak (docs/14 K1+K2). See ADR-077.
+     - **Tool node argument editing.** The properties panel now exposes `config.arguments` as
+       raw JSON, matching the EXISTING agentic-runtime tool UI's own pattern (the Tools tab's
+       "Test tool" dialog already asks for call arguments the same way, since a tool's argument
+       shape varies per tool and isn't known statically to either UI). Invalid JSON is never
+       propagated to the graph — the last-known-good value stays in effect with a visible
+       inline error. See ADR-078.
+     - 2 new backend tests (list-runs ordering + cross-org 404) + 2 new Playwright specs
+       (`31-workflow-run-history.spec.ts`, `32-workflow-tool-arguments.spec.ts`), plus the
+       original canvas spec's status-panel label assertions updated for the rename from
+       "Test run: {status}" to "Run: {status}" (the panel now serves both live and historical
+       runs, not only ones just started from the canvas).
   - **Verification.** `ruff`/`mypy app/` clean across every commit; migrations 0024/0025
     applied/downgraded/reapplied against real Postgres; full backend suite **1033 passed, 4
     skipped, 1 pre-existing unrelated failure** (`test_playground_without_handoff_feature_does_not_trigger`,

@@ -250,6 +250,36 @@ async def test_run_linear_workflow_completes(client: AsyncClient) -> None:
     assert fetched.json()["status"] == "completed"
 
 
+async def test_list_workflow_runs_newest_first(client: AsyncClient) -> None:
+    """The canvas's run-history picker (docs/17 Phase 2 gap-closure item 3) reads this to let
+    an author reopen a PAST run's overlay without it needing to still be live."""
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    await _publish_graph(client, headers, workflow["id"], LINEAR_GRAPH)
+
+    first = (await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)).json()
+    second = (await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)).json()
+
+    runs = await client.get(f"/v1/workflows/{workflow['id']}/runs", headers=headers)
+    assert runs.status_code == 200
+    ids = [r["id"] for r in runs.json()]
+    assert ids == [second["id"], first["id"]]  # newest first
+    assert all(r["status"] == "completed" for r in runs.json())
+
+
+async def test_list_workflow_runs_from_other_org_is_not_found(client: AsyncClient) -> None:
+    headers_a, _ = await _headers(client, "runsowner@example.com")
+    agent = await _create_agent(client, headers_a)
+    workflow = await _create_workflow(client, headers_a, agent["id"])
+    await _publish_graph(client, headers_a, workflow["id"], LINEAR_GRAPH)
+    await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers_a)
+
+    headers_b, _ = await _headers(client, "runsother@example.com")
+    r = await client.get(f"/v1/workflows/{workflow['id']}/runs", headers=headers_b)
+    assert r.status_code == 404
+
+
 async def test_run_workflow_pauses_on_approval_then_resumes(client: AsyncClient) -> None:
     headers, _ = await _headers(client)
     agent = await _create_agent(client, headers)
@@ -750,6 +780,8 @@ async def test_rbac_matrix_across_every_workflow_endpoint(client: AsyncClient) -
         assert (await client.get(f"/v1/workflows/{workflow['id']}", headers=headers)).status_code == 200
         assert (await client.get(f"/v1/workflows/{workflow['id']}/versions", headers=headers)).status_code == 200
         assert (await client.get(f"/v1/workflow-runs/{run['id']}/steps", headers=headers)).status_code == 200
+        assert (await client.get(f"/v1/workflow-runs/{run['id']}", headers=headers)).status_code == 200
+        assert (await client.get(f"/v1/workflows/{workflow['id']}/runs", headers=headers)).status_code == 200
 
     # WORKFLOWS_WRITE-gated: viewer denied, editor allowed.
     write_checks = [

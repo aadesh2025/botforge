@@ -23,17 +23,20 @@ import {
   createWorkflowVersion,
   getWorkflowRun,
   listWorkflowRunSteps,
+  listWorkflowRuns,
   listWorkflowVersions,
   publishWorkflowVersion,
   resumeWorkflowRun,
   testRunWorkflow,
 } from "@/lib/api/workflows";
 import type { ApiWorkflow, ApiWorkflowStep, WorkflowGraph, WorkflowNodeType } from "@/lib/api/types";
+import { relativeTime } from "@/lib/utils";
 import { NodePalette } from "./node-palette";
 import { PropertiesPanel } from "./properties-panel";
 import { WorkflowNode, type WorkflowNodeData } from "./workflow-node";
 import { NODE_TYPE_BY_ID } from "./node-types";
 import { flowToGraph, graphToFlow, newNodeId } from "./graph-convert";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const nodeTypes = { workflowNode: WorkflowNode };
 
@@ -181,9 +184,22 @@ function CanvasInner({ workflow, agentId }: { workflow: ApiWorkflow; agentId: st
     refetchInterval: run && RUN_TERMINAL.has(run.status) ? false : 1000,
   });
 
+  // ── Run history (docs/17 Phase 2 gap-closure item 3): reopening a PAST run reuses the exact
+  // same `runId`/`run`/`steps` state a live test run already drives — a terminal run's own
+  // `refetchInterval` above already stops polling on the very first fetch, so no separate
+  // "historical" code path is needed for the overlay itself.
+  const { data: runHistory } = useQuery({
+    queryKey: ["workflow-runs", workflow.id, activeOrgId],
+    queryFn: () => listWorkflowRuns(workflow.id),
+    enabled: Boolean(activeOrgId),
+  });
+
   const testRunMutation = useMutation({
     mutationFn: () => testRunWorkflow(workflow.id, {}),
-    onSuccess: (r) => setRunId(r.id),
+    onSuccess: async (r) => {
+      setRunId(r.id);
+      await qc.invalidateQueries({ queryKey: ["workflow-runs", workflow.id, activeOrgId] });
+    },
   });
   const decideMutation = useMutation({
     mutationFn: (decision: "approved" | "rejected") => resumeWorkflowRun(runId as string, decision),
@@ -199,7 +215,9 @@ function CanvasInner({ workflow, agentId }: { workflow: ApiWorkflow; agentId: st
     () =>
       nodes.map((n) => {
         const step = stepByNode.get(n.id);
-        const isCurrent = run?.status === "paused_approval" && run.current_node_id === n.id;
+        const isCurrent =
+          (run?.status === "paused_approval" || run?.status === "paused_delay") &&
+          run.current_node_id === n.id;
         const data = n.data as WorkflowNodeData;
         const runStatus: WorkflowNodeData["runStatus"] = isCurrent
           ? "awaiting_approval"
@@ -271,11 +289,29 @@ function CanvasInner({ workflow, agentId }: { workflow: ApiWorkflow; agentId: st
               : (savedLabel ??
                 (latest ? `v${latest.version} · ${latest.status}` : "No versions yet — drop a node to start"))}
           </span>
+          {runHistory && runHistory.length > 0 && (
+            <Select value={runId ?? undefined} onValueChange={(v) => setRunId(v)}>
+              <SelectTrigger className="h-8 w-[190px] text-xs">
+                <SelectValue placeholder="View a past run…" />
+              </SelectTrigger>
+              <SelectContent>
+                {runHistory.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.status} · {relativeTime(r.started_at)}
+                    {r.is_test ? " · test" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         {run && (
           <div className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border bg-surface/95 p-2.5 text-xs shadow-pop backdrop-blur">
-            <span className="font-medium text-text">Test run: {run.status}</span>
+            <span className="font-medium text-text">
+              Run: {run.status}
+              {run.is_test ? " (test)" : ""}
+            </span>
             {run.error && <span className="max-w-[220px] truncate text-error">{run.error}</span>}
             {run.status === "paused_approval" && (
               <div className="flex gap-1.5">

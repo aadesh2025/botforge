@@ -18,6 +18,63 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-078: Tool node arguments as raw JSON, matching the Tools tab's own pattern
+- **Date:** 2026-08-24
+- **Status:** accepted
+- **Context:** a Tool node's `config.arguments` had no UI at all — an author had to know to
+  hand-edit the saved graph JSON to configure what a tool node actually calls its tool with.
+- **Decision.** Edited as raw JSON text, not a dynamic per-argument form — matching the
+  EXISTING agentic-runtime tool UI's own pattern exactly. The "Test tool" dialog on the agent's
+  Tools tab (`tools-tab.tsx`) already asks for a tool's call arguments as a raw JSON
+  `<textarea>`, because a tool's argument shape varies per tool and isn't known to either UI
+  statically (an HTTP tool's placeholders come from its own URL template; a builtin tool's come
+  from its own schema). Building a dynamic form would need to fetch and interpret each tool's
+  `input_schema` first — a real feature, not done here. Invalid JSON is never propagated to the
+  graph (the last-known-good `arguments` value stays in effect, with a visible inline error)
+  rather than saving something the backend's own `_run_tool` would fail to iterate over as
+  key/value pairs.
+- **Alternatives considered:** a dynamic form driven by each tool's `input_schema` — rejected
+  as out of scope for this gap-closure item; the raw-JSON pattern was already proven acceptable
+  UX elsewhere in this exact product for the exact same kind of input.
+- **Consequences:** a Tool node's arguments still require an author to know (or go check) the
+  tool's expected argument names — no schema-driven autocomplete or validation beyond "is this
+  valid JSON."
+
+### ADR-077: Run-history overlay reuses live-run state (docs/17 Phase 2 gap-closure item 3)
+- **Date:** 2026-08-24
+- **Status:** accepted
+- **Context:** the canvas's run overlay only worked for a run started from the canvas itself
+  and polled while the tab stayed open; reopening a finished run later showed nothing.
+- **Decisions.**
+  1. **The overlay for a past run reuses the exact SAME `runId`/`run`/`steps` query state a
+     live test run already drives — no second "historical" code path.** Selecting a run from a
+     new history picker (`GET /v1/workflows/{id}/runs`, newest first) just calls `setRunId`,
+     the same setter `testRunMutation.onSuccess` already calls. The existing
+     `refetchInterval: (q) => (RUN_TERMINAL.has(q.state.data.status) ? false : 1000)` already
+     stops polling the instant the first fetch shows a terminal status — a finished run
+     selected from history is terminal on its very first fetch, so it "just works" with no
+     branching on whether the run is live or historical. `isCurrent` (the pulsing-ring
+     "currently here" indicator) was extended to also cover `paused_delay`, not only
+     `paused_approval` — an oversight from the item-6 canvas work now that delay nodes can
+     genuinely pause too.
+  2. **`list_workflow_runs` joins through EVERY version of the workflow, not just the current
+     one.** `WorkflowRun` has no direct `workflow_id` column, only `workflow_version_id` — an
+     author reviewing history reasonably expects a run against an older draft to still appear,
+     not just runs against whatever happens to be published right now.
+  3. **`ORDER BY started_at DESC, id DESC`, not `started_at` alone — found by the test itself,
+     not assumed.** Two runs created moments apart inside the same Postgres transaction can get
+     an IDENTICAL `started_at`: `func.now()` (the column's `server_default`) is frozen at
+     transaction start, not evaluated per-statement, so ties are the normal case inside one
+     transaction, not a rare edge. `WorkflowRun` uses UUIDv7 primary keys (time-ordered), so
+     `id DESC` is a correct, free tiebreak — same fix shape as the FTS `ORDER BY ts_rank DESC,
+     chunks.id` tiebreak (docs/14 K1+K2, 2026-08-17), and found the identical way: the
+     newest-first test failed on its first real run against Postgres, not in review.
+- **Consequences:** read-only history for a run currently `paused_approval`/`paused_delay`
+  still works (selecting it shows its live state and, for approval, still offers
+  Approve/Reject) — this was not a deliberate design goal of this item but falls out for free
+  from reusing the same state, and is a genuine improvement: an author can now find and act on
+  a stuck run from its own history entry, not only via the moment it originally paused.
+
 ### ADR-076: Delay node real wait semantics — Celery eta, not a blocking sleep; max_runtime_s does not span the wait
 - **Date:** 2026-08-24
 - **Status:** accepted

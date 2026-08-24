@@ -291,6 +291,7 @@ export interface ApiWorkflowVersion {
 export type WorkflowRunStatus =
   | "running"
   | "paused_approval"
+  | "paused_delay"
   | "completed"
   | "failed"
   | "cancelled"

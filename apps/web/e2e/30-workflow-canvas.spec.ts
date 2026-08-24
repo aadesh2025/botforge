@@ -63,8 +63,8 @@ test("build, save, publish and test-run a workflow from the canvas", async ({ pa
   // should genuinely complete — proving the run round-trips through the real dispatch/poll
   // path (create, enqueue-or-eager-execute, poll to a terminal status).
   await page.getByRole("button", { name: /Test run/ }).click();
-  await expect(page.getByText(/Test run:/)).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText("Test run: completed")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/^Run:/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Run: completed")).toBeVisible({ timeout: 15_000 });
 });
 
 test("a viewer sees the canvas read-only, with no palette or save controls", async ({ page, context, request }) => {
