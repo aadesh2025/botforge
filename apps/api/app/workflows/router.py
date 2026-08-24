@@ -104,11 +104,26 @@ async def run_workflow(
     session: AsyncSession = Depends(get_session),
     ctx: OrgContext = Depends(current_org),
 ) -> schemas.WorkflowRunOut:
-    """Runs synchronously and returns the outcome in the response — including
-    `status: "paused_approval"` if the graph hit an Approval node. There is no async/queued
-    execution in this slice (no Celery wiring yet); a long-running graph blocks the request
-    for as long as its budget allows (`max_runtime_s`, default 30s)."""
+    """Runs the workflow's PUBLISHED version. Dispatches to Celery in production and returns
+    immediately with `status: "running"` — poll `GET /v1/workflow-runs/{id}/steps` (or the
+    run itself) for progress. A response of `"paused_approval"` only appears once a real
+    worker has actually reached that far."""
     return await service.run_workflow_now(session, ctx, workflow_id, data)
+
+
+@router.post(
+    "/{workflow_id}/test-run", response_model=schemas.WorkflowRunOut, status_code=status.HTTP_201_CREATED
+)
+async def test_run_workflow(
+    workflow_id: uuid.UUID,
+    data: schemas.RunWorkflowRequest,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.WorkflowRunOut:
+    """Runs the workflow's LATEST version — draft or published — marked `is_test=True`.
+    Requires only `WORKFLOWS_WRITE`, not `WORKFLOWS_PUBLISH`: testing a draft is part of
+    authoring it (docs/17 Phase 2 item 3)."""
+    return await service.run_workflow_test(session, ctx, workflow_id, data)
 
 
 @runs_router.post("/{run_id}/resume", response_model=schemas.WorkflowRunOut)

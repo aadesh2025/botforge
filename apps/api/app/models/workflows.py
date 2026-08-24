@@ -18,7 +18,7 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -95,6 +95,11 @@ class WorkflowRun(Base, UUIDPrimaryKey):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # docs/17 Phase 2 item 3: a run against the workflow's LATEST version (draft or published,
+    # via the canvas's "Test run" button), distinguished from real production traffic. Executed
+    # identically to a real run otherwise — no side-effect sandboxing, same trade-off the Agent
+    # Playground already makes (real tool calls, real agent turns, real spend).
+    is_test: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class WorkflowStep(Base, UUIDPrimaryKey):

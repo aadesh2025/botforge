@@ -94,6 +94,23 @@ async def _get_run(session: AsyncSession, ctx: OrgContext, run_id: uuid.UUID) ->
     return run
 
 
+async def _latest_workflow_version(session: AsyncSession, workflow_id: uuid.UUID) -> WorkflowVersion:
+    """The version a "Test run" exercises — draft or published, whichever was created most
+    recently. Mirrors `app.modules.agents.service._latest_version`'s semantics for the Agent
+    Playground exactly: an operator testing wants to see what they just saved, not necessarily
+    what's live."""
+    stmt = (
+        select(WorkflowVersion)
+        .where(WorkflowVersion.workflow_id == workflow_id)
+        .order_by(WorkflowVersion.version.desc())
+        .limit(1)
+    )
+    version = (await session.execute(stmt)).scalar_one_or_none()
+    if version is None:
+        raise AppError("workflows.no_version", "This workflow has no versions yet.", 400)
+    return version
+
+
 def _workflow_out(w: Workflow) -> schemas.WorkflowOut:
     return schemas.WorkflowOut(
         id=w.id, organization_id=w.organization_id, agent_id=w.agent_id, name=w.name,
@@ -113,7 +130,7 @@ def _run_out(r: WorkflowRun) -> schemas.WorkflowRunOut:
     return schemas.WorkflowRunOut(
         id=r.id, workflow_version_id=r.workflow_version_id, status=r.status,
         current_node_id=r.current_node_id, variables=r.variables, error=r.error,
-        started_at=r.started_at, completed_at=r.completed_at,
+        started_at=r.started_at, completed_at=r.completed_at, is_test=r.is_test,
     )
 
 
@@ -506,6 +523,26 @@ async def publish_version(
 # ── Execution ────────────────────────────────────────────────────────────────────────────
 
 
+async def _create_and_dispatch_run(
+    session: AsyncSession,
+    ctx: OrgContext,
+    workflow: Workflow,
+    version: WorkflowVersion,
+    data: schemas.RunWorkflowRequest,
+    *,
+    is_test: bool,
+) -> schemas.WorkflowRunOut:
+    run = WorkflowRun(
+        workflow_version_id=version.id, organization_id=ctx.org.id,
+        conversation_id=data.conversation_id, status="running", variables=dict(data.variables),
+        budget=_budget_to_dict(default_budget()), is_test=is_test,
+    )
+    session.add(run)
+    await session.flush()
+    await _dispatch_run(session, run, workflow, version)
+    return _run_out(run)
+
+
 async def run_workflow_now(
     session: AsyncSession, ctx: OrgContext, workflow_id: uuid.UUID, data: schemas.RunWorkflowRequest
 ) -> schemas.WorkflowRunOut:
@@ -514,8 +551,8 @@ async def run_workflow_now(
     the graph. `run.status` is still `"running"` in the returned `WorkflowRunOut` when
     dispatched to a real worker; only eager/test mode finishes before this returns.
 
-    Test-mode execution against a draft version is a separate endpoint
-    (`run_workflow_test`) — see docs/PROGRESS.md's Phase 2 entries.
+    Test-mode execution against the latest (possibly unpublished) version is
+    `run_workflow_test` below, on a separate endpoint.
     """
     rbac.require_permission(ctx.role, rbac.WORKFLOWS_WRITE)
     workflow = await _get_workflow(session, ctx, workflow_id)
@@ -523,16 +560,23 @@ async def run_workflow_now(
         raise AppError("workflows.not_published", "This workflow has no published version.", 400)
     version = await session.get(WorkflowVersion, workflow.current_version_id)
     assert version is not None
+    return await _create_and_dispatch_run(session, ctx, workflow, version, data, is_test=False)
 
-    run = WorkflowRun(
-        workflow_version_id=version.id, organization_id=ctx.org.id,
-        conversation_id=data.conversation_id, status="running", variables=dict(data.variables),
-        budget=_budget_to_dict(default_budget()),
-    )
-    session.add(run)
-    await session.flush()
-    await _dispatch_run(session, run, workflow, version)
-    return _run_out(run)
+
+async def run_workflow_test(
+    session: AsyncSession, ctx: OrgContext, workflow_id: uuid.UUID, data: schemas.RunWorkflowRequest
+) -> schemas.WorkflowRunOut:
+    """Runs the workflow's LATEST version — draft or published — so an editor can try out what
+    they just saved before anyone with `WORKFLOWS_PUBLISH` needs to sign off on it. Requires
+    only `WORKFLOWS_WRITE`, deliberately: testing your own draft is part of authoring it, not a
+    publish action (docs/17 Phase 2 item 3). Marked `is_test=True`; otherwise executed through
+    the exact same dispatch path as a real run — no side-effect sandboxing, the same trade-off
+    the Agent Playground already makes.
+    """
+    rbac.require_permission(ctx.role, rbac.WORKFLOWS_WRITE)
+    workflow = await _get_workflow(session, ctx, workflow_id)
+    version = await _latest_workflow_version(session, workflow_id)
+    return await _create_and_dispatch_run(session, ctx, workflow, version, data, is_test=True)
 
 
 async def resume_workflow_run(

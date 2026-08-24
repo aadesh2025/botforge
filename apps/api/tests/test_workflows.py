@@ -292,6 +292,98 @@ async def test_cancel_workflow_run(client: AsyncClient) -> None:
     assert again.json()["status"] == "cancelled"
 
 
+# ── Draft-version test-mode execution (docs/17 Phase 2 item 3) ────────────────
+async def test_test_run_executes_the_latest_unpublished_draft(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+
+    version = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=headers
+    )
+    assert version.status_code == 201
+    assert version.json()["status"] == "draft"  # never published
+
+    run = await client.post(
+        f"/v1/workflows/{workflow['id']}/test-run", json={"variables": {"name": "Sam"}}, headers=headers
+    )
+    assert run.status_code == 201, run.text
+    body = run.json()
+    assert body["status"] == "completed"
+    assert body["is_test"] is True
+
+    # The real /run endpoint still refuses — the workflow genuinely has no published version.
+    real_run = await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)
+    assert real_run.status_code == 400
+    assert real_run.json()["error"]["code"] == "workflows.not_published"
+
+
+async def test_test_run_uses_the_newest_version_even_after_publish(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    await _publish_graph(client, headers, workflow["id"], LINEAR_GRAPH)  # v1, published
+
+    edited_graph = {
+        "nodes": [
+            {"id": "s1", "type": "start"},
+            {"id": "m1", "type": "message", "config": {"content": "v2 says hi to {{name}}"}},
+            {"id": "e1", "type": "end"},
+        ],
+        "edges": [{"source": "s1", "target": "m1"}, {"source": "m1", "target": "e1"}],
+    }
+    v2 = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": edited_graph}, headers=headers
+    )
+    assert v2.json()["version"] == 2
+    assert v2.json()["status"] == "draft"  # not published
+
+    run = await client.post(
+        f"/v1/workflows/{workflow['id']}/test-run", json={"variables": {"name": "Sam"}}, headers=headers
+    )
+    assert run.status_code == 201
+    steps = (await client.get(f"/v1/workflow-runs/{run.json()['id']}/steps", headers=headers)).json()
+    message_step = next(s for s in steps if s["node_type"] == "message")
+    assert message_step["output"]["content"] == "v2 says hi to Sam"  # ran v2, not published v1
+
+
+async def test_test_run_without_any_version_returns_400(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+
+    run = await client.post(f"/v1/workflows/{workflow['id']}/test-run", json={}, headers=headers)
+    assert run.status_code == 400
+    assert run.json()["error"]["code"] == "workflows.no_version"
+
+
+async def test_editor_can_test_run_without_publish_permission(client: AsyncClient) -> None:
+    owner_headers, org = await _headers(client, "owner3@example.com")
+    agent = await _create_agent(client, owner_headers)
+    editor_headers = await _invite_and_join(client, owner_headers, org, "editor3@example.com", "editor")
+
+    workflow = await _create_workflow(client, editor_headers, agent["id"])
+    await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=editor_headers
+    )
+
+    run = await client.post(
+        f"/v1/workflows/{workflow['id']}/test-run", json={"variables": {"name": "Ed"}}, headers=editor_headers
+    )
+    assert run.status_code == 201, run.text
+    assert run.json()["is_test"] is True
+
+
+async def test_real_run_is_not_marked_is_test(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    await _publish_graph(client, headers, workflow["id"], LINEAR_GRAPH)
+
+    run = await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)
+    assert run.json()["is_test"] is False
+
+
 # ── RBAC ──────────────────────────────────────────────────────────────────────
 async def test_viewer_can_read_but_not_write(client: AsyncClient) -> None:
     owner_headers, org = await _headers(client, "owner@example.com")

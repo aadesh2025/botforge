@@ -52,6 +52,7 @@ class WorkflowRunOut(BaseModel):
     error: str | None
     started_at: dt.datetime
     completed_at: dt.datetime | None
+    is_test: bool
 
 
 class RunWorkflowRequest(BaseModel):
