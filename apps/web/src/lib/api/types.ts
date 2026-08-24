@@ -226,3 +226,97 @@ export interface ApiSearchResponse {
   query: string;
   citations: ApiCitation[];
 }
+
+// ── Workflows (docs/17 Phase 2) ──────────────────────────────────────────────
+export type WorkflowNodeType =
+  | "start"
+  | "end"
+  | "message"
+  | "condition"
+  | "switch"
+  | "set_variable"
+  | "transform"
+  | "approval"
+  | "tool"
+  | "agent"
+  | "sub_agent"
+  | "loop"
+  | "delay";
+
+/** One node in a `WorkflowVersion.graph`. `position` is canvas-only — the backend's graph
+ * validator ignores unknown per-node keys, so it rides along in the same JSON blob rather
+ * than needing a parallel layout store. */
+export interface WorkflowGraphNode {
+  id: string;
+  type: WorkflowNodeType;
+  config?: Record<string, unknown>;
+  position?: { x: number; y: number };
+  /** Canvas-authored, purely cosmetic — the backend's node handlers never read it. */
+  label?: string;
+}
+
+export interface WorkflowGraphEdge {
+  source: string;
+  target: string;
+  /** The branch label this edge fires on (condition/switch/approval/loop nodes only). Absent
+   * on a node with a single unconditional outgoing edge. */
+  condition?: string;
+}
+
+export interface WorkflowGraph {
+  nodes: WorkflowGraphNode[];
+  edges: WorkflowGraphEdge[];
+}
+
+export interface ApiWorkflow {
+  id: string;
+  organization_id: string;
+  agent_id: string | null;
+  name: string;
+  description: string | null;
+  current_version_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiWorkflowVersion {
+  id: string;
+  workflow_id: string;
+  version: number;
+  status: "draft" | "in_review" | "published" | "archived";
+  graph: WorkflowGraph;
+  created_at: string;
+}
+
+export type WorkflowRunStatus =
+  | "running"
+  | "paused_approval"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "budget_exceeded";
+
+export interface ApiWorkflowRun {
+  id: string;
+  workflow_version_id: string;
+  status: WorkflowRunStatus;
+  current_node_id: string | null;
+  variables: Record<string, unknown>;
+  error: string | null;
+  started_at: string;
+  completed_at: string | null;
+  is_test: boolean;
+}
+
+export interface ApiWorkflowStep {
+  id: string;
+  node_id: string;
+  node_type: WorkflowNodeType;
+  status: string;
+  input: Record<string, unknown> | null;
+  output: Record<string, unknown> | null;
+  latency_ms: number | null;
+  cost_usd: number | null;
+  error: string | null;
+  started_at: string;
+}

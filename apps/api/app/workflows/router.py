@@ -126,6 +126,15 @@ async def test_run_workflow(
     return await service.run_workflow_test(session, ctx, workflow_id, data)
 
 
+@runs_router.get("/{run_id}", response_model=schemas.WorkflowRunOut)
+async def get_run(
+    run_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.WorkflowRunOut:
+    return await service.get_workflow_run(session, ctx, run_id)
+
+
 @runs_router.post("/{run_id}/resume", response_model=schemas.WorkflowRunOut)
 async def resume_run(
     run_id: uuid.UUID,

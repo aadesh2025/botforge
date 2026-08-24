@@ -15,13 +15,16 @@ export type Permission =
   | "tools:manage"
   | "analytics:view"
   | "read"
-  | "inbox:handle";
+  | "inbox:handle"
+  // docs/17 Phase 2 — the same split agents:write/agents:publish already encodes.
+  | "workflows:write"
+  | "workflows:publish";
 
 const ROLE_PERMISSIONS: Record<string, Permission[]> = {
-  owner: ["org:manage", "members:manage", "agents:write", "agents:publish", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle"],
-  admin: ["members:manage", "agents:write", "agents:publish", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle"],
+  owner: ["org:manage", "members:manage", "agents:write", "agents:publish", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle", "workflows:write", "workflows:publish"],
+  admin: ["members:manage", "agents:write", "agents:publish", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle", "workflows:write", "workflows:publish"],
   // The client role: shape, test and connect their own agent — but not put it live.
-  editor: ["agents:write", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle"],
+  editor: ["agents:write", "kb:manage", "tools:manage", "analytics:view", "read", "inbox:handle", "workflows:write"],
   viewer: ["analytics:view", "read"],
   operator: ["analytics:view", "read", "inbox:handle"],
 };

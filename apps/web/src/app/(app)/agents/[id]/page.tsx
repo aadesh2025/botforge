@@ -11,6 +11,7 @@ import { ModelTab } from "@/components/builder/tabs/model-tab";
 import { KnowledgeTab } from "@/components/builder/tabs/knowledge-tab";
 import { ToolsTab } from "@/components/builder/tabs/tools-tab";
 import { ChannelsTab } from "@/components/builder/tabs/channels-tab";
+import { WorkflowsTab } from "@/components/builder/tabs/workflows-tab";
 import { AnalyticsTab } from "@/components/builder/tabs/analytics-tab";
 import { VersionsTab } from "@/components/builder/tabs/versions-tab";
 import { SettingsTab } from "@/components/builder/tabs/settings-tab";
@@ -26,6 +27,7 @@ const TABS = [
   "knowledge",
   "tools",
   "channels",
+  "workflows",
   "analytics",
   "versions",
   "settings",
@@ -35,9 +37,9 @@ type Tab = (typeof TABS)[number];
 /** Tabs that own the full width and drop the Playground column.
  *
  * Channels has its own visual preview; Analytics is a dashboard of charts and wide tables
- * that would be clipped to illegibility in the 2:1 split. Neither needs a chat-testing pane
- * beside it. */
-const FULL_WIDTH_TABS: readonly string[] = ["channels", "analytics"];
+ * that would be clipped to illegibility in the 2:1 split; the workflow canvas needs the room
+ * a drag-and-drop graph editor needs. None of the three need a chat-testing pane beside it. */
+const FULL_WIDTH_TABS: readonly string[] = ["channels", "analytics", "workflows"];
 
 /** Validation failures name the offending field — surface it, since that's what to fix. */
 function describeSaveError(e: unknown): string {
@@ -169,6 +171,9 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
             <TabsContent value="channels">
               <ChannelsTab />
             </TabsContent>
+            <TabsContent value="workflows">
+              <WorkflowsTab agentId={id} />
+            </TabsContent>
             <TabsContent value="analytics">
               <AnalyticsTab agentId={id} />
             </TabsContent>
@@ -181,7 +186,7 @@ export default function AgentBuilderPage({ params }: { params: Promise<{ id: str
           </Tabs>
         </div>
 
-        {tab !== "channels" && (
+        {!FULL_WIDTH_TABS.includes(tab) && (
           <div className="xl:col-span-1">
             <div className="sticky top-32">
               <Playground />

@@ -232,6 +232,11 @@ async def test_run_linear_workflow_completes(client: AsyncClient) -> None:
     assert all(s["status"] == "completed" for s in step_list)
     assert step_list[1]["output"]["content"] == "Hello Sam"
 
+    # GET /v1/workflow-runs/{id} — the canvas's Test-run polling target (item 6).
+    fetched = await client.get(f"/v1/workflow-runs/{body['id']}", headers=headers)
+    assert fetched.status_code == 200
+    assert fetched.json()["status"] == "completed"
+
 
 async def test_run_workflow_pauses_on_approval_then_resumes(client: AsyncClient) -> None:
     headers, _ = await _headers(client)

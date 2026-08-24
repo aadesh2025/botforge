@@ -669,6 +669,14 @@ async def resume_workflow_run(
     return await resume_workflow_run_unchecked(session, run, data)
 
 
+async def get_workflow_run(session: AsyncSession, ctx: OrgContext, run_id: uuid.UUID) -> schemas.WorkflowRunOut:
+    """The run's own status — the canvas's "Test run" polling reads this (docs/17 Phase 2
+    item 6) rather than inferring completion from the step list, which has no dedicated
+    terminal/paused marker of its own."""
+    rbac.require_permission(ctx.role, rbac.READ)
+    return _run_out(await _get_run(session, ctx, run_id))
+
+
 async def cancel_workflow_run(session: AsyncSession, ctx: OrgContext, run_id: uuid.UUID) -> schemas.WorkflowRunOut:
     rbac.require_permission(ctx.role, rbac.WORKFLOWS_WRITE)
     run = await _get_run(session, ctx, run_id)
