@@ -40,10 +40,16 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
 ## Shipped enhancements (post-v1)
 - **docs/17 Phase 2, finishing pass — items 1–6 (2026-08-24).** Triggered by name, six discrete
   commits per item as instructed (`527912d`, `c536270`, `02b7935`, `0d41083`, `3f0b004`,
-  `3e6061c`), each independently green. **Not tagged `agentic-phase-2-complete`** — three
-  genuine deferrals below mean the honest status is "all six items landed, none fully gold-
-  plated," not "Phase 2 is finished." Saying so plainly rather than tagging early is the same
-  discipline `agentic-phase-2-backend-complete` set on 2026-08-19.
+  `3e6061c`), each independently green. Landed with three genuine deferrals (delay node real
+  wait semantics, run-history overlay, tool-node argument editing) named explicitly rather than
+  implied — see each item's own note below — so **not tagged `agentic-phase-2-complete` at the
+  time**, same discipline `agentic-phase-2-backend-complete` set on 2026-08-19.
+  **✅ All three closed the same day**, in a follow-up Stage-1 pass, each its own commit:
+  delay (`edfdba7`, ADR-076), run-history overlay (`fb68cc3`, ADR-077), tool arguments
+  (`acaebab`, ADR-078). Full re-verification after all three: backend **1044 passed, 4 skipped,
+  1 pre-existing unrelated failure**; frontend `tsc`/`eslint`/`next build` clean, vitest
+  **187/187**, and every workflow-canvas Playwright spec (`30`, `31`, `32`) plus two adjacent
+  specs touching the same agent-builder page green. **Tagged `agentic-phase-2-complete`.**
   1. **Six new node types** — switch (N-way, literal→branch map, no `eval()`), loop (iterates
      via a graph CYCLE so the existing node-at-a-time walker needed no new execution model, and
      `AgentBudget.max_steps` became a hard iteration cap for free), transform (whitelisted
