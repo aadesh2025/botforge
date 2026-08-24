@@ -39,6 +39,9 @@ from app.modules.macros.router import inbox_router as macros_inbox_router
 from app.modules.macros.router import router as macros_router
 from app.modules.orgs.router import router as orgs_router
 from app.modules.public.router import router as public_router
+from app.modules.workflow_tests.router import test_run_router as workflow_test_run_router
+from app.modules.workflow_tests.router import test_runs_by_workflow_router as workflow_test_runs_by_workflow_router
+from app.modules.workflow_tests.router import tests_router as workflow_tests_router
 from app.rag import converters, rerank
 from app.realtime.hub import hub
 from app.tools.mcp_router import router as mcp_router
@@ -186,6 +189,9 @@ def create_app() -> FastAPI:
     app.include_router(agent_workflows_router)
     app.include_router(workflows_router)
     app.include_router(workflow_runs_router)
+    app.include_router(workflow_tests_router)
+    app.include_router(workflow_test_runs_by_workflow_router)
+    app.include_router(workflow_test_run_router)
     app.include_router(public_router)
     app.include_router(channels_router)
     app.include_router(inbox_router)

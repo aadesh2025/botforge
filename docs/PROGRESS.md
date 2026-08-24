@@ -38,6 +38,30 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **Workflow regression testing + WORKFLOWS_PUBLISH test-failure gate (2026-08-24).** Closes the
+  first item flagged (not fixed) in the Phase 4 report: Phase 3's own DoD wanted the
+  test-failure publish gate on both `AGENTS_PUBLISH` and `WORKFLOWS_PUBLISH`, but no "workflow
+  test" entity existed for the workflow side to check against. New `workflow_tests`/
+  `workflow_test_runs` tables (migration `0027`, verified up/down/up against real Postgres) —
+  a new pair, not a `workflow_id` column bolted onto `agent_tests`, because that table's shape
+  (`input_message`, `scripted_tool_calls`, `expected_final_answer_contains`) is a chat-turn
+  "final answer" concept a workflow run's `status`+`variables` outcome doesn't have. Full
+  reasoning in ADR-081. New module `app/modules/workflow_tests/` mirrors
+  `app/modules/agent_tests/` in structure: cached mode (scripted `tool`/`agent`/`sub_agent` node
+  outputs, keyed by tool_name/agent_id/workflow_id — graph.py's executors are never told which
+  graph node_id called them) is the default and the only mode that may run automatically; live
+  mode (the real DB-backed executors `run_workflow_now` itself uses) is explicit only.
+  `workflows/service.py::publish_version` now calls
+  `workflow_tests.service.latest_batch_has_failures` exactly the way
+  `agents/service.py::publish_version` already calls the Agent equivalent — same opt-in rule
+  (no tests = publishes exactly as before), same "latest batch, not latest case" semantics.
+  18 new tests (CRUD, cross-org 404, RBAC, cached-mode pass/fail on status/variables/visited-
+  nodes, a live-mode smoke test on a graph with no external nodes so it needs no real network
+  call, all four publish-gate states). Every tool/agent/sub-workflow result — scripted or real —
+  still passes through `neutralize_injections()` before touching `variables`, because that call
+  lives inside `graph.py`'s own node handlers, not the injected executor, so nothing new had to
+  be added here to keep that rule. ruff/mypy clean.
+
 - **docs/17 Phase 4 — Version/Approval Workflow (2026-08-24).** Triggered by name immediately
   after Phase 3. Re-read both docs/17 spec files' Phase 4 sections first, then read
   `AgentVersion`'s actual draft/publish/rollback code (`app/modules/agents/service.py`) rather
@@ -74,7 +98,10 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   changes, variable schema changes" — workflow-graph only. Built to the DoD: no Agent-level
   diff (system prompt/model/RAG) exists anywhere in this codebase as precedent, and inventing
   one wasn't asked for by this phase's instructions. If a diff over Agent versions is wanted
-  later, it is a new feature, not an extension of `app/workflows/diff.py`.
+  later, it is a new feature, not an extension of `app/workflows/diff.py`. **Confirmed and now
+  recorded directly in ADR-080 itself** (2026-08-24 follow-up), not only here — closes the
+  second item flagged in the original Phase 4 report, since a future session reading the spec
+  should hit this note in the ADR before rediscovering the ambiguity from zero.
 
   **No frontend UI beyond the admin column** — docs/17 Phase 4's own Definition of Done lists
   only backend/API items (matching Phase 3's own pattern, unlike Phase 2's explicit Playwright

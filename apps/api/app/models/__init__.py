@@ -43,6 +43,7 @@ from app.models.platform import (
 )
 from app.models.tools import Tool, ToolRun
 from app.models.widget_configs import WidgetConfig
+from app.models.workflow_tests import WorkflowTest, WorkflowTestRun
 from app.models.workflows import Workflow, WorkflowRun, WorkflowStep, WorkflowVersion
 
 __all__ = [
@@ -91,5 +92,7 @@ __all__ = [
     "Workflow",
     "WorkflowRun",
     "WorkflowStep",
+    "WorkflowTest",
+    "WorkflowTestRun",
     "WorkflowVersion",
 ]

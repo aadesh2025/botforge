@@ -646,6 +646,18 @@ async def publish_version(
     rbac.require_permission(ctx.role, rbac.WORKFLOWS_PUBLISH)
     workflow = await _get_workflow(session, ctx, workflow_id)
     v = await _get_version(session, workflow_id, version)
+    # docs/17 Phase 3 publish gate, closed for workflows here (ADR-081) — local import to avoid
+    # a circular import, matching agents/service.py::publish_version's exact reason:
+    # app.modules.workflow_tests.service imports FROM this module (to build the real executors
+    # for live-mode test runs), so this module cannot also import it at the top level.
+    from app.modules.workflow_tests.service import latest_batch_has_failures
+
+    if await latest_batch_has_failures(session, workflow_id):
+        raise AppError(
+            "workflows.tests_failing",
+            "The latest test run has failures — fix them before publishing.",
+            400,
+        )
     v.status = "published"
     workflow.current_version_id = v.id
     return _workflow_out(workflow)

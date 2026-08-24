@@ -18,6 +18,59 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-081: Workflow regression testing (`workflow_tests`) — new tables, not a `workflow_id` column on `agent_tests`; closes Phase 3's WORKFLOWS_PUBLISH gate
+- **Date:** 2026-08-24
+- **Status:** accepted
+- **Context:** Phase 3's own Definition of Done (`docs/17-IMPLEMENTATION-PROMPT.md`: "Publish
+  gate: `AGENTS_PUBLISH`/`WORKFLOWS_PUBLISH` blocked when the latest test run has failures")
+  asked for the test-failure publish gate to cover both permissions, but Phase 3 only ever
+  wired `agents/service.py::publish_version`, because no "workflow test" entity existed for a
+  workflow-side gate to check against — flagged explicitly in the Phase 4 report rather than
+  silently left half-done. The task instruction for this session was to check whether
+  `agent_tests` could be extended (a nullable `workflow_id` column) rather than building a
+  parallel table, checking docs/17's Phase 3 data model section first.
+- **Decision:** New tables, `workflow_tests`/`workflow_test_runs`, mirroring the *pattern*
+  `agent_tests`/`agent_test_runs` established (ADR-079: author-defined scenario, cached-mode
+  script, expected outcome, batch grouping, opt-in publish gate) but with workflow-shaped
+  columns instead of extending the Agent table:
+  - `input_variables` (dict) replaces `input_message`/`input_history` — a workflow run's only
+    input is its seed `variables`, no message/history concept.
+  - `scripted_node_outputs` (`{"tools": {...}, "agents": {...}, "sub_workflows": {...}}`)
+    replaces `scripted_tool_calls` — and is keyed by **tool_name / agent_id / workflow_id**,
+    not a graph node_id, because `app.workflows.graph`'s injected executors
+    (`WorkflowToolExecutor`/`WorkflowAgentExecutor`/`WorkflowSubExecutor`) are never told which
+    graph node_id called them — only what they were called *with*. A node_id-keyed script would
+    have been unusable against the real executor signatures.
+  - `expected_status` / `expected_variables_contains` / `expected_visited_node_ids` replace
+    `expected_tool_calls`/`expected_final_answer_contains` — a workflow run's outcome is
+    `app.workflows.graph.WorkflowRunResult`'s `status` + `variables` + `steps`, not a chat
+    turn's final-answer text.
+  - The runner (`app/modules/workflow_tests/service.py`) injects `_scripted_*_executor`
+    closures into the SAME `app.workflows.graph.run_workflow()` the real `run_workflow_now`
+    uses, in place of the real DB-backed executors `app.workflows.service` builds — so the
+    assertion is about whether graph branching/variable-writing/budget-accounting still behaves
+    correctly against a known, fixed input, exactly the reasoning ADR-079's cached-mode
+    `MultiRoundToolProvider` already established for agents.
+  - `latest_batch_has_failures(session, workflow_id)` mirrors
+    `agent_tests.service.latest_batch_has_failures` byte-for-byte in logic (same opt-in rule,
+    same "latest batch not latest case" semantics), wired into
+    `workflows/service.py::publish_version` via the identical local-import-to-avoid-circularity
+    pattern `agents/service.py::publish_version` already uses.
+- **Alternatives considered:** A nullable `agent_id`/`workflow_id` pair on one shared table —
+  rejected: `input_message`, `scripted_tool_calls`, `expected_final_answer_contains` would be
+  permanently dead columns on every workflow-test row, and `input_variables`/
+  `scripted_node_outputs`/`expected_visited_node_ids` would be dead on every agent-test row —
+  the exact polymorphic-table-with-dead-columns shape ADR-079 already rejected once for
+  `agent_steps`/`WorkflowRun`, for the same reason (neither existing shape has a notion of the
+  other's expected outcome). Keying `scripted_node_outputs` by graph node_id — rejected, the
+  executor callback signatures don't carry it, so it would be unusable data.
+- **Consequences:** Two more tables to keep schema-parallel with `agent_tests`/`agent_test_runs`
+  if that pair's shape changes later (e.g. a live-tier detail) — accepted, since the alternative
+  (one shared table) would have coupled two conceptually different scenario shapes for a
+  cosmetic reduction in table count. Migration `0027`, verified up/down/up against real
+  Postgres. No new RBAC permission — reuses `WORKFLOWS_WRITE`/`WORKFLOWS_PUBLISH`/`READ` exactly
+  as the task instructed.
+
 ### ADR-080: docs/17 Phase 4 (Version/Approval workflow) — workflow submit-review/rollback mirror Agent's shape; diff is structural, not textual
 - **Date:** 2026-08-24
 - **Status:** accepted
@@ -66,6 +119,18 @@ Format each entry as below. Newest at the top.
      them, so THAT part cannot drift; the per-node-type key tables can, and are commented as
      needing a matching update alongside any new node type. **No `eval()` anywhere** — pure set
      /dict comparison over already-validated JSON.
+  5. **⚠️ Scope note, recorded so a future session doesn't rediscover this from zero:** the two
+     docs/17 spec files disagree on diff scope. `docs/17-AGENTIC-RUNTIME-AND-BUILDER.md` §7's
+     Phase 4 line says the diff view covers "system prompt / model / tools / RAG / workflow-
+     graph changes between versions" — an Agent-**and**-Workflow list. The authoritative,
+     binding Definition of Done in `docs/17-IMPLEMENTATION-PROMPT.md` narrows this to "node/edge
+     changes, tool/MCP-server changes, variable schema changes" — workflow-graph **only**. This
+     ADR and `app/workflows/diff.py` build to the narrower DoD, deliberately: no Agent-level
+     diff feature (system prompt/model/RAG) exists anywhere in this codebase as precedent to
+     extend, building one wasn't asked for by Phase 4's own scope, and `app/workflows/diff.py`
+     has no way to reach `AgentVersion` fields — a `WorkflowVersion.graph` is all it ever sees.
+     **If an Agent-version diff is wanted later, it is a new, separate feature** — not an
+     extension of this module, and not something Phase 4 left half-built.
 - **Alternatives considered:** Forcing publish to require `in_review` first — rejected, no
   precedent and not asked for. A generic recursive JSON diff for the graph — rejected per the
   DoD's own example (a config change must read differently from an add/remove) and because a
