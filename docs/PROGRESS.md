@@ -38,6 +38,67 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **docs/17 Phase 4 — Version/Approval Workflow (2026-08-24).** Triggered by name immediately
+  after Phase 3. Re-read both docs/17 spec files' Phase 4 sections first, then read
+  `AgentVersion`'s actual draft/publish/rollback code (`app/modules/agents/service.py`) rather
+  than assume it, per this session's own instruction — a genuinely useful check, since it found
+  Agent has no real submit-review step at all (see ADR-080).
+
+  **Lifecycle**: `submit_for_review()` (`WORKFLOWS_WRITE`, `draft -> in_review` only, 400
+  `workflows.submit_review_invalid_state` otherwise) makes real a status value
+  `WorkflowVersion.status` has carried since Phase 2 without anything ever setting it.
+  `rollback()` (`WORKFLOWS_PUBLISH`) matches `agents/service.py::rollback` exactly: moves
+  `current_version_id` onto an existing already-published version, no new row, 400
+  `workflows.rollback_unpublished` if the target was never published. `publish_version` is
+  deliberately NOT gated on having passed through `in_review` — Agent's own publish has never
+  required a prior step.
+
+  **Diff**: `GET /v1/workflows/{id}/versions/{a}/diff/{b}` (`WORKFLOWS_WRITE`), backed by
+  `app/workflows/diff.py` — a structural diff from two node-id-keyed maps, not a JSON/text diff:
+  nodes added/removed by id, nodes in both compared by type/config equality so a config change
+  reads differently from an add/remove, edges as `(source, target, condition)` sets, tool/MCP
+  references from `tool_name`, and a variable read/write schema extracted per node type via
+  hand-maintained tables mirroring `graph.py`'s handlers (condition/template parsing imports
+  `graph.py`'s own `_COND_RE`/`_VAR_PATTERN` so that part can't drift). No `eval()`.
+
+  **Admin console**: `workflows_awaiting_review` alongside the existing
+  `agents_with_unpublished_changes`, same computed-count shape, different predicate — counts
+  `WorkflowVersion.status == "in_review"` directly rather than aping Agent's version-number
+  proxy, since workflows now carry a real signal to read.
+
+  **⚠️ The two spec files disagree on diff scope, and the narrower one was built.**
+  `docs/17-AGENTIC-RUNTIME-AND-BUILDER.md` §7's Phase 4 line says diff view covers "system
+  prompt / model / tools / RAG / workflow-graph changes between versions" — an Agent-and-
+  Workflow list. The authoritative, binding Definition of Done in
+  `docs/17-IMPLEMENTATION-PROMPT.md` narrows this to "node/edge changes, tool/MCP-server
+  changes, variable schema changes" — workflow-graph only. Built to the DoD: no Agent-level
+  diff (system prompt/model/RAG) exists anywhere in this codebase as precedent, and inventing
+  one wasn't asked for by this phase's instructions. If a diff over Agent versions is wanted
+  later, it is a new feature, not an extension of `app/workflows/diff.py`.
+
+  **No frontend UI beyond the admin column** — docs/17 Phase 4's own Definition of Done lists
+  only backend/API items (matching Phase 3's own pattern, unlike Phase 2's explicit Playwright
+  requirement), so a "Submit for review"/"Diff" UI in the workflow canvas is a spec-matching
+  deferral, not a scope cut. **⚠️ Also noted, not fixed — out of this phase's scope: Phase 3's
+  own Definition of Done said the test-failure publish gate should cover
+  `WORKFLOWS_PUBLISH`/`AGENTS_PUBLISH` both, but only `agents/service.py::publish_version` ever
+  got it** (`docs/PROGRESS.md`'s Phase 3 entry only documents the Agent wiring). There is no
+  "workflow test" entity for a workflow-side gate to check against — `agent_tests` is
+  agent-scoped only — so closing this gap means designing what a workflow test even is, which
+  this phase's instructions did not ask for and is a genuinely separate piece of work.
+
+  **Phase 5 (Integration SDK) remains deliberately held**, per its own gating condition in
+  docs/17 §7 and `docs/17-IMPLEMENTATION-PROMPT.md`: Phases 1–4 running against at least one
+  real client workflow with no Sev-1/Sev-2 incident, which is not yet true. Not an oversight.
+
+  Suites: backend full **1067 passed, 4 skipped, 1 pre-existing unrelated failure**
+  (`test_playground_without_handoff_feature_does_not_trigger`, the same one Phase 3 confirmed
+  predates this track via `git stash`); ruff/mypy `app/` clean. Frontend `tsc`/`eslint` clean,
+  vitest **187/187**. New coverage: 8 new `test_workflows.py` cases (submit-review, rollback,
+  diff ×2, plus RBAC matrix additions) + 1 new `test_admin.py` case driving submit-review→publish
+  through the real HTTP client and asserting the admin count moves 0→1→0. See ADR-080. Tagged
+  `agentic-phase-4-complete`.
+
 - **docs/17 Phase 3 — Agent Testing (2026-08-24).** Triggered by name immediately after Phase 2
   closed (`agentic-phase-2-complete`), per docs/17 §7's phase order. Re-read
   `docs/17-AGENTIC-RUNTIME-AND-BUILDER.md` §7 and `docs/17-IMPLEMENTATION-PROMPT.md`'s Phase 3
