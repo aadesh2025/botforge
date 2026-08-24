@@ -703,3 +703,97 @@ async def test_viewer_cannot_list_or_decide_workflow_approvals(client: AsyncClie
     )
     assert denied.status_code == 403
     assert run["status"] == "paused_approval"  # untouched
+
+
+# ── Systematic RBAC matrix (docs/17 Phase 2 item 5) ────────────────────────────
+async def test_rbac_matrix_across_every_workflow_endpoint(client: AsyncClient) -> None:
+    """Closes the exact remaining gap: earlier tests in this file prove RBAC on the endpoints
+    each feature happened to touch, but nothing had checked delete/cancel/resume/list_versions
+    /get/list_run_steps systematically. viewer has READ only; editor has WORKFLOWS_WRITE (and
+    INBOX_HANDLE) but not WORKFLOWS_PUBLISH; owner has everything."""
+    owner_headers, org = await _headers(client, "rbacowner@example.com")
+    agent = await _create_agent(client, owner_headers)
+    workflow = await _create_workflow(client, owner_headers, agent["id"])
+    v1 = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=owner_headers
+    )
+    assert v1.status_code == 201
+    published = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/{v1.json()['version']}/publish", headers=owner_headers
+    )
+    assert published.status_code == 200
+    run = (await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=owner_headers)).json()
+
+    viewer_headers = await _invite_and_join(client, owner_headers, org, "rbacviewer@example.com", "viewer")
+    editor_headers = await _invite_and_join(client, owner_headers, org, "rbaceditor@example.com", "editor")
+
+    # READ-gated: viewer and editor both succeed.
+    for headers in (viewer_headers, editor_headers):
+        assert (await client.get(f"/v1/agents/{agent['id']}/workflows", headers=headers)).status_code == 200
+        assert (await client.get(f"/v1/workflows/{workflow['id']}", headers=headers)).status_code == 200
+        assert (await client.get(f"/v1/workflows/{workflow['id']}/versions", headers=headers)).status_code == 200
+        assert (await client.get(f"/v1/workflow-runs/{run['id']}/steps", headers=headers)).status_code == 200
+
+    # WORKFLOWS_WRITE-gated: viewer denied, editor allowed.
+    write_checks = [
+        ("PATCH", f"/v1/workflows/{workflow['id']}", {"name": "renamed"}),
+        ("POST", f"/v1/workflows/{workflow['id']}/versions", {"graph": LINEAR_GRAPH}),
+        ("POST", f"/v1/workflows/{workflow['id']}/run", {}),
+        ("POST", f"/v1/workflows/{workflow['id']}/test-run", {}),
+    ]
+    for method, path, body in write_checks:
+        denied = await client.request(method, path, json=body, headers=viewer_headers)
+        assert denied.status_code == 403, f"{method} {path} should deny viewer, got {denied.status_code}"
+        allowed = await client.request(method, path, json=body, headers=editor_headers)
+        assert allowed.status_code in (200, 201), f"{method} {path} should allow editor, got {allowed.status_code}"
+
+    # WORKFLOWS_PUBLISH-gated: editor denied, owner allowed.
+    v2 = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=owner_headers
+    )
+    publish_denied = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/{v2.json()['version']}/publish", headers=editor_headers
+    )
+    assert publish_denied.status_code == 403
+    publish_allowed = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/{v2.json()['version']}/publish", headers=owner_headers
+    )
+    assert publish_allowed.status_code == 200
+
+    # resume/cancel: viewer denied, editor allowed — separate paused runs so one check's
+    # side effect can't be mistaken for another's.
+    approval_workflow = await _create_workflow(client, owner_headers, agent["id"], "Approval RBAC")
+    await _publish_graph(client, owner_headers, approval_workflow["id"], APPROVAL_GRAPH)
+
+    run_for_resume = (
+        await client.post(f"/v1/workflows/{approval_workflow['id']}/run", json={}, headers=owner_headers)
+    ).json()
+    resume_denied = await client.post(
+        f"/v1/workflow-runs/{run_for_resume['id']}/resume",
+        json={"decision": "approved"}, headers=viewer_headers,
+    )
+    assert resume_denied.status_code == 403
+    resume_allowed = await client.post(
+        f"/v1/workflow-runs/{run_for_resume['id']}/resume",
+        json={"decision": "approved"}, headers=editor_headers,
+    )
+    assert resume_allowed.status_code == 200
+
+    run_for_cancel = (
+        await client.post(f"/v1/workflows/{approval_workflow['id']}/run", json={}, headers=owner_headers)
+    ).json()
+    cancel_denied = await client.post(
+        f"/v1/workflow-runs/{run_for_cancel['id']}/cancel", headers=viewer_headers
+    )
+    assert cancel_denied.status_code == 403
+    cancel_allowed = await client.post(
+        f"/v1/workflow-runs/{run_for_cancel['id']}/cancel", headers=editor_headers
+    )
+    assert cancel_allowed.status_code == 200
+
+    # delete: viewer denied, editor allowed.
+    scratch = await _create_workflow(client, owner_headers, agent["id"], "Scratch for delete")
+    delete_denied = await client.delete(f"/v1/workflows/{scratch['id']}", headers=viewer_headers)
+    assert delete_denied.status_code == 403
+    delete_allowed = await client.delete(f"/v1/workflows/{scratch['id']}", headers=editor_headers)
+    assert delete_allowed.status_code == 204
