@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { Field } from "@/components/builder/field";
@@ -202,6 +203,16 @@ export function PropertiesPanel({
                 </SelectContent>
               </Select>
             </Field>
+            {/* Matches the existing agentic-runtime tool config UI's own pattern (the "Test
+                tool" dialog on the Tools tab) — a raw JSON textarea, not a dynamic field-per-
+                argument form, since a tool's argument shape varies per tool and isn't known
+                here. Keyed by node id so switching nodes resets the local edit buffer instead
+                of leaking one node's in-progress (possibly invalid) JSON into another's. */}
+            <ToolArgumentsField
+              key={node.id}
+              value={(c.arguments as Record<string, unknown>) ?? {}}
+              onChange={(args) => set("arguments", args)}
+            />
             <Field label="Result variable" description="Where the sanitized result is stored.">
               <Input
                 value={(c.result_variable as string) ?? ""}
@@ -365,6 +376,48 @@ function CasesEditor({
           + Add case
         </Button>
       </div>
+    </Field>
+  );
+}
+
+function ToolArgumentsField({
+  value,
+  onChange,
+}: {
+  value: Record<string, unknown>;
+  onChange: (args: Record<string, unknown>) => void;
+}) {
+  const [text, setText] = useState(() => JSON.stringify(value ?? {}, null, 2));
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Field
+      label="Arguments (JSON)"
+      description="String values are rendered with {{variables}} at run time, same as a Message node."
+    >
+      <Textarea
+        rows={5}
+        className="font-mono text-xs"
+        value={text}
+        onChange={(e) => {
+          const next = e.target.value;
+          setText(next);
+          try {
+            const parsed: unknown = JSON.parse(next || "{}");
+            if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+              throw new Error("must be a JSON object");
+            }
+            setError(null);
+            onChange(parsed as Record<string, unknown>);
+          } catch {
+            // Not propagated to the graph until it's valid again — the last-known-good
+            // arguments stay in effect rather than saving something unparseable.
+            setError("Invalid JSON — not saved until fixed.");
+          }
+        }}
+        placeholder={'{"query": "{{search_term}}"}'}
+      />
+      {error && <p className="text-xs text-error">{error}</p>}
     </Field>
   );
 }
