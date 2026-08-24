@@ -2,15 +2,30 @@
 tx-rollback). Closes the gap ADR-074 flagged as open — the graph engine itself
 (`app/workflows/graph.py`) already has thorough unit coverage in `test_workflow_graph.py`; this
 file exercises the router/service layer (RBAC, ownership, draft/publish, run/resume/cancel).
+
+Execution now dispatches through Celery in production (docs/17 Phase 2 item 2). Every test in
+this file except the dedicated `TestAsyncDispatch` class runs with `celery_task_always_eager`
+forced on, matching `test_email.py`'s convention — eager mode makes `run`/`resume` execute
+in-process, synchronously, on the SAME request-scoped session the test's assertions read from,
+which is what nearly every test here (written under the old synchronous-only contract) still
+assumes. `TestAsyncDispatch` turns it back off to prove the real dispatch path: a `run` returns
+`"running"` immediately and a Celery task is enqueued, never executed inline.
 """
 
 from __future__ import annotations
 
 import re
 
+import pytest
 from httpx import AsyncClient
 
+from app.core.config import settings
 from app.core.email import get_email_backend
+
+
+@pytest.fixture(autouse=True)
+def _eager_workflow_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "celery_task_always_eager", True)
 
 LINEAR_GRAPH = {
     "nodes": [
@@ -355,3 +370,97 @@ async def test_workflow_run_from_other_org_is_not_found(client: AsyncClient) -> 
         f"/v1/workflow-runs/{run['id']}/resume", json={"decision": "approved"}, headers=headers_b
     )
     assert resume.status_code == 404
+
+
+# ── Async dispatch (docs/17 Phase 2 item 2): eager forced OFF, proving the REAL path ─────────
+class TestAsyncDispatch:
+    """Overrides the module's autouse eager fixture to prove the production dispatch path:
+    `run`/`resume` enqueue a Celery task and return `"running"` immediately, never executing
+    inline. `.delay()` itself is stubbed (matching `test_email.py`'s convention) so this never
+    depends on a real broker or worker being reachable in the test environment."""
+
+    @pytest.fixture(autouse=True)
+    def _real_dispatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "celery_task_always_eager", False)
+
+    async def test_run_enqueues_and_returns_running_without_executing(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.worker import tasks as worker_tasks
+
+        calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            worker_tasks.run_workflow_task, "delay",
+            lambda *a: calls.append(a), raising=False,
+        )
+
+        headers, _ = await _headers(client)
+        agent = await _create_agent(client, headers)
+        workflow = await _create_workflow(client, headers, agent["id"])
+        await _publish_graph(client, headers, workflow["id"], LINEAR_GRAPH)
+
+        run = await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)
+        assert run.status_code == 201, run.text
+        body = run.json()
+        assert body["status"] == "running"
+        assert body["completed_at"] is None
+        assert calls == [(body["id"],)]  # enqueued with this run's id, nothing more
+
+        # Never executed inline: no steps were recorded, and the terminal node never ran.
+        steps = await client.get(f"/v1/workflow-runs/{body['id']}/steps", headers=headers)
+        assert steps.json() == []
+
+    async def test_resume_enqueues_and_returns_running_without_executing(
+        self, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.worker import tasks as worker_tasks
+
+        headers, _ = await _headers(client)
+        agent = await _create_agent(client, headers)
+        workflow = await _create_workflow(client, headers, agent["id"])
+        await _publish_graph(client, headers, workflow["id"], APPROVAL_GRAPH)
+
+        # Get to a real paused run first — eager just for this one call, matching how a run
+        # would already be paused by the time an operator resumes it for real.
+        monkeypatch.setattr(settings, "celery_task_always_eager", True)
+        run = (await client.post(f"/v1/workflows/{workflow['id']}/run", json={}, headers=headers)).json()
+        assert run["status"] == "paused_approval"
+        monkeypatch.setattr(settings, "celery_task_always_eager", False)
+
+        calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            worker_tasks.resume_workflow_run_task, "delay",
+            lambda *a: calls.append(a), raising=False,
+        )
+
+        resumed = await client.post(
+            f"/v1/workflow-runs/{run['id']}/resume", json={"decision": "approved"}, headers=headers
+        )
+        assert resumed.status_code == 200, resumed.text
+        body = resumed.json()
+        assert body["status"] == "running"  # not "paused_approval" and not "completed"
+        assert calls == [(run["id"], "approved")]
+
+        # Still only the one step from the eager run that paused it — resume did not execute.
+        steps = (await client.get(f"/v1/workflow-runs/{run['id']}/steps", headers=headers)).json()
+        assert [s["node_id"] for s in steps] == ["s1", "a1"]
+
+
+def test_resumed_budget_wall_clock_restarts_per_process() -> None:
+    """docs/17 Phase 2 item 2: a Celery worker executing a run (or a resume) has no relation
+    to the process that originally created the budget — `AgentBudget.started_at` is
+    deliberately NOT part of the serialized dict, so `max_runtime_s` measures wall-clock time
+    from whenever THIS process picked the run up, never a stale reading carried over from
+    wherever it was serialized."""
+    from app.chat.budget import default_budget
+    from app.workflows.service import _budget_from_dict, _budget_to_dict
+
+    original = default_budget()
+    original.consumed_steps = 3
+    original.consumed_cost_usd = 0.01
+    serialized = _budget_to_dict(original)
+    assert "started_at" not in serialized
+
+    reconstructed = _budget_from_dict(serialized)
+    assert reconstructed.consumed_steps == 3  # spend carried over...
+    assert reconstructed.elapsed_s() < 1.0  # ...but the runtime clock did not

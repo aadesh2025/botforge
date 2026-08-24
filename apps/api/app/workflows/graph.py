@@ -545,6 +545,7 @@ async def run_workflow(
     sub_workflow_executor: WorkflowSubExecutor | None = None,
     start_node_id: str | None = None,
     resume_input: dict[str, Any] | None = None,
+    on_step: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> WorkflowRunResult:
     """Execute `graph` starting at `start_node_id` (or the graph's `start` node), until it
     reaches an `end` node, pauses on an `approval` node, fails, or exhausts `budget`.
@@ -558,6 +559,12 @@ async def run_workflow(
     "rejected"}`. Everything upstream of that node is not re-executed — this function has no
     memory of it, which is why the caller (the service layer, not this module) is responsible
     for persisting `variables` and `budget` between calls.
+
+    `on_step`, if given, is awaited once per node visit, immediately after that node's step
+    dict is recorded — before the next node runs. This is what lets a caller persist progress
+    incrementally (docs/17 Phase 2 item 2: `GET .../steps` should show a long-running
+    workflow's progress while it is still running, not only once it finishes). `result.steps`
+    still accumulates the full list regardless, for callers that only want the final tally.
     """
     errors = validate_graph(graph)
     if errors:
@@ -601,12 +608,15 @@ async def run_workflow(
         latency_ms = int((time.perf_counter() - t0) * 1000)
         budget.record_step(cost_usd=result.cost_usd)
 
-        steps.append({
+        step_record = {
             "node_id": current, "node_type": node["type"],
             "status": "awaiting_approval" if result.status == "awaiting_approval" else result.status,
             "input": None, "output": result.output, "latency_ms": latency_ms,
             "cost_usd": result.cost_usd, "error": result.error,
-        })
+        }
+        steps.append(step_record)
+        if on_step is not None:
+            await on_step(step_record)
 
         if result.status == "failed":
             return WorkflowRunResult(

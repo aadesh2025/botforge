@@ -1,11 +1,19 @@
 """Workflow CRUD, versioning, and execution (docs/17 Phase 2).
 
-Execution is synchronous-in-request for this slice (no Celery wiring yet — see
-docs/PROGRESS.md's Phase 2 entry): `run_workflow_now`/`resume_workflow_run` call
-`app.workflows.graph.run_workflow` directly and persist the result. The `WorkflowRun` row is
-still the resumability boundary — `variables`/`budget`/`current_node_id` are read back from
-the DB on resume, not kept in process memory, so a future Celery task can drive the exact same
-functions without a rewrite; only the "who calls it and when" changes.
+Execution runs on Celery in production (docs/17 Phase 2 item 2): `run_workflow_now` /
+`resume_workflow_run` create/update the `WorkflowRun` row, then `_dispatch_run` either enqueues
+`app.worker.tasks.run_workflow_task` / `resume_workflow_run_task` — which call
+`execute_queued_run` on the worker's own DB session — or, when `settings.celery_task_always_eager`
+is set, run the SAME execution coroutine in-process instead of going through Celery at all. That
+in-process branch exists for the same reason `app.core.email.queue_email` has one: every task in
+`app.worker.tasks` drives its coroutine with `asyncio.run()`, which raises inside a loop that is
+already running — exactly what a request handler's event loop is. Going through Celery's own
+"eager" machinery here would hit that trap; bypassing it entirely does not. See CLAUDE.md §12.
+
+The `WorkflowRun` row is the resumability boundary regardless of path — `variables`/`budget`/
+`current_node_id` are always read back from the DB, never kept in Python process memory across a
+pause, which is what makes "which process runs this" a detail the execution logic itself doesn't
+need to know about.
 
 Every run gets a budget from `app.chat.budget.default_budget()` unconditionally — unlike
 Phase 1's dual platform+org flag (which had to gate a change to every existing agent's default
@@ -28,11 +36,20 @@ from app.chat.assembly import compose_system_prompt
 from app.chat.budget import AgentBudget, default_budget
 from app.chat.runtime import TurnResult, run_turn
 from app.core import rbac
+from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.llm.registry import get_chat_provider, get_chat_provider_chain
 from app.llm.types import ChatRequest, Message, ToolCall
-from app.models import Agent, AgentVersion, Workflow, WorkflowRun, WorkflowStep, WorkflowVersion
+from app.models import (
+    Agent,
+    AgentVersion,
+    Organization,
+    Workflow,
+    WorkflowRun,
+    WorkflowStep,
+    WorkflowVersion,
+)
 from app.modules.orgs.deps import OrgContext
 from app.tools.base import ToolContext
 from app.tools.service import execute_tool_call, resolve_agent_tools
@@ -127,13 +144,18 @@ def _budget_from_dict(d: dict[str, Any]) -> AgentBudget:
 
 
 async def _tool_executor_for(
-    session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID | None
+    session: AsyncSession, org: Organization, agent_id: uuid.UUID | None
 ) -> Any:
     """A `WorkflowToolExecutor` over the same `Tool` rows chat's `run_turn` uses — reuses
     `execute_tool_call` rather than a second dispatch path. `None` when there is no agent to
     scope tools to, or the agent has no version yet — a tool node then fails cleanly per
     `graph.py`'s own handling rather than crashing on a `ToolContext.version` a builtin tool
     (e.g. `knowledge_search`, which reads `ctx.version.rag_config`) assumes is real.
+
+    Takes `org: Organization`, not a full `OrgContext` — a Celery worker process has no HTTP
+    request to build one from, only the `organization_id` a `WorkflowRun` row carries. The
+    RBAC-checked callers (`run_workflow_now` etc.) still take `OrgContext`; only the pure
+    execution layer was narrowed to what it actually uses.
     """
     if agent_id is None:
         return None
@@ -143,8 +165,8 @@ async def _tool_executor_for(
     version = await session.get(AgentVersion, agent.current_version_id)
     if version is None:
         return None
-    _specs, by_name = await resolve_agent_tools(session, ctx.org.id, agent_id, include_mcp=True)
-    tool_ctx = ToolContext(session=session, org_id=ctx.org.id, agent_id=agent_id, version=version)
+    _specs, by_name = await resolve_agent_tools(session, org.id, agent_id, include_mcp=True)
+    tool_ctx = ToolContext(session=session, org_id=org.id, agent_id=agent_id, version=version)
 
     async def executor(name: str, args: dict[str, Any]) -> dict[str, Any]:
         call = ToolCall(id=str(uuid.uuid4()), name=name, arguments=args)
@@ -154,7 +176,7 @@ async def _tool_executor_for(
     return executor
 
 
-async def _agent_executor_for(session: AsyncSession, ctx: OrgContext) -> WorkflowAgentExecutor:
+async def _agent_executor_for(session: AsyncSession, org: Organization) -> WorkflowAgentExecutor:
     """An `agent` node's executor: runs an existing published `Agent` through the real
     agentic runtime (`app.chat.runtime.run_turn`), a single non-streaming user turn with no
     conversation persistence — the workflow's own `WorkflowStep` for this node is the record
@@ -172,7 +194,7 @@ async def _agent_executor_for(session: AsyncSession, ctx: OrgContext) -> Workflo
         except ValueError:
             return {"content": "", "status": "error", "error": f"invalid agent_id {agent_id_str!r}"}
         agent = await session.get(Agent, agent_id)
-        if agent is None or agent.organization_id != ctx.org.id:
+        if agent is None or agent.organization_id != org.id:
             return {"content": "", "status": "error", "error": "agent not found"}
         if agent.current_version_id is None:
             return {"content": "", "status": "error", "error": "agent has no published version"}
@@ -184,15 +206,15 @@ async def _agent_executor_for(session: AsyncSession, ctx: OrgContext) -> Workflo
         provider_name = mc.get("provider", "fake")
         try:
             provider = await get_chat_provider_chain(
-                session, ctx.org.id, mc, agent_id=agent.id, resolve=get_chat_provider
+                session, org.id, mc, agent_id=agent.id, resolve=get_chat_provider
             )
         except AppError as exc:
             log.warning("workflow_agent_node_provider_unavailable", agent_id=str(agent.id), error=str(exc))
             return {"content": "", "status": "error", "error": str(exc)}
 
         system_prompt = compose_system_prompt(
-            version.system_prompt, version.persona, agent_name=agent.name, business_name=ctx.org.name,
-            variables=chat_variables.build_context(agent_name=agent.name, business_name=ctx.org.name),
+            version.system_prompt, version.persona, agent_name=agent.name, business_name=org.name,
+            variables=chat_variables.build_context(agent_name=agent.name, business_name=org.name),
         )
         messages: list[Message] = []
         if system_prompt:
@@ -217,7 +239,7 @@ async def _agent_executor_for(session: AsyncSession, ctx: OrgContext) -> Workflo
     return executor
 
 
-async def _sub_workflow_executor_for(session: AsyncSession, ctx: OrgContext) -> WorkflowSubExecutor:
+async def _sub_workflow_executor_for(session: AsyncSession, org: Organization) -> WorkflowSubExecutor:
     """A `sub_agent` node's executor: runs another org-owned, published `Workflow` in-process,
     sharing the same budget (call depth included). Deliberately does not persist a separate
     `WorkflowRun` row for the nested execution — the parent's own `WorkflowStep` for the
@@ -235,7 +257,7 @@ async def _sub_workflow_executor_for(session: AsyncSession, ctx: OrgContext) -> 
                 status="failed", variables=variables_snapshot, error=f"invalid workflow_id {workflow_id_str!r}"
             )
         workflow = await session.get(Workflow, workflow_id)
-        if workflow is None or workflow.organization_id != ctx.org.id or workflow.deleted_at is not None:
+        if workflow is None or workflow.organization_id != org.id or workflow.deleted_at is not None:
             return WorkflowRunResult(status="failed", variables=variables_snapshot, error="sub-workflow not found")
         if workflow.current_version_id is None:
             return WorkflowRunResult(
@@ -244,8 +266,8 @@ async def _sub_workflow_executor_for(session: AsyncSession, ctx: OrgContext) -> 
         version = await session.get(WorkflowVersion, workflow.current_version_id)
         assert version is not None
 
-        nested_tool_executor = await _tool_executor_for(session, ctx, workflow.agent_id)
-        nested_agent_executor = await _agent_executor_for(session, ctx)
+        nested_tool_executor = await _tool_executor_for(session, org, workflow.agent_id)
+        nested_agent_executor = await _agent_executor_for(session, org)
         return await run_workflow(
             version.graph, variables=variables_snapshot, budget=budget,
             tool_executor=nested_tool_executor, agent_executor=nested_agent_executor,
@@ -257,17 +279,126 @@ async def _sub_workflow_executor_for(session: AsyncSession, ctx: OrgContext) -> 
     return executor
 
 
-async def _persist_steps(
-    session: AsyncSession, run: WorkflowRun, result: WorkflowRunResult
+async def _persist_one_step(
+    session: AsyncSession, run: WorkflowRun, step: dict[str, Any], *, commit: bool
 ) -> None:
-    for step in result.steps:
-        session.add(
-            WorkflowStep(
-                workflow_run_id=run.id, node_id=step["node_id"], node_type=step["node_type"],
-                status=step["status"], input=step.get("input"), output=step.get("output"),
-                latency_ms=step.get("latency_ms"), cost_usd=step.get("cost_usd"), error=step.get("error"),
-            )
+    session.add(
+        WorkflowStep(
+            workflow_run_id=run.id, node_id=step["node_id"], node_type=step["node_type"],
+            status=step["status"], input=step.get("input"), output=step.get("output"),
+            latency_ms=step.get("latency_ms"), cost_usd=step.get("cost_usd"), error=step.get("error"),
         )
+    )
+    await session.flush()
+    if commit:
+        # Durable immediately — so `GET .../steps` polled from a DIFFERENT connection (the
+        # API request serving that poll) sees progress on a long-running run while the Celery
+        # task is still executing it, not only once the whole run finishes. Only ever true on
+        # the worker's own dedicated session (see `execute_queued_run`) — never on a
+        # request-scoped session, which the test harness shares across a whole test inside one
+        # uncommitted transaction (`tests/conftest.py`); committing there would break that
+        # isolation, which is exactly why `commit` is plumbed through rather than hardcoded.
+        await session.commit()
+
+
+async def _execute_and_persist(
+    session: AsyncSession,
+    run: WorkflowRun,
+    workflow: Workflow,
+    version: WorkflowVersion,
+    *,
+    resume_input: dict[str, Any] | None = None,
+    commit_each_step: bool = False,
+) -> WorkflowRunResult:
+    """The one execution path both the in-process (eager) and Celery-task dispatch routes call
+    — `_dispatch_run` decides WHICH process runs this, not what it does once it does.
+    """
+    org = await session.get(Organization, run.organization_id)
+    assert org is not None
+    budget = _budget_from_dict(run.budget)
+    tool_executor = await _tool_executor_for(session, org, workflow.agent_id)
+    agent_executor = await _agent_executor_for(session, org)
+    sub_workflow_executor = await _sub_workflow_executor_for(session, org)
+
+    async def on_step(step: dict[str, Any]) -> None:
+        await _persist_one_step(session, run, step, commit=commit_each_step)
+
+    result = await run_workflow(
+        version.graph, variables=run.variables, budget=budget, tool_executor=tool_executor,
+        agent_executor=agent_executor, sub_workflow_executor=sub_workflow_executor,
+        start_node_id=run.current_node_id if resume_input is not None else None,
+        resume_input=resume_input, on_step=on_step,
+    )
+    run.status = result.status
+    run.current_node_id = result.current_node_id
+    run.error = result.error
+    run.budget = _budget_to_dict(budget)
+    if result.status in ("completed", "failed", "budget_exceeded"):
+        run.completed_at = dt.datetime.now(tz=dt.UTC)
+    await session.flush()
+    if commit_each_step:
+        await session.commit()
+    return result
+
+
+async def _dispatch_run(
+    session: AsyncSession,
+    run: WorkflowRun,
+    workflow: Workflow,
+    version: WorkflowVersion,
+    *,
+    resume_input: dict[str, Any] | None = None,
+) -> None:
+    """Runs `_execute_and_persist` in-process when Celery is in eager mode (see the module
+    docstring for why that must NOT go through Celery's own eager machinery), otherwise
+    enqueues a Celery task and returns immediately — the caller's `WorkflowRun` stays in
+    `"running"` until that task updates it.
+    """
+    if settings.celery_task_always_eager:
+        await _execute_and_persist(session, run, workflow, version, resume_input=resume_input)
+        return
+    # Deliberately no explicit commit before enqueueing here — matches the existing
+    # `enqueue_document_ingestion` convention (flush, then `.delay()`) rather than introducing
+    # a stricter guarantee only for workflows. A worker that picks up this task before the
+    # enclosing request's `get_session()` commit lands would find no row; unobserved in
+    # practice so far for ingestion, and the same trade-off applies here. See docs/PROGRESS.md.
+    from app.worker.tasks import resume_workflow_run_task, run_workflow_task
+
+    if resume_input is None:
+        run_workflow_task.delay(str(run.id))
+    else:
+        resume_workflow_run_task.delay(str(run.id), resume_input.get("decision", "rejected"))
+
+
+async def execute_queued_run(
+    session: AsyncSession, run_id: uuid.UUID, *, resume_decision: str | None = None
+) -> str:
+    """Entry point for the Celery task (`app.worker.tasks.run_workflow_task` /
+    `resume_workflow_run_task`). No RBAC check and no `OrgContext` — the request that enqueued
+    this already checked `WORKFLOWS_WRITE`, and a worker process has no HTTP request to build
+    one from; this loads only what execution itself needs.
+    """
+    run = await session.get(WorkflowRun, run_id)
+    if run is None:
+        log.error("workflow_run_vanished", run_id=str(run_id))
+        return "not_found"
+    version = await session.get(WorkflowVersion, run.workflow_version_id)
+    if version is None:
+        run.status = "failed"
+        run.error = "workflow version was deleted before this run could execute"
+        run.completed_at = dt.datetime.now(tz=dt.UTC)
+        return run.status
+    workflow = await session.get(Workflow, version.workflow_id)
+    if workflow is None:
+        run.status = "failed"
+        run.error = "workflow was deleted before this run could execute"
+        run.completed_at = dt.datetime.now(tz=dt.UTC)
+        return run.status
+    resume_input = {"decision": resume_decision} if resume_decision is not None else None
+    result = await _execute_and_persist(
+        session, run, workflow, version, resume_input=resume_input, commit_each_step=True
+    )
+    return result.status
 
 
 # ── Workflow CRUD ────────────────────────────────────────────────────────────────────────
@@ -378,8 +509,14 @@ async def publish_version(
 async def run_workflow_now(
     session: AsyncSession, ctx: OrgContext, workflow_id: uuid.UUID, data: schemas.RunWorkflowRequest
 ) -> schemas.WorkflowRunOut:
-    """Runs the workflow's PUBLISHED version. Test-mode execution against a draft version is
-    intentionally not built in this slice — see docs/PROGRESS.md's Phase 2 entry."""
+    """Runs the workflow's PUBLISHED version. Creates the `WorkflowRun` row and dispatches
+    execution (Celery in production; see `_dispatch_run`) — this function itself never walks
+    the graph. `run.status` is still `"running"` in the returned `WorkflowRunOut` when
+    dispatched to a real worker; only eager/test mode finishes before this returns.
+
+    Test-mode execution against a draft version is a separate endpoint
+    (`run_workflow_test`) — see docs/PROGRESS.md's Phase 2 entries.
+    """
     rbac.require_permission(ctx.role, rbac.WORKFLOWS_WRITE)
     workflow = await _get_workflow(session, ctx, workflow_id)
     if workflow.current_version_id is None:
@@ -387,30 +524,14 @@ async def run_workflow_now(
     version = await session.get(WorkflowVersion, workflow.current_version_id)
     assert version is not None
 
-    budget = default_budget()
     run = WorkflowRun(
         workflow_version_id=version.id, organization_id=ctx.org.id,
         conversation_id=data.conversation_id, status="running", variables=dict(data.variables),
-        budget=_budget_to_dict(budget),
+        budget=_budget_to_dict(default_budget()),
     )
     session.add(run)
     await session.flush()
-
-    tool_executor = await _tool_executor_for(session, ctx, workflow.agent_id)
-    agent_executor = await _agent_executor_for(session, ctx)
-    sub_workflow_executor = await _sub_workflow_executor_for(session, ctx)
-    result = await run_workflow(
-        version.graph, variables=run.variables, budget=budget, tool_executor=tool_executor,
-        agent_executor=agent_executor, sub_workflow_executor=sub_workflow_executor,
-    )
-    await _persist_steps(session, run, result)
-
-    run.status = result.status
-    run.current_node_id = result.current_node_id
-    run.error = result.error
-    run.budget = _budget_to_dict(budget)
-    if result.status in ("completed", "failed", "budget_exceeded"):
-        run.completed_at = dt.datetime.now(tz=dt.UTC)
+    await _dispatch_run(session, run, workflow, version)
     return _run_out(run)
 
 
@@ -426,23 +547,11 @@ async def resume_workflow_run(
     workflow = await session.get(Workflow, version.workflow_id)
     assert workflow is not None
 
-    budget = _budget_from_dict(run.budget)
-    tool_executor = await _tool_executor_for(session, ctx, workflow.agent_id)
-    agent_executor = await _agent_executor_for(session, ctx)
-    sub_workflow_executor = await _sub_workflow_executor_for(session, ctx)
-    result = await run_workflow(
-        version.graph, variables=run.variables, budget=budget, tool_executor=tool_executor,
-        agent_executor=agent_executor, sub_workflow_executor=sub_workflow_executor,
-        start_node_id=run.current_node_id, resume_input={"decision": data.decision},
-    )
-    await _persist_steps(session, run, result)
-
-    run.status = result.status
-    run.current_node_id = result.current_node_id
-    run.error = result.error
-    run.budget = _budget_to_dict(budget)
-    if result.status in ("completed", "failed", "budget_exceeded"):
-        run.completed_at = dt.datetime.now(tz=dt.UTC)
+    # Reflects the decision was accepted immediately, before a real worker picks it up —
+    # a poller must never see the stale "paused_approval" once a decision has been made.
+    run.status = "running"
+    await session.flush()
+    await _dispatch_run(session, run, workflow, version, resume_input={"decision": data.decision})
     return _run_out(run)
 
 
