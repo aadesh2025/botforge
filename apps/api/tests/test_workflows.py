@@ -211,6 +211,102 @@ async def test_version_lifecycle_and_publish(client: AsyncClient) -> None:
     assert published.json()["current_version_id"] == v1.json()["id"]
 
 
+# ── Phase 4: submit-review / publish / rollback / diff ─────────────────────────
+async def test_submit_for_review_then_publish(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    v1 = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=headers
+    )
+    assert v1.json()["status"] == "draft"
+
+    reviewed = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/1/submit-review", headers=headers
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()["status"] == "in_review"
+
+    # publish works from in_review, same as it already does from draft — no forced gate.
+    published = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/1/publish", headers=headers
+    )
+    assert published.status_code == 200
+    assert published.json()["current_version_id"] == v1.json()["id"]
+
+
+async def test_submit_for_review_rejects_non_draft_versions(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=headers
+    )
+    first = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/1/submit-review", headers=headers
+    )
+    assert first.status_code == 200
+
+    again = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/1/submit-review", headers=headers
+    )
+    assert again.status_code == 400
+    assert again.json()["error"]["code"] == "workflows.submit_review_invalid_state"
+
+    await client.post(f"/v1/workflows/{workflow['id']}/versions/1/publish", headers=headers)
+    published_again = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/1/submit-review", headers=headers
+    )
+    assert published_again.status_code == 400
+    assert published_again.json()["error"]["code"] == "workflows.submit_review_invalid_state"
+
+
+async def test_rollback_to_older_published_version(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    v1 = await _publish_graph(client, headers, workflow["id"], LINEAR_GRAPH)
+    v1_id = v1["current_version_id"]
+
+    v2_created = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=headers
+    )
+    v2_published = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/{v2_created.json()['version']}/publish",
+        headers=headers,
+    )
+    assert v2_published.json()["current_version_id"] != v1_id
+
+    rolled_back = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/1/rollback", headers=headers
+    )
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["current_version_id"] == v1_id
+
+    # The rolled-back-from version is untouched — still published, so rolling forward again works.
+    versions = (await client.get(f"/v1/workflows/{workflow['id']}/versions", headers=headers)).json()
+    by_version = {v["version"]: v for v in versions}
+    assert by_version[2]["status"] == "published"
+
+
+async def test_rollback_to_unpublished_version_returns_400(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    await _publish_graph(client, headers, workflow["id"], LINEAR_GRAPH)
+    draft = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=headers
+    )
+    assert draft.json()["status"] == "draft"
+
+    r = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/{draft.json()['version']}/rollback",
+        headers=headers,
+    )
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "workflows.rollback_unpublished"
+
+
 # ── Execution ─────────────────────────────────────────────────────────────────
 async def test_run_workflow_without_published_version_returns_400(client: AsyncClient) -> None:
     headers, _ = await _headers(client)
@@ -796,10 +892,22 @@ async def test_rbac_matrix_across_every_workflow_endpoint(client: AsyncClient) -
         allowed = await client.request(method, path, json=body, headers=editor_headers)
         assert allowed.status_code in (200, 201), f"{method} {path} should allow editor, got {allowed.status_code}"
 
-    # WORKFLOWS_PUBLISH-gated: editor denied, owner allowed.
+    # WORKFLOWS_WRITE-gated: submit-review (viewer denied, editor allowed).
     v2 = await client.post(
         f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=owner_headers
     )
+    submit_review_denied = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/{v2.json()['version']}/submit-review",
+        headers=viewer_headers,
+    )
+    assert submit_review_denied.status_code == 403
+    submit_review_allowed = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/{v2.json()['version']}/submit-review",
+        headers=editor_headers,
+    )
+    assert submit_review_allowed.status_code == 200
+
+    # WORKFLOWS_PUBLISH-gated: publish and rollback (editor denied, owner allowed).
     publish_denied = await client.post(
         f"/v1/workflows/{workflow['id']}/versions/{v2.json()['version']}/publish", headers=editor_headers
     )
@@ -808,6 +916,15 @@ async def test_rbac_matrix_across_every_workflow_endpoint(client: AsyncClient) -
         f"/v1/workflows/{workflow['id']}/versions/{v2.json()['version']}/publish", headers=owner_headers
     )
     assert publish_allowed.status_code == 200
+
+    rollback_denied = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/{v1.json()['version']}/rollback", headers=editor_headers
+    )
+    assert rollback_denied.status_code == 403
+    rollback_allowed = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions/{v1.json()['version']}/rollback", headers=owner_headers
+    )
+    assert rollback_allowed.status_code == 200
 
     # resume/cancel: viewer denied, editor allowed — separate paused runs so one check's
     # side effect can't be mistaken for another's.

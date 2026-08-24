@@ -87,6 +87,19 @@ async def list_versions(
     return await service.list_versions(session, ctx, workflow_id)
 
 
+@router.post(
+    "/{workflow_id}/versions/{version}/submit-review", response_model=schemas.WorkflowVersionOut
+)
+async def submit_for_review(
+    workflow_id: uuid.UUID,
+    version: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.WorkflowVersionOut:
+    """`draft -> in_review`, requires only WORKFLOWS_WRITE (docs/17 Phase 4)."""
+    return await service.submit_for_review(session, ctx, workflow_id, version)
+
+
 @router.post("/{workflow_id}/versions/{version}/publish", response_model=schemas.WorkflowOut)
 async def publish_version(
     workflow_id: uuid.UUID,
@@ -95,6 +108,18 @@ async def publish_version(
     ctx: OrgContext = Depends(current_org),
 ) -> schemas.WorkflowOut:
     return await service.publish_version(session, ctx, workflow_id, version)
+
+
+@router.post("/{workflow_id}/versions/{version}/rollback", response_model=schemas.WorkflowOut)
+async def rollback_version(
+    workflow_id: uuid.UUID,
+    version: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.WorkflowOut:
+    """Moves `current_version_id` back onto an already-published version (docs/17 Phase 4) —
+    same semantics as `app.modules.agents.router.rollback`."""
+    return await service.rollback(session, ctx, workflow_id, version)
 
 
 @router.get("/{workflow_id}/runs", response_model=list[schemas.WorkflowRunOut])

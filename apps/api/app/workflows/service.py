@@ -611,6 +611,34 @@ async def list_versions(
     return [_version_out(v) for v in rows]
 
 
+async def submit_for_review(
+    session: AsyncSession, ctx: OrgContext, workflow_id: uuid.UUID, version: int
+) -> schemas.WorkflowVersionOut:
+    """`draft -> in_review` (docs/17 Phase 4). `WorkflowVersion.status` has carried this value
+    since Phase 2 (ADR-074's model comment names this exact phase as the reason) but nothing
+    ever set it — Agent has no equivalent transition at all; its "awaiting review" is inferred
+    purely from `is_published` + the viewer's own permission (`builder-header.tsx`), because
+    `AgentVersion` never grew a real in_review state to carry. Workflows did, so this makes it
+    real instead of leaving it declared-but-unused. `WORKFLOWS_WRITE`, not `WORKFLOWS_PUBLISH`
+    — requesting review is part of authoring, the same split `test-run` already uses.
+
+    Deliberately does NOT gate `publish_version` below on having passed through this state
+    first: `AgentVersion.publish_version` has never required any prior step, and forcing one
+    here would be a new, undiscussed product rule rather than "reuse the pattern" (see ADR-080).
+    """
+    rbac.require_permission(ctx.role, rbac.WORKFLOWS_WRITE)
+    await _get_workflow(session, ctx, workflow_id)
+    v = await _get_version(session, workflow_id, version)
+    if v.status != "draft":
+        raise AppError(
+            "workflows.submit_review_invalid_state",
+            f"Only a draft version can be submitted for review (this version is {v.status!r}).",
+            400,
+        )
+    v.status = "in_review"
+    return _version_out(v)
+
+
 async def publish_version(
     session: AsyncSession, ctx: OrgContext, workflow_id: uuid.UUID, version: int
 ) -> schemas.WorkflowOut:
@@ -618,6 +646,27 @@ async def publish_version(
     workflow = await _get_workflow(session, ctx, workflow_id)
     v = await _get_version(session, workflow_id, version)
     v.status = "published"
+    workflow.current_version_id = v.id
+    return _workflow_out(workflow)
+
+
+async def rollback(
+    session: AsyncSession, ctx: OrgContext, workflow_id: uuid.UUID, version: int
+) -> schemas.WorkflowOut:
+    """Moves `current_version_id` back onto an already-published version — matches
+    `app.modules.agents.service.rollback` exactly (read directly, not guessed, per docs/17
+    Phase 4's instruction): no new version row is created, the target must already be
+    published, and nothing about any other version changes. `WorkflowVersion` rows are never
+    deleted or mutated once created, so an older published version is always still there to
+    roll back onto, and rolling forward again afterwards is just another `publish_version` call.
+    """
+    rbac.require_permission(ctx.role, rbac.WORKFLOWS_PUBLISH)
+    workflow = await _get_workflow(session, ctx, workflow_id)
+    v = await _get_version(session, workflow_id, version)
+    if v.status != "published":
+        raise AppError(
+            "workflows.rollback_unpublished", "Can only roll back to a published version.", 400
+        )
     workflow.current_version_id = v.id
     return _workflow_out(workflow)
 
