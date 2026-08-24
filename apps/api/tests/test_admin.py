@@ -363,3 +363,53 @@ async def test_machine_accounts_are_hidden_from_the_roster(
         for u in (await client.get("/v1/admin/users?include_system=true", headers=headers)).json()
     ]
     assert "robot.system@example.com" in with_system
+
+
+async def test_workflows_awaiting_review_counted_in_admin_console(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """docs/17 Phase 4's admin-console equivalent of `agents_with_unpublished_changes` — but
+    reading the real `WorkflowVersion.status == "in_review"` signal directly (ADR-080) rather
+    than a version-number proxy, since workflows (unlike agents) actually have one."""
+    token = await _signup(client, "staff.workflows@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    org = await client.post("/v1/orgs", json={"name": "WorkflowReviewOrg"}, headers=headers)
+    org_headers = {**headers, "X-Org-Id": org.json()["id"]}
+    agent = await client.post(
+        "/v1/agents", json={"name": "Bot", "description": "d"}, headers=org_headers
+    )
+    workflow = await client.post(
+        f"/v1/agents/{agent.json()['id']}/workflows", json={"name": "Flow"}, headers=org_headers
+    )
+    graph = {
+        "nodes": [{"id": "s1", "type": "start"}, {"id": "e1", "type": "end"}],
+        "edges": [{"source": "s1", "target": "e1"}],
+    }
+    version = await client.post(
+        f"/v1/workflows/{workflow.json()['id']}/versions", json={"graph": graph}, headers=org_headers
+    )
+    await _make_staff(db_session, "staff.workflows@example.com")
+
+    before = await client.get("/v1/admin/orgs", headers=headers)
+    row = next(o for o in before.json() if o["name"] == "WorkflowReviewOrg")
+    assert row["workflows_awaiting_review"] == 0
+
+    submitted = await client.post(
+        f"/v1/workflows/{workflow.json()['id']}/versions/{version.json()['version']}/submit-review",
+        headers=org_headers,
+    )
+    assert submitted.status_code == 200, submitted.text
+
+    after = await client.get("/v1/admin/orgs", headers=headers)
+    row = next(o for o in after.json() if o["name"] == "WorkflowReviewOrg")
+    assert row["workflows_awaiting_review"] == 1
+
+    published = await client.post(
+        f"/v1/workflows/{workflow.json()['id']}/versions/{version.json()['version']}/publish",
+        headers=org_headers,
+    )
+    assert published.status_code == 200, published.text
+
+    final = await client.get("/v1/admin/orgs", headers=headers)
+    row = next(o for o in final.json() if o["name"] == "WorkflowReviewOrg")
+    assert row["workflows_awaiting_review"] == 0

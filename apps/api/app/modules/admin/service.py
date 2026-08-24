@@ -25,6 +25,8 @@ from app.models import (
     Tool,
     UsageRecord,
     User,
+    Workflow,
+    WorkflowVersion,
 )
 from app.modules.admin import schemas
 from app.tools.service import INTERNAL_TAGS, SHARED_TEMPLATE_TAG
@@ -77,16 +79,40 @@ async def list_orgs(
         .group_by(Agent.organization_id)
         .subquery()
     )
+    # Workflows awaiting review (docs/17 Phase 4) — NOT the same "Workflow" as an n8n
+    # automation (see `AutomationOut`); this is BotForge's own visual workflow builder entity.
+    # Unlike Agent, `WorkflowVersion.status` carries a real `in_review` value (ADR-080), so this
+    # counts that directly rather than aping Agent's "latest draft is ahead of published" proxy
+    # — a more honest signal now that one actually exists to read.
+    latest_workflow_version = (
+        select(WorkflowVersion.workflow_id, func.max(WorkflowVersion.version).label("latest"))
+        .group_by(WorkflowVersion.workflow_id)
+        .subquery()
+    )
+    workflows_review = (
+        select(Workflow.organization_id, func.count().label("n"))
+        .join(latest_workflow_version, latest_workflow_version.c.workflow_id == Workflow.id)
+        .join(
+            WorkflowVersion,
+            (WorkflowVersion.workflow_id == Workflow.id)
+            & (WorkflowVersion.version == latest_workflow_version.c.latest),
+        )
+        .where(Workflow.deleted_at.is_(None), WorkflowVersion.status == "in_review")
+        .group_by(Workflow.organization_id)
+        .subquery()
+    )
     stmt = (
         select(
             Organization,
             func.coalesce(members.c.n, 0),
             func.coalesce(agents.c.n, 0),
             func.coalesce(pending.c.n, 0),
+            func.coalesce(workflows_review.c.n, 0),
         )
         .outerjoin(members, members.c.organization_id == Organization.id)
         .outerjoin(agents, agents.c.organization_id == Organization.id)
         .outerjoin(pending, pending.c.organization_id == Organization.id)
+        .outerjoin(workflows_review, workflows_review.c.organization_id == Organization.id)
         .order_by(Organization.created_at.desc())
         .limit(limit)
     )
@@ -125,10 +151,11 @@ async def list_orgs(
             member_list=by_org.get(org.id, []),
             agents=int(a),
             agents_with_unpublished_changes=int(p),
+            workflows_awaiting_review=int(wr),
             created_at=org.created_at,
             deleted=org.deleted_at is not None,
         )
-        for org, m, a, p in rows
+        for org, m, a, p, wr in rows
     ]
 
 

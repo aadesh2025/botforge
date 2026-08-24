@@ -167,6 +167,7 @@ function OrgsTable({
     member_list?: { email: string; role: string; status: string; is_staff: boolean }[];
     agents: number;
     agents_with_unpublished_changes?: number;
+    workflows_awaiting_review?: number;
     deleted: boolean;
     created_at: string;
   }[];
@@ -185,13 +186,14 @@ function OrgsTable({
               <th className="px-5 py-3 font-medium">Members &amp; access</th>
               <th className="px-5 py-3 text-right font-medium">Agents</th>
               <th className="px-5 py-3 text-right font-medium">Awaiting review</th>
+              <th className="px-5 py-3 text-right font-medium">Workflow review</th>
               <th className="px-5 py-3 font-medium">Created</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {orgs.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-5 py-4 text-muted">No organizations.</td>
+                <td colSpan={6} className="px-5 py-4 text-muted">No organizations.</td>
               </tr>
             )}
             {orgs.map((o) => (
@@ -229,6 +231,16 @@ function OrgsTable({
                   {/* Clients can save but not publish — this is how staff notice work waiting. */}
                   {o.agents_with_unpublished_changes ? (
                     <Badge variant="warn">{o.agents_with_unpublished_changes} unpublished</Badge>
+                  ) : (
+                    <span className="font-mono text-muted">—</span>
+                  )}
+                </td>
+                <td className="px-5 py-3 text-right">
+                  {/* docs/17 Phase 4: unlike the agents column, this reads a real status a
+                      workflow author set (WorkflowVersion.status == "in_review"), not a
+                      version-number proxy. */}
+                  {o.workflows_awaiting_review ? (
+                    <Badge variant="warn">{o.workflows_awaiting_review} in review</Badge>
                   ) : (
                     <span className="font-mono text-muted">—</span>
                   )}
