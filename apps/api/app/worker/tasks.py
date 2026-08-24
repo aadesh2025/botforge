@@ -108,12 +108,12 @@ def send_email_task(
         raise self.retry(countdown=60, exc=exc) from exc  # type: ignore[attr-defined]
 
 
-async def _run_workflow_execution(run_id: str, resume_decision: str | None) -> str:
+async def _run_workflow_execution(run_id: str, resume_decision: str | None, resume: bool = False) -> str:
     from app.workflows.service import execute_queued_run
 
     async with SessionFactory() as session:
         status = await execute_queued_run(
-            session, uuid.UUID(run_id), resume_decision=resume_decision
+            session, uuid.UUID(run_id), resume_decision=resume_decision, resume=resume
         )
         await session.commit()
         return status
@@ -134,6 +134,16 @@ def run_workflow_task(self: object, run_id: str) -> str:
 def resume_workflow_run_task(self: object, run_id: str, decision: str) -> str:
     log.info("workflow_resume_task_start", run_id=run_id, decision=decision)
     return _run(_run_workflow_execution(run_id, resume_decision=decision))
+
+
+@celery_app.task(name="workflows.resume_delay", bind=True, max_retries=0)  # type: ignore[untyped-decorator]
+def resume_delayed_workflow_task(self: object, run_id: str) -> str:
+    """Fires at the `eta` a `delay` node computed (docs/17 Phase 2 gap-closure item 2,
+    ADR-076) — scheduled via `apply_async(eta=...)`, never a blocking sleep on any worker.
+    No retry, same reasoning as `run_workflow_task`: `execute_queued_run` itself guards against
+    firing on a run that moved on (e.g. was cancelled) while it was waiting."""
+    log.info("workflow_delay_resume_task_start", run_id=run_id)
+    return _run(_run_workflow_execution(run_id, resume_decision=None, resume=True))
 
 
 async def _run_sweep() -> int:

@@ -11,6 +11,7 @@ exactly like `run_turn` already does for chat.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -516,7 +517,7 @@ async def test_transform_rejects_unknown_operation() -> None:
     assert "'eval'" in (result.error or "")
 
 
-# ── delay: shape-only this slice, fails loudly rather than silently no-oping ───────────────
+# ── delay: pauses for real (docs/17 Phase 2 gap-closure item 2, ADR-076) ──────────────────
 
 DELAY_GRAPH = {
     "nodes": [
@@ -532,11 +533,120 @@ def test_validate_graph_accepts_a_delay_node() -> None:
     assert validate_graph(DELAY_GRAPH) == []
 
 
-async def test_delay_node_fails_loudly_rather_than_silently_skipping() -> None:
+async def test_delay_node_pauses_with_a_resume_at_timestamp() -> None:
+    budget = _budget()
+    result = await run_workflow(DELAY_GRAPH, variables={}, budget=budget)
+    assert result.status == "paused_delay"
+    assert result.current_node_id == "d"
+    delay_step = result.steps[-1]
+    assert delay_step["status"] == "awaiting_delay"
+    assert delay_step["output"]["duration_seconds"] == 60
+    assert "resume_at" in delay_step["output"]
+
+
+async def test_delay_node_resumes_and_completes(monkeypatch: pytest.MonkeyPatch) -> None:
+    budget = _budget()
+    variables: dict[str, Any] = {}
+    first = await run_workflow(DELAY_GRAPH, variables=variables, budget=budget)
+    assert first.status == "paused_delay"
+
+    # Any non-None resume_input signals "this is the wake-up" to a delay node — its contents
+    # (unlike approval's `decision`) don't matter.
+    second = await run_workflow(
+        DELAY_GRAPH, variables=variables, budget=budget,
+        start_node_id=first.current_node_id, resume_input={},
+    )
+    assert second.status == "completed"
+
+
+async def test_delay_node_rejects_a_non_positive_duration() -> None:
+    graph = {
+        "nodes": [
+            {"id": "s", "type": "start"},
+            {"id": "d", "type": "delay", "config": {"duration_seconds": 0}},
+            {"id": "e", "type": "end"},
+        ],
+        "edges": [{"source": "s", "target": "d"}, {"source": "d", "target": "e"}],
+    }
+    budget = _budget()
+    result = await run_workflow(graph, variables={}, budget=budget)
+    assert result.status == "failed"
+    assert "positive" in (result.error or "")
+
+
+async def test_delay_node_rejects_a_duration_beyond_the_configured_maximum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "workflow_max_delay_seconds", 100.0)
+    graph = {
+        "nodes": [
+            {"id": "s", "type": "start"},
+            {"id": "d", "type": "delay", "config": {"duration_seconds": 200}},
+            {"id": "e", "type": "end"},
+        ],
+        "edges": [{"source": "s", "target": "d"}, {"source": "d", "target": "e"}],
+    }
+    budget = _budget()
+    result = await run_workflow(graph, variables={}, budget=budget)
+    assert result.status == "failed"
+    assert "exceeds the maximum" in (result.error or "")
+
+
+async def test_delay_node_refuses_to_pause_under_eager_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No worker exists to wake an eager run up later — pausing there would strand it forever,
+    so it fails loudly instead, the same choice the original shape-only placeholder made."""
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "celery_task_always_eager", True)
     budget = _budget()
     result = await run_workflow(DELAY_GRAPH, variables={}, budget=budget)
     assert result.status == "failed"
-    assert "not executable yet" in (result.error or "")
+    assert "eager" in (result.error or "").lower()
+
+
+async def test_delay_resume_shares_and_accumulates_the_same_budget() -> None:
+    """docs/17 §2 rule 3 again, and the property ADR-076 documents explicitly: consumed_steps
+    persists across the pause (a real ceiling on total work survives), independent of whatever
+    happens to max_runtime_s's clock."""
+    budget = _budget(max_steps=100)
+    variables: dict[str, Any] = {}
+    first = await run_workflow(DELAY_GRAPH, variables=variables, budget=budget)
+    consumed_after_first = budget.consumed_steps
+    assert consumed_after_first >= 2  # start + delay, at least
+
+    await run_workflow(
+        DELAY_GRAPH, variables=variables, budget=budget,
+        start_node_id=first.current_node_id, resume_input={},
+    )
+    assert budget.consumed_steps > consumed_after_first  # grew further, proving it was shared
+
+
+async def test_delay_resume_with_a_reconstructed_budget_does_not_inherit_stale_runtime() -> None:
+    """ADR-076: what the service layer actually does across a real pause is reconstruct the
+    budget FRESH (`_budget_from_dict` — new `started_at`, carried-over counters), never keep
+    the same live object ticking. Proven here with a genuinely separate budget instance and a
+    real elapsed gap longer than `max_runtime_s`, so a tiny runtime ceiling does not
+    retroactively trip just because wall-clock time passed while the run was waiting."""
+    first_budget = _budget(max_runtime_s=0.01, max_steps=100)
+    variables: dict[str, Any] = {}
+    first = await run_workflow(DELAY_GRAPH, variables=variables, budget=first_budget)
+    assert first.status == "paused_delay"
+
+    await asyncio.sleep(0.05)  # longer than max_runtime_s — simulates real time during the wait
+
+    # A FRESH instance, same ceilings, counters carried over explicitly — exactly what
+    # `_budget_from_dict` does — NOT the same live object continuing to tick.
+    resumed_budget = _budget(max_runtime_s=0.01, max_steps=100)
+    resumed_budget.consumed_steps = first_budget.consumed_steps
+    resumed_budget.consumed_cost_usd = first_budget.consumed_cost_usd
+
+    second = await run_workflow(
+        DELAY_GRAPH, variables=variables, budget=resumed_budget,
+        start_node_id=first.current_node_id, resume_input={},
+    )
+    assert second.status == "completed"  # not budget_exceeded, despite real time having passed
 
 
 # ── agent node: shares the budget, sanitizes the reply ─────────────────────────────────────

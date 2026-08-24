@@ -58,6 +58,18 @@ INVALID_GRAPH = {
     "edges": [],
 }
 
+DELAY_GRAPH = {
+    "nodes": [
+        {"id": "s1", "type": "start"},
+        {"id": "d1", "type": "delay", "config": {"duration_seconds": 3600}},
+        {"id": "e1", "type": "end"},
+    ],
+    "edges": [
+        {"source": "s1", "target": "d1"},
+        {"source": "d1", "target": "e1"},
+    ],
+}
+
 
 async def _headers(client: AsyncClient, email: str = "a@example.com") -> tuple[dict[str, str], dict]:
     signup = await client.post("/v1/auth/signup", json={"email": email, "password": "password123"})
@@ -802,3 +814,143 @@ async def test_rbac_matrix_across_every_workflow_endpoint(client: AsyncClient) -
     assert delete_denied.status_code == 403
     delete_allowed = await client.delete(f"/v1/workflows/{scratch['id']}", headers=editor_headers)
     assert delete_allowed.status_code == 204
+
+
+# ── Delay node real execution (docs/17 Phase 2 gap-closure item 2, ADR-076) ────────────────
+class TestDelayExecution:
+    """`_run_delay` refuses to pause under eager execution (no worker to wake up later), so
+    these override the module's autouse eager fixture to prove the real pause+schedule
+    behavior. Rather than going through a real Celery broker/worker, `_execute_and_persist` is
+    called directly against the test's own session (flush-only, `commit_each_step=False` —
+    exactly what the eager dispatch path already does) to drive the SAME execution logic
+    production uses, without needing a second connection or a real broker. This mirrors how
+    `test_resumed_budget_wall_clock_restarts_per_process` already reaches into service
+    internals for a DB-backed property no HTTP-level test can see."""
+
+    @pytest.fixture(autouse=True)
+    def _real_dispatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "celery_task_always_eager", False)
+
+    async def test_delay_pauses_and_schedules_a_celery_resume(
+        self, client: AsyncClient, db_session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import datetime as dt
+        import uuid as uuid_mod
+
+        from app.chat.budget import default_budget
+        from app.models import Workflow as WorkflowModel
+        from app.models import WorkflowRun as WorkflowRunModel
+        from app.models import WorkflowVersion as WorkflowVersionModel
+        from app.worker import tasks as worker_tasks
+        from app.workflows.service import _budget_to_dict, _execute_and_persist
+
+        calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            worker_tasks.resume_delayed_workflow_task, "apply_async",
+            lambda **kw: calls.append((kw["args"], kw["eta"])), raising=False,
+        )
+
+        headers, _ = await _headers(client)
+        agent = await _create_agent(client, headers)
+        workflow_api = await _create_workflow(client, headers, agent["id"])
+        published = await _publish_graph(client, headers, workflow_api["id"], DELAY_GRAPH)
+
+        workflow_row = await db_session.get(WorkflowModel, uuid_mod.UUID(workflow_api["id"]))
+        version_row = await db_session.get(
+            WorkflowVersionModel, uuid_mod.UUID(published["current_version_id"])
+        )
+        run_row = WorkflowRunModel(
+            workflow_version_id=version_row.id, organization_id=workflow_row.organization_id,
+            status="running", variables={}, budget=_budget_to_dict(default_budget()),
+        )
+        db_session.add(run_row)
+        await db_session.flush()
+
+        result = await _execute_and_persist(db_session, run_row, workflow_row, version_row)
+
+        assert result.status == "paused_delay"
+        assert run_row.status == "paused_delay"
+        assert run_row.current_node_id == "d1"
+        assert len(calls) == 1
+        (run_id_arg,), eta = calls[0]
+        assert run_id_arg == str(run_row.id)
+        assert eta > dt.datetime.now(tz=dt.UTC)
+
+    async def test_delay_resume_completes_the_run(
+        self, client: AsyncClient, db_session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import uuid as uuid_mod
+
+        from app.chat.budget import default_budget
+        from app.models import Workflow as WorkflowModel
+        from app.models import WorkflowRun as WorkflowRunModel
+        from app.models import WorkflowVersion as WorkflowVersionModel
+        from app.worker import tasks as worker_tasks
+        from app.workflows.service import _budget_to_dict, _execute_and_persist
+
+        monkeypatch.setattr(worker_tasks.resume_delayed_workflow_task, "apply_async", lambda **kw: None, raising=False)
+
+        headers, _ = await _headers(client)
+        agent = await _create_agent(client, headers)
+        workflow_api = await _create_workflow(client, headers, agent["id"])
+        published = await _publish_graph(client, headers, workflow_api["id"], DELAY_GRAPH)
+        workflow_row = await db_session.get(WorkflowModel, uuid_mod.UUID(workflow_api["id"]))
+        version_row = await db_session.get(
+            WorkflowVersionModel, uuid_mod.UUID(published["current_version_id"])
+        )
+        run_row = WorkflowRunModel(
+            workflow_version_id=version_row.id, organization_id=workflow_row.organization_id,
+            status="running", variables={}, budget=_budget_to_dict(default_budget()),
+        )
+        db_session.add(run_row)
+        await db_session.flush()
+        paused = await _execute_and_persist(db_session, run_row, workflow_row, version_row)
+        assert paused.status == "paused_delay"
+
+        # The scheduled task firing: any non-None resume_input signals "this is the wake-up".
+        resumed = await _execute_and_persist(
+            db_session, run_row, workflow_row, version_row, resume_input={}
+        )
+        assert resumed.status == "completed"
+        assert run_row.status == "completed"
+
+    async def test_stale_delay_resume_does_not_revive_a_cancelled_run(
+        self, client: AsyncClient, db_session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import uuid as uuid_mod
+
+        from app.chat.budget import default_budget
+        from app.models import Workflow as WorkflowModel
+        from app.models import WorkflowRun as WorkflowRunModel
+        from app.models import WorkflowVersion as WorkflowVersionModel
+        from app.worker import tasks as worker_tasks
+        from app.workflows.service import _budget_to_dict, _execute_and_persist, execute_queued_run
+
+        monkeypatch.setattr(worker_tasks.resume_delayed_workflow_task, "apply_async", lambda **kw: None, raising=False)
+
+        headers, _ = await _headers(client)
+        agent = await _create_agent(client, headers)
+        workflow_api = await _create_workflow(client, headers, agent["id"])
+        published = await _publish_graph(client, headers, workflow_api["id"], DELAY_GRAPH)
+        workflow_row = await db_session.get(WorkflowModel, uuid_mod.UUID(workflow_api["id"]))
+        version_row = await db_session.get(
+            WorkflowVersionModel, uuid_mod.UUID(published["current_version_id"])
+        )
+        run_row = WorkflowRunModel(
+            workflow_version_id=version_row.id, organization_id=workflow_row.organization_id,
+            status="running", variables={}, budget=_budget_to_dict(default_budget()),
+        )
+        db_session.add(run_row)
+        await db_session.flush()
+        paused = await _execute_and_persist(db_session, run_row, workflow_row, version_row)
+        assert paused.status == "paused_delay"
+
+        # An operator cancels it while it's still waiting.
+        run_row.status = "cancelled"
+        await db_session.flush()
+
+        # The scheduled Celery task fires anyway (it has no way to un-schedule itself) —
+        # execute_queued_run's own guard must refuse to revive it.
+        status = await execute_queued_run(db_session, run_row.id, resume=True)
+        assert status == "cancelled"
+        assert run_row.status == "cancelled"  # untouched, not silently reset to "running"

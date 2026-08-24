@@ -18,6 +18,76 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-076: Delay node real wait semantics — Celery eta, not a blocking sleep; max_runtime_s does not span the wait
+- **Date:** 2026-08-24
+- **Status:** accepted
+- **Context:** docs/17 Phase 2's `delay` node shipped shape-only (527912d) — accepted for
+  validation and canvas authoring, refused loudly if actually reached, deferred until Celery
+  async execution existed (c536270). This closes that deferral: a `delay` node should pause a
+  run and wake it back up at the target time without blocking a worker for the interval.
+- **Decisions.**
+  1. **Same pause/resume shape `approval` already uses, not a new primitive.** `_run_delay`
+     computes `resume_at` and reports `awaiting_delay` on first visit (→
+     `WorkflowRunResult.status = "paused_delay"`); a resume call with any non-`None`
+     `resume_input` (its *contents* are irrelevant, only its presence — unlike `approval`,
+     there is no human decision attached) completes it immediately. Dispatched the same way
+     `approval`'s first-iteration check already is in the node loop.
+  2. **Real Celery `apply_async(eta=...)`, never a blocking sleep on any worker.** A new task,
+     `resume_delayed_workflow_task`, scheduled from `_schedule_delay_resume` once
+     `_execute_and_persist` sees `status == "paused_delay"`. Verified against a REAL worker,
+     not mocks: a 5-second delay node paused, stayed paused for the interval (not an instant
+     silent pass-through), and resumed automatically ~5.1s later with no human/API action.
+  3. **Refuses to pause under `settings.celery_task_always_eager`, loudly, rather than either
+     silently completing immediately or hanging the request.** Eager execution has no worker
+     process to wake up later — pausing there would strand the run forever with nothing ever
+     resuming it. This is the same choice the original shape-only placeholder made for the
+     "not executable yet" case; the refusal reason just changed from "at all" to "not under
+     eager execution specifically."
+  4. **`WORKFLOW_MAX_DELAY_SECONDS` (default 24h) rejected loudly, never silently clamped** —
+     same philosophy as every other config-driven cap in this track (loop's `max_iterations`,
+     sub_agent's call depth): a workflow author configuring an absurd wait should see an
+     error at the node, not a silently truncated one that behaves differently from what they
+     configured.
+  5. **`AgentBudget.max_runtime_s` deliberately does NOT span the real wait.** Resuming
+     reconstructs the budget via `_budget_from_dict`, which has never serialized `started_at`
+     — so `elapsed_s()` restarts at zero in whichever process picks the run back up, exactly
+     the property `test_resumed_budget_wall_clock_restarts_per_process` (item 2, 2026-08-24)
+     already pinned for the API/worker process boundary and now also applies across a real
+     wait. **This was checked, not assumed**: the alternative (serializing a true wall-clock
+     `started_at` so `max_runtime_s` counts the whole elapsed lifetime, waiting included) was
+     considered and rejected, because it breaks BOTH pause types it would apply to —
+     `paused_approval` (an operator legitimately taking an hour to click Approve would blow a
+     30-second default runtime budget the moment they got back to it) and `paused_delay`
+     itself (a workflow's own "wait 2 hours, then follow up" is the deliberate point of the
+     node, not runaway compute — and the wait costs the worker nothing while it's scheduled,
+     so there's no resource being protected by counting it). `max_steps` /
+     `max_tool_calls` / `max_cost_usd` all continue to accumulate correctly across the pause
+     (they ARE serialized) — proven by
+     `test_delay_resume_shares_and_accumulates_the_same_budget` — so the ceiling on total
+     *work* a run can do still holds even though the wall-clock-since-start figure resets;
+     only the runtime dimension specifically declines to count real elapsed wait time, and
+     that is deliberate, not an oversight.
+  6. **`execute_queued_run` gained a guard against reviving a run that moved on while
+     waiting.** Celery has no way to un-schedule an already-queued `eta` task, so if an
+     operator cancels a `paused_delay` run before the scheduled wake-up fires, the task still
+     fires — `execute_queued_run` now checks `run.status == "paused_delay"` before proceeding
+     for a delay-shaped resume (`resume=True, resume_decision=None`) and returns the run's
+     actual (unchanged) status otherwise, rather than silently re-running a cancelled workflow.
+     This same class of race did not previously need a guard for `approval`, because that
+     resume path is only ever dispatched synchronously from an explicit human action in the
+     same request that flips `run.status` to `"running"` — there is no scheduling gap for a
+     stale task to fire into.
+- **Alternatives considered:** a wall-clock `started_at` for `max_runtime_s` — rejected, see
+  (5). Silently no-opping a delay node instead of failing loudly under eager execution —
+  rejected for the same reason the original placeholder rejected it: a "wait 1 hour" step that
+  silently didn't wait is a worse failure mode than one that visibly errors.
+- **Consequences:** none new beyond what item 2's ADR-075 entry already accepted (the
+  flush-then-`.delay()` enqueue race). A resume scheduled far in the future (up to
+  `WORKFLOW_MAX_DELAY_SECONDS`) sits in Celery/Redis as a pending `eta` task for that entire
+  interval — this is exactly what Celery's `eta` mechanism is for and is not itself a new
+  operational concern, but it does mean a Redis flush during that window silently drops the
+  scheduled wake-up with no error surfaced anywhere; not addressed here.
+
 ### ADR-075: docs/17 Phase 2 gap closure — Handoff reuse, loop/call-depth caps, is_test, eager-mode dispatch
 - **Date:** 2026-08-24
 - **Status:** accepted

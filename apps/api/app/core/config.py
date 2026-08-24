@@ -253,6 +253,10 @@ class Settings(BaseSettings):
     # before AgentBudget.call_depth trips it (ADR — see docs/DECISIONS.md). Bounds a direct
     # self-call or an indirect cycle (A→B→A) the same way, since depth doesn't care which.
     workflow_max_call_depth: int = 5
+    # Longest a `delay` node may schedule a real wait for (default 24h). Rejected loudly above
+    # this rather than silently clamped — a workflow author configuring an absurd wait should
+    # see an error, not a truncated one.
+    workflow_max_delay_seconds: float = 86400.0
 
     # How often (seconds) the Celery beat sweep re-enqueues due `pending` webhook deliveries.
     webhook_sweep_interval_seconds: float = 60.0

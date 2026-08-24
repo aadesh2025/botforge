@@ -50,11 +50,24 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
      string/number ops, no `eval()`), agent (invokes a published `Agent` through the real
      `run_turn`, sharing the SAME budget per docs/17 §2 rule 3), sub_agent (invokes another
      `Workflow`, call depth tracked on the budget itself via new `WORKFLOW_MAX_CALL_DEPTH`, so a
-     self-referential or indirect cycle fails loudly instead of hanging), delay (shape-only —
-     accepted for validation/canvas authoring, fails loudly if executed). **⚠️ Deferred, not
-     forgotten: delay's real wait semantics never landed even after item 2 shipped Celery.**
-     Sequencing it there was right, but no follow-up session has come back to build it; it still
-     fails loudly rather than silently no-op, which was always the fallback if this happened.
+     self-referential or indirect cycle fails loudly instead of hanging), delay (shape-only at
+     first — accepted for validation/canvas authoring, failed loudly if executed).
+     **✅ CLOSED 2026-08-24 (Stage 1 of the same-day gap-closure follow-up):** delay now pauses
+     for real (`status: "paused_delay"`) and schedules a Celery task at the target `eta`
+     (`resume_delayed_workflow_task`, `app.workflows.service._schedule_delay_resume`) rather
+     than blocking a worker — same first-visit/resume split `approval` already uses. Still
+     refuses loudly, on purpose, under `celery_task_always_eager` (no worker exists to wake an
+     eager run up later) and above the new `WORKFLOW_MAX_DELAY_SECONDS` cap (default 24h).
+     Verified against a REAL Celery worker, not mocks: a 5-second delay node paused, stayed
+     paused for the interval, and resumed automatically ~5.1s later with no human action.
+     **`max_runtime_s` deliberately does not span the real wait** (resuming reconstructs the
+     budget fresh, same as an approval pause already does) — checked, not assumed; see
+     ADR-076 for why the alternative (a wall-clock `started_at`) was considered and rejected.
+     `max_steps`/`max_tool_calls`/`max_cost_usd` all still accumulate correctly across the
+     pause. A new guard in `execute_queued_run` stops a stale scheduled wake-up from reviving a
+     run an operator cancelled while it was waiting (Celery cannot un-schedule an already-
+     queued `eta` task). 8 new graph-engine tests + 3 new service-layer tests, plus a live
+     smoke test against a real worker (not part of the automated suite). See ADR-076.
   2. **Celery async execution.** `run`/`resume` now dispatch (enqueue in production, run
      in-process only under `celery_task_always_eager`) instead of walking the graph inline —
      deliberately NOT via Celery's own eager machinery, which would hit the exact

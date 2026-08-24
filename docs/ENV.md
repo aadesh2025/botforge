@@ -294,6 +294,10 @@ to RRF ordering, logged, never an error and never an empty result set.
 - `WORKFLOW_MAX_CALL_DEPTH` (default `5`) — how deep a chain of workflow `sub_agent` nodes may
   nest before `AgentBudget.call_depth` trips it. Bounds a direct self-call and an indirect
   cycle (A→B→A) the same way, since depth doesn't distinguish which.
+- `WORKFLOW_MAX_DELAY_SECONDS` (default `86400`, 24h) — longest a `delay` node may schedule a
+  real wait for. A `delay` node pauses the run and schedules a Celery task at that `eta`
+  (`app.worker.tasks.resume_delayed_workflow_task`) rather than blocking a worker; rejected
+  loudly above this cap, never silently clamped.
 
 ## Guardrails (docs/11)
 - `MAX_USER_MESSAGE_CHARS` (default `8000`) — hard ceiling on a single visitor message. Also

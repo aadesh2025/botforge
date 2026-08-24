@@ -47,10 +47,18 @@ each of the newer types.
   once the cap is hit rather than recursing until something else gives out. A nested run that
   itself pauses on approval or exhausts the shared budget is surfaced as a failed node, not
   silently swallowed — synchronous cross-run approval propagation is out of scope this slice.
-- **delay** is accepted for graph validation and canvas authoring but fails loudly if actually
-  executed: a synchronous wait would hang the HTTP request, and pausing for real needs the
-  Celery execution item 2 of this pass builds. See that item's PROGRESS.md entry for whether
-  real wait semantics landed on top of it in the same pass.
+- **delay** pauses the run (`status: "paused_delay"`) and reports `config.duration_seconds`
+  from now as `resume_at` — the service layer schedules a Celery task at that `eta` rather
+  than blocking a worker, the same "pause, persist, resume later" shape `approval` already
+  uses. Refuses outright under eager/synchronous execution (no worker to wake up later) and
+  above `WORKFLOW_MAX_DELAY_SECONDS`, both loudly rather than silently no-opping.
+  **`max_runtime_s` deliberately does NOT span the real wait** — resuming reconstructs the
+  budget fresh (`_budget_from_dict`, no `started_at` in the serialized form), exactly like an
+  approval pause already does, and for the same reason: an operator can legitimately take an
+  hour to click Approve, and a workflow's own "wait 2 hours, then follow up" is deliberate
+  elapsed time, not runaway compute. `max_steps`/`max_tool_calls`/`max_cost_usd` still
+  accumulate correctly across the pause (they ARE serialized), so the ceiling on total *work*
+  survives even though the wall-clock-since-start figure resets. See ADR-076.
 
 **Security, not incidental:**
 - `evaluate_condition()` is a narrow hand-rolled parser (`var OP literal`, five operators, no
@@ -68,6 +76,7 @@ each of the newer types.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 import time
@@ -78,6 +87,7 @@ from typing import Any
 from app.chat.budget import AgentBudget
 from app.chat.guardrails import neutralize_injections
 from app.chat.variables import escape_value
+from app.core.config import settings
 
 # (tool_name, arguments) -> {"output": dict, "status": str, "error": str | None} — identical
 # shape to app.chat.runtime.ToolExecutor, deliberately, so the same tool dispatch used for
@@ -106,7 +116,7 @@ class WorkflowError(Exception):
 
 @dataclass
 class NodeResult:
-    status: str  # completed | failed | awaiting_approval
+    status: str  # completed | failed | awaiting_approval | awaiting_delay
     output: dict[str, Any] | None = None
     error: str | None = None
     cost_usd: float = 0.0
@@ -117,7 +127,7 @@ class NodeResult:
 
 @dataclass
 class WorkflowRunResult:
-    status: str  # completed | paused_approval | failed | budget_exceeded
+    status: str  # completed | paused_approval | paused_delay | failed | budget_exceeded
     variables: dict[str, Any]
     steps: list[dict[str, Any]] = field(default_factory=list)
     current_node_id: str | None = None
@@ -415,15 +425,51 @@ async def _run_transform(node: dict[str, Any], variables: dict[str, Any], _execu
     return NodeResult(status="completed", output={target: result})
 
 
-async def _run_delay(node: dict[str, Any], variables: dict[str, Any], _executor: Any) -> NodeResult:
-    """Shape-only: accepted by graph validation and the canvas so authors can wire one in, but
-    fails loudly if actually reached — a synchronous wait would hang the HTTP request, and
-    pausing for real needs Celery execution. Never silently no-ops (a "wait 1 hour" step that
-    silently didn't wait is worse than one that visibly fails)."""
+async def _run_delay(
+    node: dict[str, Any],
+    variables: dict[str, Any],
+    _executor: Any,
+    *,
+    resume_input: dict[str, Any] | None = None,
+) -> NodeResult:
+    """Pauses the run rather than blocking the worker — same first-visit-vs-resume split as
+    `_run_approval`. On first visit, computes `resume_at` and reports `awaiting_delay`; the
+    caller (the service layer, not this module — see `app.workflows.service
+    ._schedule_delay_resume`) is responsible for actually scheduling a Celery task at that
+    time and has no obligation to do so synchronously with this call. On resume (`resume_input`
+    is any non-`None` dict — its contents are irrelevant here, only its presence signals "this
+    is the wake-up, not the original visit"), completes immediately.
+
+    Refuses outright rather than pausing when `settings.celery_task_always_eager` is on: eager
+    mode has no worker to wake up later, so pausing would just strand the run forever. Failing
+    loudly here is the same choice the original shape-only placeholder made — never silently
+    no-op a "wait N seconds" step.
+    """
+    if resume_input is not None:
+        return NodeResult(status="completed", output={})
+
+    if settings.celery_task_always_eager:
+        return NodeResult(
+            status="failed",
+            error="delay nodes cannot run under eager/synchronous execution — there is no "
+            "worker to wake up later. Real wait semantics only work through the async "
+            "(Celery) dispatch path.",
+        )
+
+    config = node.get("config") or {}
+    duration = config.get("duration_seconds")
+    if not isinstance(duration, int | float) or isinstance(duration, bool) or duration <= 0:
+        return NodeResult(status="failed", error="delay requires a positive config.duration_seconds")
+    if duration > settings.workflow_max_delay_seconds:
+        return NodeResult(
+            status="failed",
+            error=f"delay duration {duration}s exceeds the maximum of "
+            f"{settings.workflow_max_delay_seconds}s (WORKFLOW_MAX_DELAY_SECONDS)",
+        )
+    resume_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=duration)
     return NodeResult(
-        status="failed",
-        error="delay nodes are not executable yet — real wait semantics require async "
-        "(Celery) execution, see docs/17 Phase 2 gap-closure item 2",
+        status="awaiting_delay",
+        output={"resume_at": resume_at.isoformat(), "duration_seconds": duration},
     )
 
 
@@ -590,7 +636,7 @@ async def run_workflow(
 
         handler = _HANDLERS[node["type"]]
         t0 = time.perf_counter()
-        if node["type"] == "approval":
+        if node["type"] == "approval" or node["type"] == "delay":
             result = await handler(
                 node, variables, tool_executor,
                 resume_input=resume_input if first_iteration else None,
@@ -626,6 +672,10 @@ async def run_workflow(
         if result.status == "awaiting_approval":
             return WorkflowRunResult(
                 status="paused_approval", variables=variables, steps=steps, current_node_id=current,
+            )
+        if result.status == "awaiting_delay":
+            return WorkflowRunResult(
+                status="paused_delay", variables=variables, steps=steps, current_node_id=current,
             )
         if node["type"] in _TERMINAL_TYPES:
             return WorkflowRunResult(status="completed", variables=variables, steps=steps, current_node_id=None)

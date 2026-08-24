@@ -343,6 +343,29 @@ async def _create_approval_handoff(session: AsyncSession, run: WorkflowRun, resu
     )
 
 
+async def _schedule_delay_resume(run: WorkflowRun, result: WorkflowRunResult) -> None:
+    """Schedules the Celery task that wakes a `paused_delay` run back up (ADR-076) — a real
+    `apply_async(eta=...)`, not a blocking sleep on any worker. A no-op under eager execution:
+    `_run_delay` already refuses to pause there (no worker exists to wake up later), so this
+    should not normally be reached in that mode, but the check stays as a defensive backstop
+    rather than trusting that invariant silently.
+    """
+    if settings.celery_task_always_eager:
+        return
+    resume_at_raw = None
+    if result.steps:
+        last = result.steps[-1]
+        if last.get("status") == "awaiting_delay":
+            resume_at_raw = (last.get("output") or {}).get("resume_at")
+    if not resume_at_raw:
+        log.error("workflow_delay_missing_resume_at", run_id=str(run.id))
+        return
+    from app.worker.tasks import resume_delayed_workflow_task
+
+    resume_at = dt.datetime.fromisoformat(resume_at_raw)
+    resume_delayed_workflow_task.apply_async(args=[str(run.id)], eta=resume_at)
+
+
 async def _persist_one_step(
     session: AsyncSession, run: WorkflowRun, step: dict[str, Any], *, commit: bool
 ) -> None:
@@ -402,13 +425,18 @@ async def _execute_and_persist(
     if result.status == "paused_approval":
         await _create_approval_handoff(session, run, result)
     else:
-        # Also the correctness backstop for the resume path: `_resume_workflow_run_core`
+        # Also the correctness backstop for the resume path: `resume_workflow_run_unchecked`
         # already resolves the handoff being acted on before dispatch, but this covers a run
         # reaching a terminal state any other way, and is a no-op when there was nothing open.
         await _resolve_run_handoffs(session, run.id, run.organization_id)
     await session.flush()
     if commit_each_step:
         await session.commit()
+    if result.status == "paused_delay":
+        # After the commit (if any) — the scheduled task's own session must see this run's
+        # `paused_delay` status as durable, not just flushed in a transaction that might not
+        # have landed yet on whatever connection it reads from.
+        await _schedule_delay_resume(run, result)
     return result
 
 
@@ -442,17 +470,32 @@ async def _dispatch_run(
 
 
 async def execute_queued_run(
-    session: AsyncSession, run_id: uuid.UUID, *, resume_decision: str | None = None
+    session: AsyncSession, run_id: uuid.UUID, *, resume_decision: str | None = None, resume: bool = False
 ) -> str:
     """Entry point for the Celery task (`app.worker.tasks.run_workflow_task` /
-    `resume_workflow_run_task`). No RBAC check and no `OrgContext` — the request that enqueued
-    this already checked `WORKFLOWS_WRITE`, and a worker process has no HTTP request to build
-    one from; this loads only what execution itself needs.
+    `resume_workflow_run_task` / `resume_delayed_workflow_task`). No RBAC check and no
+    `OrgContext` — the request that enqueued this already checked `WORKFLOWS_WRITE` (or, for a
+    delay's self-scheduled wake-up, nothing needs re-checking — it's not a new user action),
+    and a worker process has no HTTP request to build one from; this loads only what execution
+    itself needs.
+
+    `resume=True` with `resume_decision=None` is the delay-wake-up shape: resume from
+    `run.current_node_id` with an empty (but non-`None`) `resume_input`, which `_run_delay`
+    reads as "this is the wake-up, not the original visit" — it doesn't care what's in it,
+    only that it's there. `resume_decision` set is the approval shape; neither set is a fresh
+    run from the graph's start node.
     """
     run = await session.get(WorkflowRun, run_id)
     if run is None:
         log.error("workflow_run_vanished", run_id=str(run_id))
         return "not_found"
+    if resume and resume_decision is None and run.status != "paused_delay":
+        # A scheduled delay-resume firing after the run was already moved on some other way
+        # (an operator cancelled it while it was still waiting, most plausibly) must not revive
+        # it — Celery has no way to un-schedule an already-queued `eta` task, so the guard has
+        # to live here instead.
+        log.info("workflow_delay_resume_skipped_stale", run_id=str(run_id), status=run.status)
+        return run.status
     version = await session.get(WorkflowVersion, run.workflow_version_id)
     if version is None:
         run.status = "failed"
@@ -465,7 +508,12 @@ async def execute_queued_run(
         run.error = "workflow was deleted before this run could execute"
         run.completed_at = dt.datetime.now(tz=dt.UTC)
         return run.status
-    resume_input = {"decision": resume_decision} if resume_decision is not None else None
+    if resume_decision is not None:
+        resume_input: dict[str, Any] | None = {"decision": resume_decision}
+    elif resume:
+        resume_input = {}
+    else:
+        resume_input = None
     result = await _execute_and_persist(
         session, run, workflow, version, resume_input=resume_input, commit_each_step=True
     )
