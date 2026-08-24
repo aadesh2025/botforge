@@ -485,6 +485,17 @@ async def publish_version(session: AsyncSession, ctx: OrgContext, agent_id: uuid
     rbac.require_permission(ctx.role, rbac.AGENTS_PUBLISH)
     agent = await _get_agent(session, ctx, agent_id)
     version = await _get_version(session, agent_id, number)
+    # docs/17 Phase 3 publish gate (ADR-079) — local import to avoid a circular import:
+    # app.modules.agent_tests.service imports FROM this module (to build a Playground-style
+    # request), so this module cannot also import it at the top level.
+    from app.modules.agent_tests.service import latest_batch_has_failures
+
+    if await latest_batch_has_failures(session, agent_id):
+        raise AppError(
+            "agents.tests_failing",
+            "The latest test run has failures — fix them before publishing.",
+            400,
+        )
     version.is_published = True
     agent.current_version_id = version.id
     agent.status = "published"

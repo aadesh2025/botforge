@@ -18,6 +18,9 @@ from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 from app.llm import embeddings
 from app.modules.admin.router import router as admin_router
+from app.modules.agent_tests.router import test_run_router as agent_test_run_router
+from app.modules.agent_tests.router import test_runs_by_agent_router as agent_test_runs_by_agent_router
+from app.modules.agent_tests.router import tests_router as agent_tests_router
 from app.modules.agents.router import router as agents_router
 from app.modules.agents.router import templates_router as agent_templates_router
 from app.modules.analytics.router import router as analytics_router
@@ -173,6 +176,9 @@ def create_app() -> FastAPI:
     app.include_router(credentials_router)
     app.include_router(agents_router)
     app.include_router(agent_templates_router)
+    app.include_router(agent_tests_router)
+    app.include_router(agent_test_runs_by_agent_router)
+    app.include_router(agent_test_run_router)
     app.include_router(knowledge_router)
     app.include_router(conversations_router)
     app.include_router(tools_router)

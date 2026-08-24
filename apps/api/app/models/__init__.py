@@ -2,6 +2,7 @@
 (used by Alembic autogenerate and by tests)."""
 
 from app.models.agent_steps import AgentStep
+from app.models.agent_tests import AgentTest, AgentTestRun
 from app.models.agents import Agent, AgentVersion, ProviderCredential
 from app.models.campaigns import Campaign
 from app.models.canned_responses import CannedResponse
@@ -48,6 +49,8 @@ __all__ = [
     "PLAYGROUND_CHANNEL",
     "Agent",
     "AgentStep",
+    "AgentTest",
+    "AgentTestRun",
     "AgentVersion",
     "ApiKey",
     "AuditLog",

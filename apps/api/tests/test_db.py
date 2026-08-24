@@ -28,6 +28,8 @@ EXPECTED_TABLES = {
     "agent_steps", "mcp_servers",
     # docs/17 Phase 2 (visual workflow builder): draft/publish + execution-trace tables.
     "workflows", "workflow_versions", "workflow_runs", "workflow_steps",
+    # docs/17 Phase 3 (agent testing): scenario definitions + per-run actual-vs-expected results.
+    "agent_tests", "agent_test_runs",
 }
 
 

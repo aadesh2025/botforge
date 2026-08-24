@@ -38,6 +38,68 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **docs/17 Phase 3 — Agent Testing (2026-08-24).** Triggered by name immediately after Phase 2
+  closed (`agentic-phase-2-complete`), per docs/17 §7's phase order. Re-read
+  `docs/17-AGENTIC-RUNTIME-AND-BUILDER.md` §7 and `docs/17-IMPLEMENTATION-PROMPT.md`'s Phase 3
+  Definition of Done in full before writing any code, per this session's own Stage 2
+  instruction — Step 0's reference-repo study and 5 open questions were a one-time
+  track-level prerequisite already satisfied at Phase 1 kickoff, not repeated here.
+
+  **New tables, checked against the spec rather than assumed:** `agent_tests` (an
+  author-defined scenario — input, cached-mode script, expected outcome) and
+  `agent_test_runs` (one scenario's one execution's actual-vs-expected result), migration
+  `0026`. docs/17 §7/§10 names these two tables and a REST API explicitly
+  (`POST /v1/agents/{id}/tests`, `POST /v1/agents/{id}/tests/run`,
+  `GET /v1/agent-test-runs/{id}`) — unambiguously a persisted, product-facing feature, not the
+  docs/11 Phase D red-team corpus's YAML-fixture-file shape, which was the other shape this
+  session's instructions asked to weigh before building. See ADR-079 for the full reasoning,
+  including why neither existing execution-trace table (`agent_steps`, `WorkflowRun`) was
+  reused — neither has any notion of an *expected* outcome to diff against.
+
+  **Cached mode (the default, and the only mode a batch run takes unless the request body
+  explicitly asks for `"live"`) reuses `app.llm.fake.MultiRoundToolProvider` directly** — a
+  test case's `scripted_tool_calls`/`scripted_final_answer` feed its exact constructor shape,
+  already built and proven in Phase 1's own budget tests. The runner otherwise reuses the
+  Agent Playground's own request-building helpers
+  (`_build_request`/`_retrieve_context`/`_playground_tooling`/`_resolve_playground_provider`)
+  unchanged, per this session's instruction to build on that existing "run the draft version,
+  not counted as production traffic" pattern rather than a parallel one — imported locally to
+  break a circular import with the publish-gate check calling back the other way. Unlike the
+  Playground, the runner sets `guard_output=True`: a scripted final answer containing PII the
+  org hasn't allowlisted, redacted in `actual_final_answer`, is exactly the kind of pipeline
+  regression cached mode exists to catch, not "would the model say this."
+  **Live mode is never automatic** — confirmed by test: a request with no `mode` field defaults
+  to `"cached"`, matching the Definition of Done's explicit requirement that a live tier must
+  never fire on every draft save (docs/17 §7 names the exact prior incident this guards
+  against: the 2026-08-10 manual checklist run that exhausted the Groq free tier on 61 probes).
+
+  **Publish gate wired into `agents/service.py::publish_version`, opt-in.** Blocks with a new
+  `agents.tests_failing` 400 only when the agent's most recent test BATCH
+  (`agent_test_runs.batch_id`, shared by every case triggered from the same `POST /tests/run`
+  call) contains a failure — an agent with zero test cases, or cases that have never been run,
+  publishes exactly as before Phase 3 existed. A later PASSING batch un-blocks publish even
+  after an earlier one failed — "the latest test run" means the latest batch, not any one
+  case's history read in isolation. See ADR-079 for why opt-in was chosen over "no tests =
+  blocked," and for the one real gap this leaves open: the gate does not force the most recent
+  batch to have run against the CURRENT draft — an author could edit the prompt after a passing
+  run and publish on stale evidence, flagged rather than silently assumed solved.
+
+  **No frontend UI ships in this phase** — docs/17 Phase 3's own Definition of Done lists only
+  backend/API items (unlike Phase 2's, which explicitly required a Playwright check), so a
+  "Tests" tab in the agent builder is a spec-matching deferral, not a scope cut.
+
+  **Verification.** `ruff`/`mypy app/` clean; migration `0026` applied/downgraded/reapplied
+  against real Postgres; app imports cleanly (the publish-gate/runner mutual dependency is
+  real and resolved with a local import on one side, matching the established pattern already
+  used for `_dispatch_run`'s Celery-task imports). 16 new tests covering CRUD, cross-org 404,
+  RBAC, cached-mode pass/fail assertions (a real builtin `calculator` tool bound to the test
+  agent so a scripted tool call has something network-free and deterministic to dispatch to),
+  the default-cached-mode proof, the empty-batch 400, and all three publish-gate states
+  (blocked / allowed / unaffected-with-no-tests / re-allowed-after-a-later-pass). Full backend
+  suite **1060 passed, 4 skipped, 1 pre-existing unrelated failure**
+  (`test_playground_without_handoff_feature_does_not_trigger`, confirmed via `git stash`
+  earlier this track to predate it). Tagged `agentic-phase-3-complete`.
+
 - **docs/17 Phase 2, finishing pass — items 1–6 (2026-08-24).** Triggered by name, six discrete
   commits per item as instructed (`527912d`, `c536270`, `02b7935`, `0d41083`, `3f0b004`,
   `3e6061c`), each independently green. Landed with three genuine deferrals (delay node real

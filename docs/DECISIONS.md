@@ -18,6 +18,71 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-079: docs/17 Phase 3 (Agent Testing) — new tables not reused ones, scripted-provider cached mode, opt-in publish gate
+- **Date:** 2026-08-24
+- **Status:** accepted
+- **Context:** docs/17 Phase 3 needs a way to define a regression scenario against an agent
+  (input, expected tool calls, expected final-answer shape), run it without spending real
+  model calls on every draft save, and block publish when the latest run has failures. Two
+  design questions had no single obviously-correct answer and are recorded here rather than
+  picked silently, per this session's own Stage 2 instructions.
+- **Decisions.**
+  1. **New tables (`agent_tests`, `agent_test_runs`), not a reuse of
+     `WorkflowRun`/`agent_steps`.** Checked against the spec before building, not assumed:
+     docs/17 §7 Phase 3 names these two tables explicitly, and its own §10 API surface
+     (`POST /v1/agents/{id}/tests`, `POST /v1/agents/{id}/tests/run`,
+     `GET /v1/agent-test-runs/{id}`) is unambiguous that this is a persisted, product-facing
+     feature — not a developer-only YAML fixture file in the shape of docs/11 Phase D's
+     red-team corpus (`tests/fixtures/redteam/*.yaml` + `test_redteam_corpus.py`), which was
+     the other shape considered. `agent_steps` records what ONE turn's think→act→observe loop
+     actually did; `WorkflowRun`/`WorkflowStep` record what ONE workflow execution actually
+     did — neither has any notion of an *expected* outcome to diff against, and bolting an
+     "expected" column onto either would conflate "this happened" with "this was supposed to
+     happen," a distinction Phase 3 exists specifically to keep separate. `agent_tests` is the
+     scenario (author-defined, versionless — editing one is expected, not a new draft);
+     `agent_test_runs` is one scenario's one execution's actual-vs-expected outcome, exactly
+     mirroring how `WorkflowVersion.graph` (the definition) and `WorkflowRun` (one execution of
+     it) are already kept separate in Phase 2's own data model.
+  2. **Cached/replayed mode reuses `app.llm.fake.MultiRoundToolProvider` directly, not a new
+     provider class.** A test case's `scripted_tool_calls` + `scripted_final_answer` feed it
+     exactly the constructor shape `MultiRoundToolProvider(tool_calls, answer)` already takes —
+     built and proven in Phase 1's own budget-inheritance tests. The scripted model is
+     deterministic BY DESIGN, so in cached mode the test is not really asking "would a real
+     model do this" (it's told to) — it's asking whether the REAL surrounding pipeline (the
+     agent's actual system prompt/RAG retrieval feeding the request, the actual tool executor
+     resolving `scripted_tool_calls` against this agent's real configured tools, and — since
+     the runner uses `guard_output=True`, unlike the Playground's `False` — the REAL L5 output
+     guard) still behaves correctly against a known, fixed input. A `scripted_final_answer`
+     containing PII the org hasn't allowlisted, redacted in `actual_final_answer`, is exactly
+     the kind of regression this mode is for. Live mode (`mode: "live"`, never the default,
+     always explicitly requested in the request body) swaps in the agent's real configured
+     provider via the exact same `_resolve_playground_provider`/`_playground_tooling` helpers
+     the Playground already uses — reused directly rather than re-implemented, per this
+     session's Stage 2 instruction to build on the Playground's existing pattern.
+  3. **The publish gate is opt-in, not "no tests = blocked."** `publish_version` only refuses
+     when the agent's most recent test BATCH (`agent_test_runs.batch_id`, shared by every case
+     triggered from the same `POST /tests/run` call — "the latest test run" means the latest
+     coherent regression run, not one case's history read in isolation) contains at least one
+     `failed`/`error` result. An agent with zero test cases, or with cases that have never been
+     run, publishes exactly as it did before Phase 3 existed. Rejected: blocking publish
+     whenever no passing batch exists at all — an operator who has not yet adopted the testing
+     feature would be surprised by a publish suddenly failing for a reason unrelated to
+     anything they changed, and docs/17 does not ask for tests to be mandatory, only for a
+     result of `failed` to gate.
+  4. **A test run does not force the draft to be re-tested at publish time.** The gate checks
+     the most recently completed batch, whatever version it happened to run against — like a
+     CI check gating a PR on its last completed run against HEAD, not re-running CI at merge
+     time. Re-validating "is the latest batch still against the CURRENT draft" is a real gap
+     (an author could edit the prompt after a passing run and publish on stale evidence) but is
+     out of scope for this slice — flagged here rather than silently assumed solved.
+- **Consequences:** no frontend UI ships in this phase — docs/17 Phase 3's own Definition of
+  Done lists only backend/API items (unlike Phase 2's, which explicitly required a Playwright
+  check), so a "Tests" tab in the agent builder is a deliberate, spec-matching deferral, not a
+  scope cut. `expected_final_answer` is a single substring-contains check, not a richer
+  assertion DSL (regex/exact/semantic) — narrow and named, matching this track's existing
+  no-`eval()`/whitelisted-operations philosophy (`evaluate_condition`, `transform`), extensible
+  later if a real need for a second mode appears.
+
 ### ADR-078: Tool node arguments as raw JSON, matching the Tools tab's own pattern
 - **Date:** 2026-08-24
 - **Status:** accepted
