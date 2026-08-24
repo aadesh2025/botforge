@@ -38,6 +38,42 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **docs/17 Phase 2 gap closure — DB-backed integration tests for the workflow CRUD/router layer
+  (2026-08-24).** Closes the exact gap the 2026-08-19 entry below flagged as open: `create_workflow`,
+  `update_workflow`, `delete_workflow`, `create_version`, `publish_version`, `run_workflow_now`,
+  `resume_workflow_run`, `cancel_workflow_run`, and `list_run_steps` had only ever been exercised
+  by the pure-Python engine tests — never over the real HTTP client, never against a real Postgres
+  session, never with RBAC or cross-org ownership checked. `tests/test_workflows.py` (14 tests,
+  real DB via the `client`/`db_session` fixtures) now covers CRUD + soft delete, invalid-graph
+  rejection at `create_version`, the full draft→publish→run lifecycle, an approval-node
+  pause/resume round trip (asserting the step log records the paused visit and the resumed visit
+  as two distinct rows), `not_published`/`not_paused` 400s, idempotent cancel, viewer-read/
+  editor-write-not-publish/owner-publish RBAC, and 404-not-403 on cross-org access to both a
+  workflow and a run.
+  **⚠️ Found a real bug the moment the run/resume/cancel paths were hit over real HTTP:**
+  `run_workflow_now`/`resume_workflow_run`/`cancel_workflow_run` all set
+  `run.completed_at = sa_func.now()` (a raw SQL expression) and then serialized the same
+  in-memory ORM object straight into `WorkflowRunOut` with no intervening flush/refresh —
+  every terminal run response (`completed`, `failed`, `budget_exceeded`, and every `cancel` call)
+  would have thrown a Pydantic `ValidationError` and come back as a 500, in production, on the
+  first call. The pure-Python engine tests never touched this line — `run_workflow()` itself
+  doesn't set `completed_at`, the service layer does, and only serialization through the real
+  Pydantic response model surfaces the type mismatch. Fixed to `dt.datetime.now(tz=dt.UTC)`,
+  matching the convention every other service in the codebase already uses for this exact pattern
+  (`app/modules/agents/service.py`, `app/modules/apikeys/service.py`, `app/modules/auth/service.py`,
+  `app/modules/knowledge/service.py`). This is the second time in this track that the DB-backed
+  integration layer caught something the unit layer structurally could not see — same lesson as
+  the 2026-08-04 "Phase B" allowlist note in CLAUDE.md's session log: an untested direction is not
+  a verified direction, even when the code under it looks obviously correct.
+  Verification: `ruff check` and `mypy app/` clean (206 files); `tests/test_workflows.py` 14/14;
+  `tests/test_workflow_graph.py` + `test_db.py` unaffected (32/32); full suite
+  **991 passed, 4 skipped, 1 pre-existing unrelated failure** (the same
+  `test_playground_without_handoff_feature_does_not_trigger` 502, confirmed via `git stash`
+  against the clean tree to predate this track — see Phase 1's entry).
+  **Still open** (unchanged from the 2026-08-19 entry, not addressed by this slice): no Celery
+  wiring, no React Flow canvas, 7 of 11 node types, no test-mode execution against a draft version,
+  no Approval→Handoff inbox integration.
+
 - **docs/17 Phase 2 — Visual Workflow Builder, backend slice (2026-08-19).** Triggered by name
   per CLAUDE.md §10b, immediately after Phase 1. **This is a backend/API foundation, not a
   finished Phase 2** — see ADR-074's Consequences for the explicit list of what's deferred

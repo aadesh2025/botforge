@@ -16,10 +16,10 @@ be redundant. See ADR-074.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import func as sa_func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -209,7 +209,7 @@ async def delete_workflow(session: AsyncSession, ctx: OrgContext, workflow_id: u
     rbac.require_permission(ctx.role, rbac.WORKFLOWS_WRITE)
     workflow = await _get_workflow(session, ctx, workflow_id)
 
-    workflow.deleted_at = sa_func.now()
+    workflow.deleted_at = dt.datetime.now(tz=dt.UTC)
 
 
 # ── Versions ─────────────────────────────────────────────────────────────────────────────
@@ -292,8 +292,7 @@ async def run_workflow_now(
     run.error = result.error
     run.budget = _budget_to_dict(budget)
     if result.status in ("completed", "failed", "budget_exceeded"):
-
-        run.completed_at = sa_func.now()
+        run.completed_at = dt.datetime.now(tz=dt.UTC)
     return _run_out(run)
 
 
@@ -322,8 +321,7 @@ async def resume_workflow_run(
     run.error = result.error
     run.budget = _budget_to_dict(budget)
     if result.status in ("completed", "failed", "budget_exceeded"):
-
-        run.completed_at = sa_func.now()
+        run.completed_at = dt.datetime.now(tz=dt.UTC)
     return _run_out(run)
 
 
@@ -333,8 +331,7 @@ async def cancel_workflow_run(session: AsyncSession, ctx: OrgContext, run_id: uu
     if run.status in ("completed", "failed", "cancelled", "budget_exceeded"):
         return _run_out(run)
     run.status = "cancelled"
-
-    run.completed_at = sa_func.now()
+    run.completed_at = dt.datetime.now(tz=dt.UTC)
     return _run_out(run)
 
 

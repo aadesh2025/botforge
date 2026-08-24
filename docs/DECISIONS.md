@@ -91,6 +91,19 @@ Format each entry as below. Newest at the top.
     — `test_workflow_graph.py` covers the execution engine thoroughly but never goes through
     `app/workflows/router.py` or `service.py`'s RBAC/ownership checks. That gap is real and
     open, unlike the migration gap this paragraph used to describe.
+  - **⚠️ 2026-08-24 follow-up — that gap is now closed, and closing it found a real bug.**
+    `tests/test_workflows.py` (14 tests) now exercises the full CRUD/versioning/execution
+    surface over the real HTTP client with RBAC and cross-org ownership checks. The first time
+    `run_workflow_now`/`resume_workflow_run`/`cancel_workflow_run` were hit that way, all three
+    threw a Pydantic `ValidationError` on every terminal run — `run.completed_at = sa_func.now()`
+    assigned a raw SQL expression to the ORM attribute with no flush/refresh before
+    `_run_out(run)` serialized it, so `WorkflowRunOut.completed_at` received a SQLAlchemy
+    function object, not a datetime. This would have been a 500 on every `completed`/`failed`/
+    `budget_exceeded`/`cancel` response in production; the pure-Python engine tests structurally
+    could not see it, since `run_workflow()` itself never sets `completed_at` — only the service
+    layer does, and only the real response-model validation surfaces the type mismatch. Fixed to
+    `dt.datetime.now(tz=dt.UTC)`, the convention every other service already uses for this exact
+    pattern. See docs/PROGRESS.md's 2026-08-24 entry for the full verification numbers.
 
 ### ADR-073: Agentic loop rollout gate — platform AND org, both explicit, off by default; default budget numbers
 - **Date:** 2026-08-19
