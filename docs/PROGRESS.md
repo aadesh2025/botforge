@@ -73,6 +73,16 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   **Still open** (unchanged from the 2026-08-19 entry, not addressed by this slice): no Celery
   wiring, no React Flow canvas, 7 of 11 node types, no test-mode execution against a draft version,
   no Approval→Handoff inbox integration.
+  **DB-verified, not just test-suite-verified.** Migration `0023` re-run against the real
+  `botforge-postgres-1` (port 5433): `upgrade head` (no-op, already current) → `downgrade -1`
+  (`0023_workflows` → `0022_agentic_runtime`) → `upgrade head` (back to `0023_workflows`), all
+  three clean. Then a live smoke test through the actual running API (keyless E2E mode, port
+  8010, `ALLOW_SELF_SERVE_ORGS=true`) rather than the httpx test client: created a workflow,
+  published a version with an approval node, ran it to `paused_approval`, resumed it to
+  `completed`, and separately ran + cancelled a second run — `WorkflowRunOut.completed_at` came
+  back as a real ISO datetime string on the wire in both terminal states, confirming the
+  `sa_func.now()` fix holds outside the test transaction too, not only inside the tx-rollback
+  fixture. Committed as `37d5803`.
 
 - **docs/17 Phase 2 — Visual Workflow Builder, backend slice (2026-08-19).** Triggered by name
   per CLAUDE.md §10b, immediately after Phase 1. **This is a backend/API foundation, not a
