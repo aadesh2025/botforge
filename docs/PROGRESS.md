@@ -38,6 +38,83 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **docs/17 Phase 2, finishing pass — items 1–6 (2026-08-24).** Triggered by name, six discrete
+  commits per item as instructed (`527912d`, `c536270`, `02b7935`, `0d41083`, `3f0b004`,
+  `3e6061c`), each independently green. **Not tagged `agentic-phase-2-complete`** — three
+  genuine deferrals below mean the honest status is "all six items landed, none fully gold-
+  plated," not "Phase 2 is finished." Saying so plainly rather than tagging early is the same
+  discipline `agentic-phase-2-backend-complete` set on 2026-08-19.
+  1. **Six new node types** — switch (N-way, literal→branch map, no `eval()`), loop (iterates
+     via a graph CYCLE so the existing node-at-a-time walker needed no new execution model, and
+     `AgentBudget.max_steps` became a hard iteration cap for free), transform (whitelisted
+     string/number ops, no `eval()`), agent (invokes a published `Agent` through the real
+     `run_turn`, sharing the SAME budget per docs/17 §2 rule 3), sub_agent (invokes another
+     `Workflow`, call depth tracked on the budget itself via new `WORKFLOW_MAX_CALL_DEPTH`, so a
+     self-referential or indirect cycle fails loudly instead of hanging), delay (shape-only —
+     accepted for validation/canvas authoring, fails loudly if executed). **⚠️ Deferred, not
+     forgotten: delay's real wait semantics never landed even after item 2 shipped Celery.**
+     Sequencing it there was right, but no follow-up session has come back to build it; it still
+     fails loudly rather than silently no-op, which was always the fallback if this happened.
+  2. **Celery async execution.** `run`/`resume` now dispatch (enqueue in production, run
+     in-process only under `celery_task_always_eager`) instead of walking the graph inline —
+     deliberately NOT via Celery's own eager machinery, which would hit the exact
+     `asyncio.run()`-inside-a-running-loop trap `app.core.email.queue_email` already carries a
+     fix for (CLAUDE.md §12). Steps persist incrementally as a real worker produces them.
+     Verified against an actual `--pool=solo` worker and real Redis, not only mocks. **⚠️
+     Accepted, not fixed: the same flush-then-`.delay()` race `enqueue_document_ingestion`
+     already has** (a worker could in principle start before the enqueuing request's
+     transaction commits) — matching existing convention rather than a workflows-only fix that
+     would also have required breaking the test harness's transaction-rollback isolation.
+  3. **Draft-version test-mode execution.** `POST /v1/workflows/{id}/test-run` executes the
+     LATEST version (draft or published, mirroring the Agent Playground's own semantics) with a
+     new `WorkflowRun.is_test` flag (migration 0024) rather than an ephemeral, non-persisted
+     run. `WORKFLOWS_WRITE`, not `WORKFLOWS_PUBLISH` — testing your own draft is authoring, not
+     publishing.
+  4. **Approval → Handoff inbox integration.** Reuses `Handoff` (migration 0025:
+     `conversation_id` now nullable, new nullable `workflow_run_id`) rather than a parallel
+     "workflow approval" table. New `GET/POST /v1/inbox/workflow-approvals[/{id}/decide]`,
+     gated on `INBOX_HANDLE` — proven with the `operator` role specifically, which has
+     `INBOX_HANDLE` but not `WORKFLOWS_WRITE`, so the raw resume endpoint correctly refuses them
+     while the inbox path accepts them. `resume_workflow_run` split into an RBAC-checked
+     wrapper and `resume_workflow_run_unchecked` so both entry points share one execution path.
+  5. **Systematic RBAC matrix.** Most of this was already covered by the original gap-closure
+     session (2026-08-24, below) plus items 1–4's own tests; what was missing was a single pass
+     proving READ/WORKFLOWS_WRITE/WORKFLOWS_PUBLISH on every one of the 13 endpoints, not just
+     the ones another test's setup happened to touch — `delete_workflow`, `cancel_workflow_run`,
+     `resume_workflow_run`, `list_versions`, `get_workflow` and `list_run_steps` had no RBAC
+     test at all before this.
+  6. **React Flow canvas** (`@xyflow/react`, new dependency) — a "Workflows" tab in the agent
+     builder: drag-and-drop palette over all 13 node types, one custom node renderer with
+     branch-labeled handles for condition/switch/approval/loop, a properties panel reusing
+     existing form primitives and populating agent/tool/workflow pickers from the real
+     endpoints, Save (draft)/Publish, and a Test run button that polls a new
+     `GET /v1/workflow-runs/{id}` (added alongside — the canvas needs the run's own terminal
+     status, not just its step list) plus `.../steps`, overlaying each step's outcome onto the
+     matching node live. **The Playwright check caught three real bugs before a human ever
+     opened a browser**: a freshly created workflow's default graph had no `end` node and would
+     have failed its own first save; Save/Test-run were only `disabled` for a read-only role,
+     not hidden, unlike every other RBAC-gated control in this codebase; publishing after
+     saving left the toolbar showing the stale "Saved as draft v1" label. Fixed a small
+     pre-existing bug on the way: the agent page's Playground-visibility check was hardcoded to
+     `tab !== "channels"` rather than deriving from `FULL_WIDTH_TABS`, which the new
+     "workflows" tab would otherwise have inherited (a stray Playground stacked below an
+     already-tall canvas). **⚠️ Deferred, called out rather than skipped silently:** read-only
+     overlay of a run's history is live-only (a completed run reopened later shows no overlay,
+     only a run actively polled while its tab is open does); a Tool node's `arguments` aren't
+     yet editable from the properties panel (only `tool_name`/`result_variable` are); native
+     HTML5 drag-and-drop from the palette is exercised by Playwright but the jsdom unit suite
+     stubs the whole canvas out and covers only the list/create screen around it.
+  - **Verification.** `ruff`/`mypy app/` clean across every commit; migrations 0024/0025
+    applied/downgraded/reapplied against real Postgres; full backend suite **1033 passed, 4
+    skipped, 1 pre-existing unrelated failure** (`test_playground_without_handoff_feature_does_not_trigger`,
+    confirmed via `git stash` earlier this track to predate it). Frontend: `tsc --noEmit` and
+    `next build` clean, `eslint` clean (one pre-existing unrelated error in `playground.tsx`,
+    untouched by this pass), vitest **187/187**, and the new Playwright spec plus three
+    existing specs touching the same tab/Playground logic all green.
+  - ADR-075 (docs/DECISIONS.md) records the non-obvious calls: Handoff reuse for approvals,
+    call-depth-on-the-budget for sub_agent cycles, `max_steps`-as-loop-cap by default,
+    `is_test` as a persisted column, and the eager-mode dispatch pattern.
+
 - **docs/17 Phase 2 gap closure — DB-backed integration tests for the workflow CRUD/router layer
   (2026-08-24).** Closes the exact gap the 2026-08-19 entry below flagged as open: `create_workflow`,
   `update_workflow`, `delete_workflow`, `create_version`, `publish_version`, `run_workflow_now`,
