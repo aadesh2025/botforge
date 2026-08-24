@@ -66,6 +66,52 @@ class ResumeWorkflowRequest(BaseModel):
     decision: str = Field(pattern="^(approved|rejected)$")
 
 
+class NodeRef(BaseModel):
+    id: str
+    type: str | None = None
+
+
+class NodeChange(BaseModel):
+    id: str
+    type_changed: bool
+    old_type: str | None
+    new_type: str | None
+    config_changed: bool
+    old_config: dict[str, Any] | None
+    new_config: dict[str, Any] | None
+
+
+class EdgeRef(BaseModel):
+    source: str | None
+    target: str | None
+    condition: str | None
+
+
+class WorkflowVersionDiffOut(BaseModel):
+    """Structural diff between two versions of the same workflow's graph (docs/17 Phase 4) —
+    see `app.workflows.diff` for how each field is computed. Never a text/JSON diff: a node
+    whose config changed is reported separately from one that was added or removed."""
+
+    from_version: int
+    to_version: int
+    nodes_added: list[NodeRef]
+    nodes_removed: list[NodeRef]
+    nodes_changed: list[NodeChange]
+    edges_added: list[EdgeRef]
+    edges_removed: list[EdgeRef]
+    #: Tool (builtin or MCP-provided — both share one reference namespace) names referenced by
+    #: a `tool` node's `config.tool_name`, added/removed between the two versions.
+    tools_added: list[str]
+    tools_removed: list[str]
+    #: Variable names read (via a direct config key or a `{{var}}` template) by any node.
+    variables_read_added: list[str]
+    variables_read_removed: list[str]
+    #: Variable names written (`set_variable`, a tool/agent/sub_agent's `result_variable`, a
+    #: transform's target, a loop's item/index variable) by any node.
+    variables_written_added: list[str]
+    variables_written_removed: list[str]
+
+
 class WorkflowStepOut(BaseModel):
     id: uuid.UUID
     node_id: str

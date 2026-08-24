@@ -307,6 +307,105 @@ async def test_rollback_to_unpublished_version_returns_400(client: AsyncClient) 
     assert r.json()["error"]["code"] == "workflows.rollback_unpublished"
 
 
+DIFF_GRAPH_A = LINEAR_GRAPH
+
+DIFF_GRAPH_B = {
+    "nodes": [
+        {"id": "s1", "type": "start"},
+        {"id": "sv1", "type": "set_variable", "config": {"key": "greeted", "value": "true"}},
+        {
+            "id": "t1", "type": "tool",
+            "config": {"tool_name": "lookup", "arguments": {"q": "{{name}}"}, "result_variable": "lookup_result"},
+        },
+        {"id": "m1", "type": "message", "config": {"content": "Hi {{name}}, {{city}}"}},
+        {"id": "e1", "type": "end"},
+    ],
+    "edges": [
+        {"source": "s1", "target": "sv1"},
+        {"source": "sv1", "target": "t1"},
+        {"source": "t1", "target": "m1"},
+        {"source": "m1", "target": "e1"},
+    ],
+}
+
+
+async def test_diff_versions_reports_structural_changes(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    v1 = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": DIFF_GRAPH_A}, headers=headers
+    )
+    v2 = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": DIFF_GRAPH_B}, headers=headers
+    )
+
+    diff = await client.get(
+        f"/v1/workflows/{workflow['id']}/versions/{v1.json()['version']}/diff/{v2.json()['version']}",
+        headers=headers,
+    )
+    assert diff.status_code == 200
+    body = diff.json()
+    assert body["from_version"] == 1
+    assert body["to_version"] == 2
+
+    assert {n["id"] for n in body["nodes_added"]} == {"sv1", "t1"}
+    assert body["nodes_removed"] == []
+    changed_ids = {n["id"] for n in body["nodes_changed"]}
+    assert changed_ids == {"m1"}
+    m1_change = next(n for n in body["nodes_changed"] if n["id"] == "m1")
+    assert m1_change["config_changed"] is True
+    assert m1_change["type_changed"] is False
+    assert m1_change["old_config"]["content"] == "Hello {{name}}"
+    assert m1_change["new_config"]["content"] == "Hi {{name}}, {{city}}"
+
+    assert {(e["source"], e["target"]) for e in body["edges_removed"]} == {("s1", "m1")}
+    assert {(e["source"], e["target"]) for e in body["edges_added"]} == {
+        ("s1", "sv1"), ("sv1", "t1"), ("t1", "m1"),
+    }
+
+    assert body["tools_added"] == ["lookup"]
+    assert body["tools_removed"] == []
+    assert body["variables_read_added"] == ["city"]
+    assert body["variables_read_removed"] == []
+    assert sorted(body["variables_written_added"]) == ["greeted", "lookup_result"]
+    assert body["variables_written_removed"] == []
+
+    # Diffing the other direction swaps additions and removals.
+    reverse = await client.get(
+        f"/v1/workflows/{workflow['id']}/versions/{v2.json()['version']}/diff/{v1.json()['version']}",
+        headers=headers,
+    )
+    assert reverse.status_code == 200
+    reverse_body = reverse.json()
+    assert {n["id"] for n in reverse_body["nodes_removed"]} == {"sv1", "t1"}
+    assert reverse_body["tools_removed"] == ["lookup"]
+
+
+async def test_diff_of_identical_versions_is_empty(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    agent = await _create_agent(client, headers)
+    workflow = await _create_workflow(client, headers, agent["id"])
+    v1 = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=headers
+    )
+    v2 = await client.post(
+        f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=headers
+    )
+    diff = await client.get(
+        f"/v1/workflows/{workflow['id']}/versions/{v1.json()['version']}/diff/{v2.json()['version']}",
+        headers=headers,
+    )
+    assert diff.status_code == 200
+    body = diff.json()
+    for key in (
+        "nodes_added", "nodes_removed", "nodes_changed", "edges_added", "edges_removed",
+        "tools_added", "tools_removed", "variables_read_added", "variables_read_removed",
+        "variables_written_added", "variables_written_removed",
+    ):
+        assert body[key] == [], f"{key} should be empty for identical graphs, got {body[key]}"
+
+
 # ── Execution ─────────────────────────────────────────────────────────────────
 async def test_run_workflow_without_published_version_returns_400(client: AsyncClient) -> None:
     headers, _ = await _headers(client)
@@ -892,10 +991,21 @@ async def test_rbac_matrix_across_every_workflow_endpoint(client: AsyncClient) -
         allowed = await client.request(method, path, json=body, headers=editor_headers)
         assert allowed.status_code in (200, 201), f"{method} {path} should allow editor, got {allowed.status_code}"
 
-    # WORKFLOWS_WRITE-gated: submit-review (viewer denied, editor allowed).
+    # WORKFLOWS_WRITE-gated: submit-review and diff (viewer denied, editor allowed).
     v2 = await client.post(
         f"/v1/workflows/{workflow['id']}/versions", json={"graph": LINEAR_GRAPH}, headers=owner_headers
     )
+    diff_denied = await client.get(
+        f"/v1/workflows/{workflow['id']}/versions/{v1.json()['version']}/diff/{v2.json()['version']}",
+        headers=viewer_headers,
+    )
+    assert diff_denied.status_code == 403
+    diff_allowed = await client.get(
+        f"/v1/workflows/{workflow['id']}/versions/{v1.json()['version']}/diff/{v2.json()['version']}",
+        headers=editor_headers,
+    )
+    assert diff_allowed.status_code == 200
+
     submit_review_denied = await client.post(
         f"/v1/workflows/{workflow['id']}/versions/{v2.json()['version']}/submit-review",
         headers=viewer_headers,

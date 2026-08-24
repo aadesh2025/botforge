@@ -122,6 +122,23 @@ async def rollback_version(
     return await service.rollback(session, ctx, workflow_id, version)
 
 
+@router.get(
+    "/{workflow_id}/versions/{version_a}/diff/{version_b}",
+    response_model=schemas.WorkflowVersionDiffOut,
+)
+async def diff_versions(
+    workflow_id: uuid.UUID,
+    version_a: int,
+    version_b: int,
+    session: AsyncSession = Depends(get_session),
+    ctx: OrgContext = Depends(current_org),
+) -> schemas.WorkflowVersionDiffOut:
+    """Structural diff between two versions of this workflow's graph (docs/17 Phase 4) —
+    node/edge changes, tool/MCP-server reference changes, variable schema changes. Gated on
+    WORKFLOWS_WRITE, not WORKFLOWS_PUBLISH: viewing a diff is part of reviewing a draft."""
+    return await service.diff_versions(session, ctx, workflow_id, version_a, version_b)
+
+
 @router.get("/{workflow_id}/runs", response_model=list[schemas.WorkflowRunOut])
 async def list_workflow_runs(
     workflow_id: uuid.UUID,

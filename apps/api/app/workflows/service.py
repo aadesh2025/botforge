@@ -56,6 +56,7 @@ from app.realtime.hub import hub, inbox_topic
 from app.tools.base import ToolContext
 from app.tools.service import execute_tool_call, resolve_agent_tools
 from app.workflows import schemas
+from app.workflows.diff import diff_graphs
 from app.workflows.graph import (
     WorkflowAgentExecutor,
     WorkflowRunResult,
@@ -669,6 +670,21 @@ async def rollback(
         )
     workflow.current_version_id = v.id
     return _workflow_out(workflow)
+
+
+async def diff_versions(
+    session: AsyncSession, ctx: OrgContext, workflow_id: uuid.UUID, version_a: int, version_b: int
+) -> schemas.WorkflowVersionDiffOut:
+    """Structural diff between two versions of this workflow's graph (docs/17 Phase 4).
+    `WORKFLOWS_WRITE`, not `WORKFLOWS_PUBLISH` — reviewing a draft against what's live is part
+    of authoring/reviewing, not a publish action, the same reasoning `run_workflow_test` already
+    uses. Pure computation over the two stored `graph` JSON blobs; see `app.workflows.diff`."""
+    rbac.require_permission(ctx.role, rbac.WORKFLOWS_WRITE)
+    await _get_workflow(session, ctx, workflow_id)
+    a = await _get_version(session, workflow_id, version_a)
+    b = await _get_version(session, workflow_id, version_b)
+    computed = diff_graphs(a.graph, b.graph)
+    return schemas.WorkflowVersionDiffOut(from_version=a.version, to_version=b.version, **computed)
 
 
 # ── Execution ────────────────────────────────────────────────────────────────────────────

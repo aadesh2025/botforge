@@ -18,6 +18,70 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-080: docs/17 Phase 4 (Version/Approval workflow) — workflow submit-review/rollback mirror Agent's shape; diff is structural, not textual
+- **Date:** 2026-08-24
+- **Status:** accepted
+- **Context:** docs/17's Phase 4 Definition of Done asks for `workflow_versions` to get "the same
+  draft → submit-review → publish → rollback flow already shipped for `AgentVersion`," plus a
+  structural diff between two versions covering node/edge, tool/MCP-server, and variable-schema
+  changes. Reading `AgentVersion`'s actual code first (per the operator's explicit instruction)
+  found it does NOT have a real submit-review step: `is_published` is the only state field, and
+  "awaiting review" is a purely computed badge (`builder-header.tsx`: unpublished + the viewer
+  lacking `AGENTS_PUBLISH`) plus a per-org admin count (`agents_with_unpublished_changes`,
+  `app/modules/admin/service.py`). `WorkflowVersion.status`, by contrast, already carries an
+  explicit `draft|in_review|published|archived` string — added proactively in Phase 2 for this
+  exact phase (its own model comment names Phase 4 as the reason) — but the service layer never
+  set or read `in_review` until now.
+- **Decision:**
+  1. **`submit_for_review()`** (`WORKFLOWS_WRITE`): `draft -> in_review` only; 400
+     `workflows.submit_review_invalid_state` from any other status. `publish_version` is
+     deliberately NOT gated on having passed through `in_review` first — `AgentVersion.publish_version`
+     has never required a prior step, and adding one here would be a new product rule the
+     operator's instruction to "reuse the pattern" doesn't ask for.
+  2. **`rollback()`** (`WORKFLOWS_PUBLISH`): read `app.modules.agents.service.rollback` directly
+     rather than guessing, and matched it exactly — moves `workflow.current_version_id` onto an
+     existing row, requires `version.status == "published"` (400
+     `workflows.rollback_unpublished` otherwise), creates no new version, and touches no other
+     row's status. `WorkflowVersion` rows are immutable and never deleted, so an older published
+     version is always available to roll back onto, and rolling forward again is just another
+     `publish_version` call.
+  3. **Admin "awaiting review" equivalent**: added `workflows_awaiting_review` alongside the
+     existing `agents_with_unpublished_changes` in `OrgAdminOut`, same computed-per-org-count
+     shape (a query in `admin/service.py`, an int field, a table column in `admin/page.tsx`) —
+     but a DIFFERENT predicate on purpose: Agent's count is a proxy ("latest draft version number
+     exceeds what's published") because Agent has no real in_review signal to count; Workflow now
+     does, so `workflows_awaiting_review` counts workflows whose LATEST version has
+     `status == "in_review"` directly, which is more honest than aping the Agent proxy would have
+     been.
+  4. **Diff is structural, computed from two node-id-keyed maps** (`app/workflows/diff.py`), not
+     a JSON/text diff: nodes added/removed by id, nodes present in both compared by
+     `type`/`config` equality (so a tool node's argument change is `nodes_changed`, distinct from
+     add/remove), edges compared as `(source, target, condition)` sets (edges carry no id of
+     their own in the graph schema). Tool/MCP-server references are `tool_name` (builtin and MCP
+     tools share one dispatch namespace via `resolve_agent_tools(..., include_mcp=True)`, so one
+     list covers both). Variable schema = read/write variable names extracted per node type, via
+     hand-maintained tables (`_WRITES`/`_READ_VAR_KEYS`/`_TEMPLATE_KEYS`) that mirror
+     `graph.py`'s node handlers' config keys exactly — condition-expression and `{{var}}`
+     template parsing import `graph.py`'s own `_COND_RE`/`_VAR_PATTERN` rather than duplicate
+     them, so THAT part cannot drift; the per-node-type key tables can, and are commented as
+     needing a matching update alongside any new node type. **No `eval()` anywhere** — pure set
+     /dict comparison over already-validated JSON.
+- **Alternatives considered:** Forcing publish to require `in_review` first — rejected, no
+  precedent and not asked for. A generic recursive JSON diff for the graph — rejected per the
+  DoD's own example (a config change must read differently from an add/remove) and because a
+  library-based deep-diff would be one more place "structural, not textual" would need re-
+  verifying by hand. Making the admin "awaiting review" count for workflows use the exact same
+  proxy query as Agent's — rejected once it was clear workflows carry a real signal the proxy
+  exists only to approximate.
+- **Consequences:** Publishing directly from `draft` (skipping review) remains possible for
+  workflows, same as it always has been for agents — `submit_for_review` is additive, not a
+  gate. `archived` stays declared-but-unused (nothing in this phase's scope sets it). The
+  diff's per-node-type extraction tables are a second place that needs updating when
+  `graph.py` gains a node type or renames a config key — same drift risk already accepted
+  elsewhere in this codebase for deliberately-duplicated logic (e.g. docs/14 K2-6's
+  `fts.SEARCHABLE_SQL` pin), mitigated the same way: a short comment at the point of risk, not a
+  runtime coupling to the execution module's private handler functions.
+
 ### ADR-079: docs/17 Phase 3 (Agent Testing) — new tables not reused ones, scripted-provider cached mode, opt-in publish gate
 - **Date:** 2026-08-24
 - **Status:** accepted
