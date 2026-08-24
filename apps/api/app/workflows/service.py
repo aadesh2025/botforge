@@ -23,17 +23,27 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat import variables as chat_variables
+from app.chat.assembly import compose_system_prompt
 from app.chat.budget import AgentBudget, default_budget
+from app.chat.runtime import TurnResult, run_turn
 from app.core import rbac
 from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.llm.types import ToolCall
+from app.llm.registry import get_chat_provider, get_chat_provider_chain
+from app.llm.types import ChatRequest, Message, ToolCall
 from app.models import Agent, AgentVersion, Workflow, WorkflowRun, WorkflowStep, WorkflowVersion
 from app.modules.orgs.deps import OrgContext
 from app.tools.base import ToolContext
 from app.tools.service import execute_tool_call, resolve_agent_tools
 from app.workflows import schemas
-from app.workflows.graph import WorkflowRunResult, run_workflow, validate_graph
+from app.workflows.graph import (
+    WorkflowAgentExecutor,
+    WorkflowRunResult,
+    WorkflowSubExecutor,
+    run_workflow,
+    validate_graph,
+)
 
 log = get_logger("workflows")
 
@@ -140,6 +150,109 @@ async def _tool_executor_for(
         call = ToolCall(id=str(uuid.uuid4()), name=name, arguments=args)
         res = await execute_tool_call(session, tool_ctx, by_name, call)
         return {"output": res.output, "status": res.status, "error": res.error}
+
+    return executor
+
+
+async def _agent_executor_for(session: AsyncSession, ctx: OrgContext) -> WorkflowAgentExecutor:
+    """An `agent` node's executor: runs an existing published `Agent` through the real
+    agentic runtime (`app.chat.runtime.run_turn`), a single non-streaming user turn with no
+    conversation persistence — the workflow's own `WorkflowStep` for this node is the record
+    of what happened, not a second `Conversation`/`Message` pair. Passes the SAME budget
+    instance into `run_turn` so a nested think→act→observe cycle decrements the workflow
+    run's own ceiling (docs/17 §2 rule 3), and disables the output guard/PII allowlist the
+    same way the Playground does — the caller here is another workflow node, not a visitor,
+    and the untrusted-output rule is enforced by `graph.py`'s `neutralize_injections()` on the
+    return value instead.
+    """
+
+    async def executor(agent_id_str: str, message: str, budget: AgentBudget) -> dict[str, Any]:
+        try:
+            agent_id = uuid.UUID(agent_id_str)
+        except ValueError:
+            return {"content": "", "status": "error", "error": f"invalid agent_id {agent_id_str!r}"}
+        agent = await session.get(Agent, agent_id)
+        if agent is None or agent.organization_id != ctx.org.id:
+            return {"content": "", "status": "error", "error": "agent not found"}
+        if agent.current_version_id is None:
+            return {"content": "", "status": "error", "error": "agent has no published version"}
+        version = await session.get(AgentVersion, agent.current_version_id)
+        if version is None:
+            return {"content": "", "status": "error", "error": "agent has no published version"}
+
+        mc = version.model_config_json or {}
+        provider_name = mc.get("provider", "fake")
+        try:
+            provider = await get_chat_provider_chain(
+                session, ctx.org.id, mc, agent_id=agent.id, resolve=get_chat_provider
+            )
+        except AppError as exc:
+            log.warning("workflow_agent_node_provider_unavailable", agent_id=str(agent.id), error=str(exc))
+            return {"content": "", "status": "error", "error": str(exc)}
+
+        system_prompt = compose_system_prompt(
+            version.system_prompt, version.persona, agent_name=agent.name, business_name=ctx.org.name,
+            variables=chat_variables.build_context(agent_name=agent.name, business_name=ctx.org.name),
+        )
+        messages: list[Message] = []
+        if system_prompt:
+            messages.append(Message(role="system", content=system_prompt))
+        messages.append(Message(role="user", content=message))
+        req = ChatRequest(
+            model=mc.get("model", provider_name), messages=messages,
+            temperature=mc.get("temperature", 0.7), top_p=mc.get("top_p", 1.0),
+            max_tokens=mc.get("max_tokens", 1024),
+            frequency_penalty=mc.get("frequency_penalty", 0.0), presence_penalty=mc.get("presence_penalty", 0.0),
+            stop=mc.get("stop") or None, stream=False,
+        )
+        result = TurnResult()
+        async for _ev in run_turn(provider, req, [], result, budget=budget, guard_output=False):
+            pass
+        return {
+            "content": result.content,
+            "status": "error" if result.error else "completed",
+            "error": result.error,
+        }
+
+    return executor
+
+
+async def _sub_workflow_executor_for(session: AsyncSession, ctx: OrgContext) -> WorkflowSubExecutor:
+    """A `sub_agent` node's executor: runs another org-owned, published `Workflow` in-process,
+    sharing the same budget (call depth included). Deliberately does not persist a separate
+    `WorkflowRun` row for the nested execution — the parent's own `WorkflowStep` for the
+    `sub_agent` node already records the sanitized outcome; a full nested audit trail is a
+    follow-up, not built this slice.
+    """
+
+    async def executor(
+        workflow_id_str: str, variables_snapshot: dict[str, Any], budget: AgentBudget
+    ) -> WorkflowRunResult:
+        try:
+            workflow_id = uuid.UUID(workflow_id_str)
+        except ValueError:
+            return WorkflowRunResult(
+                status="failed", variables=variables_snapshot, error=f"invalid workflow_id {workflow_id_str!r}"
+            )
+        workflow = await session.get(Workflow, workflow_id)
+        if workflow is None or workflow.organization_id != ctx.org.id or workflow.deleted_at is not None:
+            return WorkflowRunResult(status="failed", variables=variables_snapshot, error="sub-workflow not found")
+        if workflow.current_version_id is None:
+            return WorkflowRunResult(
+                status="failed", variables=variables_snapshot, error="sub-workflow has no published version"
+            )
+        version = await session.get(WorkflowVersion, workflow.current_version_id)
+        assert version is not None
+
+        nested_tool_executor = await _tool_executor_for(session, ctx, workflow.agent_id)
+        nested_agent_executor = await _agent_executor_for(session, ctx)
+        return await run_workflow(
+            version.graph, variables=variables_snapshot, budget=budget,
+            tool_executor=nested_tool_executor, agent_executor=nested_agent_executor,
+            # Passing itself allows a chain deeper than one level — bounded by
+            # `budget.max_call_depth`, not by how many executor factories were pre-built.
+            sub_workflow_executor=executor,
+        )
 
     return executor
 
@@ -283,8 +396,13 @@ async def run_workflow_now(
     session.add(run)
     await session.flush()
 
-    executor = await _tool_executor_for(session, ctx, workflow.agent_id)
-    result = await run_workflow(version.graph, variables=run.variables, budget=budget, tool_executor=executor)
+    tool_executor = await _tool_executor_for(session, ctx, workflow.agent_id)
+    agent_executor = await _agent_executor_for(session, ctx)
+    sub_workflow_executor = await _sub_workflow_executor_for(session, ctx)
+    result = await run_workflow(
+        version.graph, variables=run.variables, budget=budget, tool_executor=tool_executor,
+        agent_executor=agent_executor, sub_workflow_executor=sub_workflow_executor,
+    )
     await _persist_steps(session, run, result)
 
     run.status = result.status
@@ -309,9 +427,12 @@ async def resume_workflow_run(
     assert workflow is not None
 
     budget = _budget_from_dict(run.budget)
-    executor = await _tool_executor_for(session, ctx, workflow.agent_id)
+    tool_executor = await _tool_executor_for(session, ctx, workflow.agent_id)
+    agent_executor = await _agent_executor_for(session, ctx)
+    sub_workflow_executor = await _sub_workflow_executor_for(session, ctx)
     result = await run_workflow(
-        version.graph, variables=run.variables, budget=budget, tool_executor=executor,
+        version.graph, variables=run.variables, budget=budget, tool_executor=tool_executor,
+        agent_executor=agent_executor, sub_workflow_executor=sub_workflow_executor,
         start_node_id=run.current_node_id, resume_input={"decision": data.decision},
     )
     await _persist_steps(session, run, result)

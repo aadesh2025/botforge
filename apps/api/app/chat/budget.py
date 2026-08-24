@@ -42,6 +42,14 @@ class AgentBudget:
     # Which limit tripped, once one does. Sticky — once tripped, stays tripped for the rest
     # of this budget's lifetime (including across nested calls sharing the same instance).
     tripped: str | None = None
+    # docs/17 Phase 2's sub_agent node: how many nested-workflow calls are currently on the
+    # stack. Lives on the budget (not a separate parameter threaded through every call)
+    # because the budget is already the one object every level of nesting shares — the same
+    # reasoning §2 rule 3 uses for steps/cost. Unwinds back to 0 as each nested call returns,
+    # so it never needs to survive a pause/resume boundary; a fresh top-level budget always
+    # starts at 0 (the dataclass default), which is correct on every path that constructs one.
+    call_depth: int = 0
+    max_call_depth: int = 5
 
     def elapsed_s(self) -> float:
         return time.perf_counter() - self.started_at
@@ -75,6 +83,7 @@ def default_budget() -> AgentBudget:
         max_tool_calls=settings.agentic_max_tool_calls,
         max_runtime_s=settings.agentic_max_runtime_s,
         max_cost_usd=settings.agentic_max_cost_usd,
+        max_call_depth=settings.workflow_max_call_depth,
     )
 
 

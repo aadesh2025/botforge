@@ -8,12 +8,49 @@ run is bounded exactly the way an agentic chat turn is (steps/tool-calls/runtime
 Sub-Agent node (not built this slice) sharing the SAME budget instance as its parent workflow
 run gets the inheritance rule from docs/17 §2 rule 3 for free.
 
-**Node types shipped this slice:** start, end, message, condition, set_variable, approval,
-tool. Deliberately NOT shipped: switch (condition covers the two-way case; N-way needs its own
-edge-selection design), loop, transform, delay, agent, sub-agent, get_variable (redundant with
-template substitution — a Message/Condition node already reads any variable by name). See
-docs/PROGRESS.md's Phase 2 entry for the reasoning; adding one is a registry entry in
-`NODE_HANDLERS` plus an edge-selection case in `_next_node`, not a rearchitecture.
+**Node types:** start, end, message, condition, set_variable, approval, tool, switch, loop,
+transform, agent, sub_agent, delay. `get_variable` is still deliberately not shipped —
+redundant with template substitution, a Message/Condition/Transform node already reads any
+variable by name. See docs/PROGRESS.md's Phase 2 gap-closure entry for the reasoning behind
+each of the newer types.
+
+- **switch** is `condition` generalised to N-way: a literal-value → branch-name mapping
+  (`config.cases`), never `eval()`, falling back to `config.default_branch` (default
+  `"default"`) when nothing matches.
+- **loop** iterates a list variable via a GRAPH CYCLE, not recursion: the loop node emits
+  branch `"body"` (with the next item written to `config.item_variable`) or `"done"` once the
+  list is exhausted, and the graph author wires the loop body's last node back to the loop
+  node's own id. This means the existing single node-at-a-time walker handles it with no new
+  execution model — and it means `AgentBudget.max_steps` is *already* a hard iteration cap
+  with no extra plumbing: every revisit of the loop node is a node visit like any other, so
+  `run_workflow`'s existing `budget.can_continue()` check (top of the loop, below) catches an
+  unbounded list exactly the way it catches any other runaway graph. `config.max_iterations`
+  is an optional second, loop-local cap for when the workflow's shared step budget is too
+  coarse to bound one specific loop.
+- **transform** is a whitelist of named string/number operations (uppercase, lowercase, trim,
+  to_number, length, concat) — same no-`eval()` rule as `evaluate_condition`. `concat` takes
+  its second operand from `config.with_variable` XOR `config.with_literal`, deliberately not a
+  single ambiguous `with` key that would have to guess whether the value names a variable or
+  is one.
+- **agent** invokes an existing published `Agent` through the real agentic runtime
+  (`app.chat.runtime.run_turn`), via an injected `agent_executor` built by the service layer
+  (this module stays DB-free by design — the executor is how it reaches the DB without
+  importing `app.workflows.service`, mirroring `tool_executor`). Passes the SAME `budget`
+  instance into `run_turn`, so a multi-step think→act→observe cycle inside the invoked agent
+  decrements the workflow run's own ceiling, per docs/17 §2 rule 3 — never a fresh budget for
+  the nested call. The agent's reply is untrusted (its own KB or tools may be attacker-
+  influenced) and is `neutralize_injections()`-ed before it can reach a variable.
+- **sub_agent** invokes another `Workflow` by id as a nested run, via an injected
+  `sub_workflow_executor`, sharing the same `budget`. Call depth is tracked on the budget
+  itself (`call_depth`/`max_call_depth`) — the one object every level of nesting already
+  shares — so a cycle of sub-agent nodes (direct self-call or indirect A→B→A) fails loudly
+  once the cap is hit rather than recursing until something else gives out. A nested run that
+  itself pauses on approval or exhausts the shared budget is surfaced as a failed node, not
+  silently swallowed — synchronous cross-run approval propagation is out of scope this slice.
+- **delay** is accepted for graph validation and canvas authoring but fails loudly if actually
+  executed: a synchronous wait would hang the HTTP request, and pausing for real needs the
+  Celery execution item 2 of this pass builds. See that item's PROGRESS.md entry for whether
+  real wait semantics landed on top of it in the same pass.
 
 **Security, not incidental:**
 - `evaluate_condition()` is a narrow hand-rolled parser (`var OP literal`, five operators, no
@@ -47,8 +84,20 @@ from app.chat.variables import escape_value
 # chat can be reused here without an adapter.
 WorkflowToolExecutor = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
-NODE_TYPES = frozenset({"start", "end", "message", "condition", "set_variable", "approval", "tool"})
+# (agent_id, rendered_message, budget) -> {"content": str, "status": "completed"|"error",
+# "error": str | None, "cost_usd": float}. `budget` is passed through so the executor can
+# forward the SAME instance into `run_turn` (docs/17 §2 rule 3).
+WorkflowAgentExecutor = Callable[[str, str, "AgentBudget"], Awaitable[dict[str, Any]]]
+
+# (workflow_id, variables_snapshot, budget) -> WorkflowRunResult of the nested run.
+WorkflowSubExecutor = Callable[[str, dict[str, Any], "AgentBudget"], Awaitable["WorkflowRunResult"]]
+
+NODE_TYPES = frozenset({
+    "start", "end", "message", "condition", "set_variable", "approval", "tool",
+    "switch", "loop", "transform", "agent", "sub_agent", "delay",
+})
 _TERMINAL_TYPES = frozenset({"end"})
+_TRANSFORM_OPS = frozenset({"uppercase", "lowercase", "trim", "to_number", "length", "concat"})
 
 
 class WorkflowError(Exception):
@@ -277,6 +326,178 @@ async def _run_tool(
     )
 
 
+async def _run_switch(node: dict[str, Any], variables: dict[str, Any], _executor: Any) -> NodeResult:
+    """`condition` generalised to N-way — a literal-value → branch-name mapping, never
+    `eval()`. `config.cases` keys are always strings (JSON object keys), so the compared
+    variable value is stringified before lookup rather than attempting type-aware matching."""
+    config = node.get("config") or {}
+    var_path = config.get("variable")
+    if not var_path or not isinstance(var_path, str):
+        return NodeResult(status="failed", error="switch requires config.variable")
+    cases = config.get("cases") or {}
+    if not isinstance(cases, dict):
+        return NodeResult(status="failed", error="switch requires config.cases to be an object")
+    value = variables.get(var_path)
+    value_str = "" if value is None else str(value)
+    branch = cases.get(value_str)
+    if branch is None:
+        branch = config.get("default_branch") or "default"
+    return NodeResult(status="completed", output={"value": value_str, "branch": branch}, branch=str(branch))
+
+
+async def _run_loop(node: dict[str, Any], variables: dict[str, Any], _executor: Any) -> NodeResult:
+    """Iterates via a graph cycle (see module docstring), not recursion — the loop node's own
+    revisits are ordinary node visits, so `AgentBudget.max_steps` already hard-caps it."""
+    config = node.get("config") or {}
+    list_var = config.get("list_variable")
+    item_var = config.get("item_variable")
+    if not list_var or not isinstance(list_var, str) or not item_var or not isinstance(item_var, str):
+        return NodeResult(
+            status="failed", error="loop requires config.list_variable and config.item_variable"
+        )
+    items = variables.get(list_var)
+    if not isinstance(items, list):
+        return NodeResult(status="failed", error=f"loop variable {list_var!r} is not a list")
+
+    state_key = f"__loop_index__{node['id']}"
+    index = variables.get(state_key, 0)
+    if not isinstance(index, int):
+        index = 0
+    max_iterations = config.get("max_iterations")
+    capped = isinstance(max_iterations, int) and index >= max_iterations
+
+    if index >= len(items) or capped:
+        variables.pop(state_key, None)
+        return NodeResult(status="completed", output={"done": True, "count": index}, branch="done")
+
+    variables[item_var] = items[index]
+    index_var = config.get("index_variable")
+    if index_var and isinstance(index_var, str):
+        variables[index_var] = index
+    variables[state_key] = index + 1
+    return NodeResult(status="completed", output={"item": items[index], "index": index}, branch="body")
+
+
+async def _run_transform(node: dict[str, Any], variables: dict[str, Any], _executor: Any) -> NodeResult:
+    """A whitelist of named string/number operations — never `eval()`, same rule as
+    `evaluate_condition`. `concat`'s second operand is `with_variable` XOR `with_literal`,
+    deliberately not one ambiguous key that would have to guess variable-name vs. literal."""
+    config = node.get("config") or {}
+    op = config.get("operation")
+    var_path = config.get("variable")
+    if op not in _TRANSFORM_OPS or not var_path or not isinstance(var_path, str):
+        return NodeResult(
+            status="failed",
+            error=f"transform requires config.variable and one of {sorted(_TRANSFORM_OPS)} (got {op!r})",
+        )
+    value = variables.get(var_path)
+    target = config.get("target_variable") or var_path
+    try:
+        if op == "uppercase":
+            result: Any = str(value if value is not None else "").upper()
+        elif op == "lowercase":
+            result = str(value if value is not None else "").lower()
+        elif op == "trim":
+            result = str(value if value is not None else "").strip()
+        elif op == "length":
+            result = len(value) if value is not None else 0
+        elif op == "to_number":
+            result = float(value) if value is not None else 0.0
+            if isinstance(result, float) and result.is_integer():
+                result = int(result)
+        else:  # concat
+            with_var = config.get("with_variable")
+            other = variables.get(with_var, "") if isinstance(with_var, str) else config.get("with_literal", "")
+            result = f"{value if value is not None else ''}{other if other is not None else ''}"
+    except (TypeError, ValueError) as exc:
+        return NodeResult(status="failed", error=f"transform {op!r} failed: {exc}")
+    variables[target] = result
+    return NodeResult(status="completed", output={target: result})
+
+
+async def _run_delay(node: dict[str, Any], variables: dict[str, Any], _executor: Any) -> NodeResult:
+    """Shape-only: accepted by graph validation and the canvas so authors can wire one in, but
+    fails loudly if actually reached — a synchronous wait would hang the HTTP request, and
+    pausing for real needs Celery execution. Never silently no-ops (a "wait 1 hour" step that
+    silently didn't wait is worse than one that visibly fails)."""
+    return NodeResult(
+        status="failed",
+        error="delay nodes are not executable yet — real wait semantics require async "
+        "(Celery) execution, see docs/17 Phase 2 gap-closure item 2",
+    )
+
+
+async def _run_agent(
+    node: dict[str, Any],
+    variables: dict[str, Any],
+    agent_executor: WorkflowAgentExecutor | None,
+    budget: AgentBudget,
+) -> NodeResult:
+    config = node.get("config") or {}
+    agent_id = config.get("agent_id")
+    if not agent_id or not isinstance(agent_id, str):
+        return NodeResult(status="failed", error="agent node requires config.agent_id")
+    if agent_executor is None:
+        return NodeResult(status="failed", error="no agent executor configured for this run")
+    message = render_workflow_template(config.get("message"), variables)
+    out = await agent_executor(agent_id, message, budget)
+    # Untrusted — the invoked agent's own KB or tools may be attacker-influenced (docs/17 §6,
+    # no exception for "it's our own agent").
+    sanitized_text = neutralize_injections(out.get("content") or "")
+    result_variable = config.get("result_variable")
+    if result_variable and isinstance(result_variable, str):
+        variables[result_variable] = sanitized_text
+    return NodeResult(
+        status="failed" if out.get("status") == "error" else "completed",
+        output={"sanitized_text": sanitized_text},
+        error=out.get("error"),
+    )
+
+
+async def _run_sub_agent(
+    node: dict[str, Any],
+    variables: dict[str, Any],
+    sub_workflow_executor: WorkflowSubExecutor | None,
+    budget: AgentBudget,
+) -> NodeResult:
+    config = node.get("config") or {}
+    workflow_id = config.get("workflow_id")
+    if not workflow_id or not isinstance(workflow_id, str):
+        return NodeResult(status="failed", error="sub_agent node requires config.workflow_id")
+    if sub_workflow_executor is None:
+        return NodeResult(status="failed", error="no sub-workflow executor configured for this run")
+    if budget.call_depth >= budget.max_call_depth:
+        return NodeResult(
+            status="failed",
+            error=f"sub-workflow call depth exceeded ({budget.max_call_depth}) — "
+            "a direct or indirect cycle of sub_agent nodes is the likely cause",
+        )
+    budget.call_depth += 1
+    try:
+        nested = await sub_workflow_executor(workflow_id, dict(variables), budget)
+    finally:
+        budget.call_depth -= 1
+
+    if nested.status == "paused_approval":
+        return NodeResult(
+            status="failed",
+            error="nested workflow paused on an approval node — sub_agent does not yet "
+            "support pausing the parent run on a nested approval",
+        )
+    if nested.status != "completed":
+        return NodeResult(
+            status="failed",
+            error=nested.error or f"nested workflow ended with status {nested.status!r}",
+        )
+    # Only a sanitized summary crosses back — the nested run's raw variable bag is untrusted
+    # output from the caller's perspective, identical treatment to a tool result.
+    sanitized_text = neutralize_injections(json.dumps(nested.variables))
+    result_variable = config.get("result_variable")
+    if result_variable and isinstance(result_variable, str):
+        variables[result_variable] = sanitized_text
+    return NodeResult(status="completed", output={"sanitized_text": sanitized_text})
+
+
 _HANDLERS: dict[str, Callable[..., Awaitable[NodeResult]]] = {
     "start": _run_start,
     "end": _run_end,
@@ -285,6 +506,15 @@ _HANDLERS: dict[str, Callable[..., Awaitable[NodeResult]]] = {
     "condition": _run_condition,
     "approval": _run_approval,
     "tool": _run_tool,
+    "switch": _run_switch,
+    "loop": _run_loop,
+    "transform": _run_transform,
+    "delay": _run_delay,
+    # "agent"/"sub_agent" are dispatched specially below (they need `budget`, which this
+    # dict-based signature doesn't carry) — registered here only so the unconditional
+    # `_HANDLERS[node["type"]]` lookup above the dispatch doesn't KeyError.
+    "agent": _run_agent,
+    "sub_agent": _run_sub_agent,
 }
 
 
@@ -311,6 +541,8 @@ async def run_workflow(
     variables: dict[str, Any],
     budget: AgentBudget,
     tool_executor: WorkflowToolExecutor | None = None,
+    agent_executor: WorkflowAgentExecutor | None = None,
+    sub_workflow_executor: WorkflowSubExecutor | None = None,
     start_node_id: str | None = None,
     resume_input: dict[str, Any] | None = None,
 ) -> WorkflowRunResult:
@@ -359,6 +591,10 @@ async def run_workflow(
         elif node["type"] == "tool":
             budget.record_tool_calls(1)
             result = await handler(node, variables, tool_executor)
+        elif node["type"] == "agent":
+            result = await _run_agent(node, variables, agent_executor, budget)
+        elif node["type"] == "sub_agent":
+            result = await _run_sub_agent(node, variables, sub_workflow_executor, budget)
         else:
             result = await handler(node, variables, tool_executor)
         first_iteration = False

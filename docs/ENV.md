@@ -279,6 +279,22 @@ to RRF ordering, logged, never an error and never an empty result set.
   forces a final answer.
 - `TOOL_TIMEOUT_SECONDS` (default `15`) — per-tool execution timeout (HTTP / built-in tools).
 
+## Agentic runtime & workflows (docs/17)
+- `AGENTIC_LOOP_ENABLED` (default `false`) — platform-wide gate for the chat agentic loop and
+  MCP tools. Off at BOTH this level and per-org (`Organization.agentic_loop_enabled`) by
+  default — new attack surface and new cost exposure, so nothing turns on with a single flip.
+- `AGENTIC_MAX_STEPS` / `AGENTIC_MAX_TOOL_CALLS` / `AGENTIC_MAX_RUNTIME_S` /
+  `AGENTIC_MAX_COST_USD` (defaults `5` / `5` / `30` / `0.05`) — the four-dimensional
+  `AgentBudget` ceiling shared by both the chat agentic loop and every workflow run (docs/17
+  §2 rule 3: nested calls decrement the SAME budget, never a fresh one). A workflow's `loop`
+  node is hard-capped by `AGENTIC_MAX_STEPS` too — every loop iteration is a node visit like
+  any other.
+- `MCP_TOOL_TIMEOUT_SECONDS` (default `20`) — wider than `TOOL_TIMEOUT_SECONDS`: an MCP call
+  involves a subprocess spawn or a third-party network round trip.
+- `WORKFLOW_MAX_CALL_DEPTH` (default `5`) — how deep a chain of workflow `sub_agent` nodes may
+  nest before `AgentBudget.call_depth` trips it. Bounds a direct self-call and an indirect
+  cycle (A→B→A) the same way, since depth doesn't distinguish which.
+
 ## Guardrails (docs/11)
 - `MAX_USER_MESSAGE_CHARS` (default `8000`) — hard ceiling on a single visitor message. Also
   the OWASP **LLM10** unbounded-consumption control: without it one caller can push an

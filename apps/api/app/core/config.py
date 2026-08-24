@@ -249,6 +249,10 @@ class Settings(BaseSettings):
     # materially slower than an HTTP/builtin tool — a separate, wider timeout rather than
     # sharing tool_timeout_seconds.
     mcp_tool_timeout_seconds: float = 20.0
+    # docs/17 Phase 2 gap closure: how deep a chain of `sub_agent` workflow nodes may nest
+    # before AgentBudget.call_depth trips it (ADR — see docs/DECISIONS.md). Bounds a direct
+    # self-call or an indirect cycle (A→B→A) the same way, since depth doesn't care which.
+    workflow_max_call_depth: int = 5
 
     # How often (seconds) the Celery beat sweep re-enqueues due `pending` webhook deliveries.
     webhook_sweep_interval_seconds: float = 60.0
