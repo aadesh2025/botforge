@@ -30,6 +30,9 @@ EXPECTED_TABLES = {
     "workflows", "workflow_versions", "workflow_runs", "workflow_steps",
     # docs/17 Phase 3 (agent testing): scenario definitions + per-run actual-vs-expected results.
     "agent_tests", "agent_test_runs",
+    # docs/17 Phase 4 follow-up (workflow testing, ADR-081): the workflow-shaped twin of the
+    # pair above, closing the WORKFLOWS_PUBLISH test-failure gate.
+    "workflow_tests", "workflow_test_runs",
 }
 
 

@@ -144,7 +144,7 @@ export function Playground() {
             <div key={m.id} className="flex flex-col gap-1.5">
               {m.handoff && (
                 <div className="inline-flex w-fit items-center gap-1.5 rounded-md border border-accent/25 bg-accent/[0.07] px-2 py-1 text-[11px] text-accent-soft">
-                  <Headphones className="size-3" /> Handed off to a human — status set to "handoff"
+                  <Headphones className="size-3" /> Handed off to a human — status set to &quot;handoff&quot;
                 </div>
               )}
               {m.tool && (

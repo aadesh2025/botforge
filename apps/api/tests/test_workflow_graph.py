@@ -442,6 +442,32 @@ async def test_loop_over_a_large_list_is_hard_capped_by_the_shared_budget() -> N
     assert budget.consumed_steps == 5
 
 
+async def test_loop_config_max_iterations_stops_early_independent_of_budget() -> None:
+    """`config.max_iterations` is a loop-local cap, separate from `AgentBudget.max_steps` — a
+    generous budget must not let it run past its own configured limit."""
+    graph = {
+        "nodes": [
+            LOOP_GRAPH["nodes"][0],
+            {
+                "id": "loop", "type": "loop",
+                "config": {
+                    "list_variable": "items", "item_variable": "item", "index_variable": "idx",
+                    "max_iterations": 2,
+                },
+            },
+            LOOP_GRAPH["nodes"][2],
+            LOOP_GRAPH["nodes"][3],
+        ],
+        "edges": LOOP_GRAPH["edges"],
+    }
+    budget = _budget(max_steps=1000)  # deliberately generous — max_iterations must bind first
+    variables: dict[str, Any] = {"items": ["a", "b", "c", "d", "e"], "acc": ""}
+    result = await run_workflow(graph, variables=variables, budget=budget)
+    assert result.status == "completed"
+    assert variables["acc"] == "ab"  # stopped after 2 of 5 items
+    assert budget.consumed_steps < 1000  # proves the budget cap never had to bind
+
+
 async def test_loop_requires_a_list_variable() -> None:
     budget = _budget()
     result = await run_workflow(

@@ -38,6 +38,69 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **docs/17 Phases 1-4 hardening pass (2026-08-24).** An autonomous session instruction: sweep
+  every already-documented deferred/unverified item across Phases 1-4 and close what's safe and
+  in-scope, without inventing new product surface. Not a new feature; exclusively coverage and
+  verification. Three real findings, one of them a regression this same session introduced.
+  - **⚠️ Found by actually re-running the full suite, not by inspection: `test_db.py`'s
+    `EXPECTED_TABLES` was never updated for the new `workflow_tests`/`workflow_test_runs` tables
+    from the commit immediately before this one.** `test_all_models_registered` failed
+    (`47 == 45`) the moment the full suite ran — this is precisely the test this repo relies on
+    to catch a table nobody remembered to register anywhere else (the same class of bug Phase
+    1's own entry names), and it caught its own family's newest instance within one commit.
+    Fixed by adding both table names. **Lesson restated, not new**: running only the test files
+    that seem relevant is not the same as running the suite — this file has said that before and
+    proved it again.
+  - **A real, previously-undocumented, zero-coverage gap: the MCP server registry endpoints
+    (`POST/GET /v1/mcp/servers`, `POST /v1/mcp/servers/{id}/test-connection`) had no test
+    coverage of any kind since they shipped in Phase 1 (2026-08-19)** — not even a pure-logic
+    unit test. Found while checking Phase 1-4 for "service-layer function only covered by
+    pure-logic tests, not real DB-session integration tests" per this session's own instruction;
+    this one had *no* tests at all, which is worse. New `tests/test_mcp.py`: CRUD, org-scoping,
+    RBAC (viewer read-only, editor has `TOOLS_MANAGE`), `test-connection` mocked at
+    `app.tools.service.mcp_list_tools` (same reasoning `test_admin.py` already applies to n8n —
+    no real stdio spawn or SSE socket in the suite) covering both success and a protocol failure
+    resolving to `ok: false`, not a 5xx. Also closed the identical gap one layer down:
+    `POST /v1/tools` with `type: "mcp"` (config validation — missing server_id/tool_name, unknown
+    server, cross-org server) and `execute_mcp_tool()` itself (the actual DB-session dispatch: a
+    real tenant-isolation check, a disabled-server check, and a protocol error surfacing as a
+    `ToolResult`, not an exception) — all previously untested. 17 new tests total, all passing on
+    first real run against actual Postgres.
+  - **Confirmed, not assumed: no RBAC gap between `workflows_awaiting_review` and
+    `agents_with_unpublished_changes`.** Both fields live only in `app/modules/admin/`, and every
+    admin route (including the one that returns them, `GET /v1/admin/orgs`) is gated by the same
+    `require_staff` dependency, already exercised for exactly this route by
+    `test_non_staff_blocked_from_all_admin_endpoints`. There is no org-scoped path (viewer/
+    editor/owner) that can reach either field — the admin console is staff-only and
+    cross-tenant-by-design, which *is* its purpose, not a leak. No new test needed; the existing
+    one already proves the boundary that matters.
+  - **Added, not previously covered: the loop node's own `config.max_iterations` cap**, a
+    loop-local ceiling separate from `AgentBudget.max_steps` (already well covered — a 10,000-
+    item list capped correctly by the shared budget, `test_loop_over_a_large_list_is_hard_capped
+    _by_the_shared_budget`). New `test_loop_config_max_iterations_stops_early_independent_of
+    _budget` proves `max_iterations` binds first even under a deliberately generous budget.
+    Everything else this item asked to check was already thoroughly covered before this pass:
+    `agent`/`sub_agent` malicious-content fixtures proving `neutralize_injections()`
+    (`test_agent_node_reply_is_neutralized_before_reaching_a_variable`,
+    `test_sub_agent_shares_the_budget_and_sanitizes_the_result`), `sub_agent`'s call-depth cap
+    under a self-referential cycle (`test_sub_agent_call_depth_cap_fails_loudly_not_silently`),
+    and `delay`'s duration ceiling (`test_delay_node_rejects_a_duration_beyond_the_configured
+    _maximum`) — all already existed from the Phase 2 gap-closure pass, matching the rigor the
+    `tool` node already had. Named explicitly here rather than re-built, per this session's own
+    instruction not to invent work that's already done.
+  - **All migrations for docs/17 Phases 1-4 (`0022`-`0027`) were already individually
+    up/down/up-verified against real Postgres** at the time each shipped — reconfirmed by
+    re-checking each phase's own PROGRESS.md entry rather than re-running six migrations that
+    were never in doubt.
+  - **Full backend suite re-run end to end after every Phase 1-4 commit, not just the touched
+    test files: 1102 passed, 4 skipped, 1 pre-existing unrelated failure**
+    (`test_playground_without_handoff_feature_does_not_trigger`, the same 502 already confirmed
+    via `git stash` to predate this entire track — reconfirmed again here, still true). Frontend
+    re-run too: `tsc`/vitest (187/187) clean, but `eslint` surfaced one pre-existing, unrelated
+    failure in `components/builder/playground.tsx` (an un-escaped `"` in
+    `react/no-unescaped-entities`, predating this session per `git log` — not touched by anything
+    in docs/17). Fixed as the trivial one-line correction it is, not filed as a tracked gap.
+
 - **Workflow regression testing + WORKFLOWS_PUBLISH test-failure gate (2026-08-24).** Closes the
   first item flagged (not fixed) in the Phase 4 report: Phase 3's own DoD wanted the
   test-failure publish gate on both `AGENTS_PUBLISH` and `WORKFLOWS_PUBLISH`, but no "workflow
