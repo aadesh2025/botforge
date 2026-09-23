@@ -398,12 +398,21 @@ separate volumes each would not, and would be the tempting shortcut.
 It does not make object storage unnecessary — §4 Option 2 still requires it the moment uploads
 cross a machine boundary — but it is no longer a prerequisite for a docs/14 phase.
 
-### 8.3 The backup gap is now live, not future
+### 8.3 The backup gap is now live, not future — ✅ closed 2026-09-23 (ADR-082)
 
 §5 says the persisted JSON becomes part of the recovery story "after K1-4". K1-4 has landed, so
-that file exists today. `infra/scripts/backup.sh` still covers Postgres only, so **neither the
-uploads nor the extracted text are backed up** — restoring Postgres alone leaves every
-`documents` row pointing at a `storage_path` and a `docling_json_path` that are gone.
+that file exists today. `infra/scripts/backup.sh` covered Postgres only, so **neither the
+uploads nor the extracted text were backed up** — restoring Postgres alone left every
+`documents` row pointing at a `storage_path` and a `docling_json_path` that were gone.
+
+**Closed.** `backup.sh` now also `tar -czf`s the `uploads` volume (mounted read-only into the
+prod `backup` service at `/uploads`, the same volume `api`/`worker` write to) alongside the
+`pg_dump`, same timestamp, same rotation, same `backups` volume. `restore.sh` takes the archive
+as an optional second argument. Verified with a real backup→restore round trip against this
+project's own dev database and its real `uploads` directory (48 tables, 2993 files) — restored
+`organizations` row count and a `diff -rq` of the restored directory both matched the source
+exactly. Backward compatible: `UPLOADS_DIR` unset still produces the DB dump alone, loudly
+flagged rather than silently gapped. See ADR-082 and `docs/09-DEPLOYMENT.md` §4.
 
 ### 8.4 The retention half of §5's disk bullet is done; the alerting half is not
 
@@ -518,7 +527,9 @@ volume per service, service added but model never pulled, model drifted, port pu
   and worker pod in `ContainerCreating` — trading a broken *feature* for a broken *platform*. The
   manifest now opens with an unmissable warning, the exact YAML to add if the cluster has RWX, and
   a pointer to object storage as the real answer.
-- **Backups still do not cover the `uploads` volume** (§8.3). `docs/09` §4 now says so explicitly.
+- ~~Backups still do not cover the `uploads` volume~~ — **✅ closed 2026-09-23, ADR-082** (§8.3).
+  Still true for **k8s** specifically, since no RWX volume/k8s backup story exists there yet —
+  the fix above is the single-box (`docker-compose.prod.yml`) path only.
 - **`ollama`'s resident size is still unmeasured.** §3.2 estimates 1–2 GB, but that figure assumed
   a chat model; serving only `nomic-embed-text` should be far smaller. Not measured, so not
   claimed — it is a planning correction to validate, exactly as §7 says of every number in §3.

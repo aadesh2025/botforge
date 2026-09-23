@@ -110,17 +110,28 @@ knowledge base, it is no knowledge base.
   no adapter for either exists. Startup warns, because there is otherwise no symptom.
 
 ## 4. Backups & data  *(implemented)*
-- **`infra/scripts/backup.sh`** — `pg_dump | gzip` to a timestamped file with N-day rotation.
-  Run it nightly via cron (example in the script header) or as a one-shot container that can
-  reach Postgres. The prod compose ships a `backup` service (cron-driven) writing to a `backups` volume.
-- **`infra/scripts/restore.sh <file.sql.gz>`** — documented, confirmation-gated restore (with an
-  optional drop+recreate). Verify with `SELECT count(*) FROM organizations;`.
+- **`infra/scripts/backup.sh`** — `pg_dump | gzip` to a timestamped file with N-day rotation,
+  **plus a `tar.gz` of the `uploads` volume** when `UPLOADS_DIR` is set (ADR-082) — the prod
+  `backup` service mounts the same `uploads` volume `api`/`worker` use, read-only, at exactly
+  that path, so one nightly run produces `botforge_<db>_<STAMP>.sql.gz` and
+  `botforge_uploads_<STAMP>.tar.gz` together, same retention window, same volume. Run it nightly
+  via cron (example in the script header) or as a one-shot container that can reach Postgres.
+  `UPLOADS_DIR` unset (e.g. a bare Postgres-only environment) falls back to the DB dump alone,
+  with a loud warning rather than a silent gap.
+- **`infra/scripts/restore.sh <file.sql.gz> [uploads.tar.gz]`** — documented, confirmation-gated
+  restore (with an optional drop+recreate for the DB). The uploads archive is optional and, when
+  given, extracted to `UPLOADS_TARGET_DIR` (no default — must be set explicitly, matching the
+  real `UPLOAD_DIR` the api/worker containers read) behind its own confirmation prompt. Verify
+  the DB side with `SELECT count(*) FROM organizations;`.
 - Uploaded files: the shared `uploads` volume (`UPLOAD_DIR`), holding each original document **and**
   the persisted `DoclingDocument` beside it. Retention + delete-per-org honored (NFR-8).
-- ⚠️ **`backup.sh` does not cover `uploads`.** It dumps Postgres only, so restoring from a backup
-  alone leaves every `documents` row pointing at a `storage_path` and `docling_json_path` that are
-  gone. Back that volume up alongside the database, or move it to an S3-compatible bucket
-  (docs/15 §8.3).
+- **✅ Closed (ADR-082, 2026-09-23), verified against real Postgres and real uploaded files, not
+  fixtures**: a full backup→restore round trip (48 tables, 2993 real files) matched the source
+  exactly on both the DB row count and a `diff -rq` of the restored directory. Was: "`backup.sh`
+  does not cover `uploads`… restoring from a backup alone leaves every `documents` row pointing
+  at a `storage_path` and `docling_json_path` that are gone" (docs/15 §8.3). Moving this to
+  object storage (S3-compatible) remains the eventual right move for multi-replica/k8s (§9.5,
+  R11) — this fix does not block that migration, it just closes the single-box gap now.
 
 ## 5. Observability  *(implemented)*
 - `/healthz` (liveness), `/readyz` (DB+Redis), **`/metrics` (Prometheus exposition** — request

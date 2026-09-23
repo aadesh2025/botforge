@@ -38,6 +38,37 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **RISK-REGISTER R1 closed: backups now cover the `uploads` volume (2026-09-23, ADR-082).**
+  The top item on `RISK-REGISTER.md`'s P0 list — `infra/scripts/backup.sh` had only ever run
+  `pg_dump`, so the `uploads` volume (client-uploaded documents + each one's persisted
+  `DoclingDocument` JSON) was never backed up, a gap flagged at docs/15 §8.3 and docs/09 §4 and
+  never previously closed.
+  - **Extended the existing `backup` service/script, not a second one.** The prod `backup`
+    service gets a **read-only** mount of the SAME `uploads` volume `api`/`worker` already write
+    to (never a duplicate copy), plus a new `UPLOADS_DIR` env var. `backup.sh` now `tar -czf`s
+    that directory alongside the `pg_dump`, same timestamp, same `backups` volume, same
+    rotation `find` (now matching both filename patterns). `restore.sh` takes the archive as an
+    optional second argument, extracted to a new required `UPLOADS_TARGET_DIR` (no default — a
+    wrong guess there silently "restores" documents nobody can find).
+  - **Backward compatible by construction**: `UPLOADS_DIR` unset still produces the DB dump
+    alone, now with a loud warning instead of a silent gap — a bare Postgres-only environment
+    (no uploads volume at all) keeps working unchanged. Same for `restore.sh` with no second arg.
+  - **Verified against real Postgres and real client-shaped data, not fixtures.** Ran the actual
+    `backup` service's own command (a `postgres:16` container, network-joined to the real dev
+    `botforge-postgres-1`, the real dev `apps/api/var/uploads` bind-mounted read-only in place of
+    the volume): 48 tables dumped, 2993 real uploaded-file entries archived. Restored BOTH into a
+    throwaway database and a throwaway directory — `organizations` row count matched source
+    exactly (2 = 2) and `diff -rq` between the original uploads directory and the restored one
+    came back identical. This is a real end-to-end round trip, not just "the script exited 0".
+    Also confirmed `docker compose -f docker-compose.prod.yml config` resolves the `uploads`
+    volume `read_only: true` at `/uploads` in the `backup` service — the same named volume, not
+    a second one under a different name.
+  - `docs/09-DEPLOYMENT.md` §4, `docs/15-DEPLOYMENT-CAPACITY.md` §8.3, and `RISK-REGISTER.md` R1
+    all updated to reflect the closure. **k8s unaffected** (R11, unchanged) — no RWX volume or
+    k8s backup story exists yet; this fix is the single-box (`docker-compose.prod.yml`) path
+    only, and does not block the eventual move to S3-compatible object storage (docs/15 §4
+    Option 2) — the archive format is exactly what an upload step to that would ship.
+
 - **docs/17 Phases 1-4 hardening pass (2026-08-24).** An autonomous session instruction: sweep
   every already-documented deferred/unverified item across Phases 1-4 and close what's safe and
   in-scope, without inventing new product surface. Not a new feature; exclusively coverage and

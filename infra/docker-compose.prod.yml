@@ -317,7 +317,7 @@ services:
           # does. Capping its CPU would add latency to every grounded answer. CPU caps belong on
           # the batch ML services when they land (docling-serve, ASR), not here.
 
-  # Nightly pg_dump backup with rotation (see infra/scripts/backup.sh).
+  # Nightly pg_dump + uploads-archive backup with rotation (see infra/scripts/backup.sh, ADR-082).
   backup:
     image: postgres:16
     restart: unless-stopped
@@ -329,9 +329,14 @@ services:
       PGDATABASE: ${POSTGRES_DB:-botforge}
       BACKUP_DIR: /backups
       RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      # Read-only mount of the SAME `uploads` volume api/worker write to (below) — closes
+      # RISK-REGISTER R1 / docs/15 §8.3: without this, restoring the DB dump alone leaves every
+      # `documents` row pointing at a storage_path/docling_json_path that no longer exists.
+      UPLOADS_DIR: /uploads
     volumes:
       - ./scripts:/scripts:ro
       - backups:/backups
+      - uploads:/uploads:ro
     entrypoint: ["/bin/sh", "-c"]
     # Run the backup script once an hour past 3am UTC daily; keep the container alive with a sleep loop.
     command: ["while true; do sh /scripts/backup.sh || true; sleep 86400; done"]
@@ -351,8 +356,9 @@ volumes:
   caddyconfig:
   backups:
   # Uploaded documents AND the persisted DoclingDocument beside each one. Shared by api +
-  # worker (PROD-1) and NOT covered by infra/scripts/backup.sh, which dumps Postgres only —
-  # restoring the database alone leaves every `documents` row pointing at a file that is gone
-  # (docs/15 §8.3).
+  # worker (PROD-1) and, since ADR-082, mounted read-only into `backup` too — the same volume,
+  # never a second copy — so a nightly archive of it lands beside the DB dump instead of
+  # restoring the database alone leaving every `documents` row pointing at a file that is gone
+  # (docs/15 §8.3, RISK-REGISTER R1 — closed).
   uploads:
   ollamadata:

@@ -18,6 +18,56 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-082: Backups now cover the `uploads` volume — same script, same backup service, read-only mount
+- **Date:** 2026-09-23
+- **Status:** accepted
+- **Context:** `infra/scripts/backup.sh` has only ever run `pg_dump`. The `uploads` named volume
+  (client-uploaded documents + each one's persisted `DoclingDocument` JSON, shared by `api` and
+  `worker` since ADR-068/PROD-1) was never backed up at all — flagged explicitly at the time
+  (docs/15 §8.3, docs/09 §4) and never closed. Restoring the Postgres dump alone left every
+  `documents` row pointing at a `storage_path`/`docling_json_path` that no longer existed on
+  disk. Recorded as `RISK-REGISTER.md` R1, P0 ("it's not 'if', it's 'whenever a disk is lost'").
+- **Decision:** Extend the existing `backup` service and script rather than add a second one.
+  `docker-compose.prod.yml`'s `backup` service gets a **read-only** mount of the SAME `uploads`
+  volume `api`/`worker` already write to (never a second copy of the data) at `/uploads`, plus a
+  new `UPLOADS_DIR` env var pointing at it. `backup.sh` archives that directory with `tar -czf`
+  into the same `BACKUP_DIR`/`backups` volume the DB dump already writes to, timestamped to
+  match (`botforge_uploads_<STAMP>.tar.gz` beside `botforge_botforge_<STAMP>.sql.gz`), and the
+  existing rotation `find` now matches both filename patterns. `restore.sh` takes the archive as
+  an optional second argument and extracts it to a new required `UPLOADS_TARGET_DIR` (no default
+  — a wrong guess here silently "restores" documents nobody can find, so it must be explicit).
+  **Backward compatible by construction**: `UPLOADS_DIR` unset → `backup.sh` does the DB dump
+  exactly as before, with a loud warning (not a silent no-op) instead of failing, so a bare
+  Postgres-only environment (a dev box with no uploads volume at all) keeps working unchanged.
+  Likewise `restore.sh` with no second argument does exactly what it always did.
+- **Verified, not assumed — against real Postgres and real client-shaped data, not fixtures.**
+  Ran the actual `backup` service's own command (`postgres:16` image, network-joined to the real
+  `botforge-postgres-1`, the real dev `uploads` directory bind-mounted read-only in place of the
+  volume) against this project's live dev database and its live `apps/api/var/uploads` — 48
+  tables dumped, 2993 real uploaded-file entries archived. Restored BOTH into a throwaway
+  database and a throwaway directory: `organizations` row count matched (2 = 2) and
+  `diff -rq` between the original uploads directory and the extracted archive came back
+  identical — a real end-to-end round trip, not a "the script exited 0" check. Also verified the
+  no-`UPLOADS_DIR` backward-compatibility path produces the DB dump plus the warning and nothing
+  else. `docker compose -f docker-compose.prod.yml config` confirms the resolved service: the
+  `uploads` volume mounted `read_only: true` at `/uploads`, `UPLOADS_DIR: /uploads` in the
+  service's own environment — the same named volume, not a duplicate declared under a new name.
+- **Alternatives considered:** A second, uploads-only backup service — rejected, no reason to
+  duplicate the cron-like `while true; sleep 86400` loop and the retention logic for a job that
+  already runs on the same schedule against the same volume family. Backing up straight to
+  object storage (S3-compatible) instead of a local tar — the right move eventually (docs/15 §4
+  Option 2, R11) but a bigger, separable decision (credentials, a new dependency, k8s multi-
+  replica implications) than "the existing single-box backup should cover the volume it already
+  has read access to." This ADR closes the immediate gap without blocking that later migration —
+  the archive format (`tar.gz` of the mount root) is exactly what an S3 upload step would ship.
+- **Consequences:** `RISK-REGISTER.md` R1 closed — updated to reflect the fix and the
+  verification, not deleted, since the register's own instructions say re-derive rather than
+  silently drop a row. `docs/09-DEPLOYMENT.md` §4 and the `uploads:` volume comment in
+  `docker-compose.prod.yml` updated to match (a stale "not backed up" comment next to code that
+  now backs it up is exactly the kind of drift this project's own session log has flagged before
+  as worse than no comment). k8s (R11) is unaffected — no RWX volume, no k8s backup story exists
+  yet, documented as already out of scope there and not pulled forward here.
+
 ### ADR-081: Workflow regression testing (`workflow_tests`) — new tables, not a `workflow_id` column on `agent_tests`; closes Phase 3's WORKFLOWS_PUBLISH gate
 - **Date:** 2026-08-24
 - **Status:** accepted

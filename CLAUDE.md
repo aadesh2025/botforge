@@ -215,6 +215,31 @@ Two standing rules from that spec, repeated here because they are easy to violat
 > fresh session has context beyond git log. Full detail lives in `docs/PROGRESS.md` +
 > `docs/DECISIONS.md`; keep entries here to a few lines.
 
+### 2026-09-23 — RISK-REGISTER R1 closed: backups now cover the `uploads` volume
+- **ADR-082.** `infra/scripts/backup.sh` had only ever `pg_dump`ped Postgres — the `uploads`
+  volume (client-uploaded documents + each one's persisted `DoclingDocument` JSON) was never
+  backed up, flagged at docs/15 §8.3/docs/09 §4 and carried forward unfixed into
+  `RISK-REGISTER.md` as **R1**, the top item on the P0 list. Extended the existing `backup`
+  script/service rather than adding a second one: a **read-only** mount of the SAME `uploads`
+  volume `api`/`worker` already write to, a new `UPLOADS_DIR` env var, `tar -czf` alongside the
+  `pg_dump`, same timestamp/rotation/volume. `restore.sh` takes the archive as an optional
+  second argument. Backward compatible — `UPLOADS_DIR` unset still produces the DB dump alone,
+  now with a loud warning instead of a silent gap, so a bare Postgres-only environment keeps
+  working unchanged.
+- **Verified against real Postgres and real client-shaped data, not fixtures.** Ran the actual
+  `backup` service's own command (`postgres:16` image, network-joined to the real dev
+  `botforge-postgres-1`, the real dev `apps/api/var/uploads` bind-mounted read-only) — 48 tables
+  dumped, 2993 real uploaded-file entries archived. Restored BOTH into a throwaway database and
+  a throwaway directory: `organizations` row count matched (2 = 2) and `diff -rq` between the
+  original uploads directory and the extracted archive came back identical. Also confirmed the
+  no-`UPLOADS_DIR` path still works and `docker compose -f docker-compose.prod.yml config`
+  resolves the intended mount (`uploads` volume, `read_only: true`, `/uploads`) rather than a
+  duplicate volume under a new name.
+- `docs/09-DEPLOYMENT.md` §4, `docs/15-DEPLOYMENT-CAPACITY.md` §8.3, and `RISK-REGISTER.md` R1
+  all updated to reflect the closure rather than left stale next to code that now does the
+  thing they say it doesn't. k8s (R11) unaffected — no RWX volume/backup story exists there yet,
+  unchanged and not pulled forward here.
+
 ### 2026-08-17 — docs/15 PROD-3: memory ceilings, and the deploy command that never worked
 - **ADR-069.** Memory limit on **all ten** prod services (every value overridable, defaults for the
   16 GB VPS of docs/15 §4 Option 1) plus memory **reservations** on Postgres and Redis. Before this,
