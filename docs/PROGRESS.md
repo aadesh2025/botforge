@@ -38,6 +38,39 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **RISK-REGISTER R4 measured, and a real data-loss bug (R14) found doing it (2026-09-23).**
+  New `infra/perf/load_test.py` — the first concurrency test ever run against this stack; every
+  prior verification anywhere in this file is sequential, one-request-at-a-time correctness.
+  - **Deliberately isolates platform throughput from LLM-provider latency**: every test agent
+    uses `provider: "fake"` (instant, no network) and runs against a DEDICATED API instance with
+    guard L2/L3 disabled — otherwise a real concurrency test would fire live Groq calls per
+    message and risk repeating the exact incident already logged 2026-08-10 (free tier exhausted
+    by 61 *sequential* probes). Isolated on Redis DB 1 so its Celery traffic never touched the
+    operator's normal dev worker/queue.
+  - **Numbers**: chat first-token p50 49ms→2220ms (c=1→50), workflow-run p50 355ms-1581ms→
+    3700-4057ms (c=1→25), **zero HTTP-level errors at any level** — the platform didn't fall
+    over, it degraded. Two causes identified, not fixed (a sizing decision for whoever deploys
+    to production, not a code bug): no `pool_size`/`max_overflow` on the async DB engine
+    (asyncpg default caps at 15 concurrent connections/process); the documented Windows dev
+    `--pool=solo` Celery worker (one process, no parallelism) caps workflow throughput near
+    3.3 req/s regardless of concurrency. Full numbers in `docs/15-DEPLOYMENT-CAPACITY.md` §11.1.
+  - **⚠️ R14 (new): a 100%-reproducible data-loss bug, found only because the load test's own
+    client disconnects the SSE stream after the first token — the same thing a browser tab does
+    on navigation, a pattern no prior test in this codebase exercised.** Every early-disconnected
+    chat turn (38/38 in this run) logs an `unhandled_exception` (a `CancelledError` propagating
+    through `BaseHTTPMiddleware` into a SQLAlchemy session mid-flush) — but worse, **the
+    assistant's reply is never persisted**: queried directly, 53/53 user messages from the
+    concurrent runs have zero matching assistant message, while a matched control (identical
+    setup, stream drained to completion) persisted correctly on the first try. The client sees
+    HTTP 200 throughout (SSE headers are already on the wire before the stream breaks), so
+    nothing signals the loss. **Not fixed** — needs a design decision (persist partial content on
+    disconnect vs. discard on purpose; middleware order; move persistence earlier in
+    `app/chat/runtime.py`) that touches the chat streaming/persistence path, flagged rather than
+    guessed at. Filed as `RISK-REGISTER.md` R14, P0 — arguably more urgent than R4 itself was,
+    since it's a concrete bug rather than an absence of measurement.
+  - `RISK-REGISTER.md` (R4 marked measured, R14 added), `docs/15-DEPLOYMENT-CAPACITY.md` (new
+    §11), `CLAUDE.md` §11 all updated.
+
 - **RISK-REGISTER R1 closed: backups now cover the `uploads` volume (2026-09-23, ADR-082).**
   The top item on `RISK-REGISTER.md`'s P0 list — `infra/scripts/backup.sh` had only ever run
   `pg_dump`, so the `uploads` volume (client-uploaded documents + each one's persisted

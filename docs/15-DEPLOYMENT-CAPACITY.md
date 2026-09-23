@@ -598,3 +598,86 @@ gets past it. So the documented `docker compose -f docker-compose.prod.yml up -d
 never have worked from the file the header told you to populate. It fails **loudly**, before
 anything starts, which is the one good thing about it. Both the compose header and `docs/09` §3 now
 carry `--env-file ../.env` and name which variables belong to which mechanism.
+
+## 11. First-ever concurrency/load test — RISK-REGISTER R4 (2026-09-23)
+
+Every prior verification in this doc, and in every phase entry in `docs/PROGRESS.md`, is
+correctness under low, sequential, test-shaped traffic — one request at a time. Nothing had ever
+sent concurrent requests at this stack before. `RISK-REGISTER.md` carried this as **R4**, P0.
+New `infra/perf/load_test.py` — see its own header for the exact reproduction command and why it
+must run against a dedicated instance (`provider="fake"`, guard L2/L3 disabled) rather than the
+operator's normal dev API: a real concurrency test against Groq would risk repeating the
+2026-08-10 incident that exhausted the free tier on 61 *sequential* probes.
+
+### 11.1 Numbers (8-org pool, this dev machine, single uvicorn process + single `--pool=solo` Celery worker)
+
+```
+chat  c=  1: p50=49ms   p95=49ms    (baseline)
+chat  c=  5: p50=678ms  p95=684ms
+chat  c= 10: p50=1011ms p95=1036ms
+chat  c= 25: p50=1207ms p95=1514ms
+chat  c= 50: p50=2220ms p95=2420ms  — 45x the baseline
+
+wf-simple  c= 1: p50=1581ms  (dispatch + one Celery round trip)
+wf-simple  c=25: p50=3700ms p95=7302ms
+
+wf-tool    c= 1: p50=355ms
+wf-tool    c=25: p50=4057ms p95=7637ms
+```
+
+Zero HTTP-level errors at any concurrency level, on either path — the platform did not fall over.
+It did degrade close to linearly with concurrency, and the **two causes are identifiable, not
+mysterious**:
+
+- **Chat**: `app/db/session.py`'s `create_async_engine()` sets no `pool_size`/`max_overflow`,
+  so SQLAlchemy's asyncpg default applies — a **hard ceiling of 15 concurrent DB connections**
+  per process. 50 concurrent chat requests queue behind that ceiling; the queueing-shaped
+  (roughly linear, not exponential) latency growth is exactly what that predicts. Single dev
+  `uvicorn` process (no `--workers N`) is the other half of the ceiling.
+- **Workflow runs**: `--pool=solo` is the CLAUDE.md §12-documented Windows dev convention — one
+  process, no real parallelism. Both graphs plateau around 3-3.6 req/s regardless of submitted
+  concurrency: this is the worker serializing, not the API. Production sizing (more workers, a
+  non-solo pool) is a capacity-planning decision for §3-4 of this doc, not a code bug.
+
+**Neither of these is fixed in this pass** — R4's ask was to produce real numbers where there
+were none, not to re-tune connection pools or worker counts. `pool_size`/`max_overflow` and
+Celery worker concurrency are now identified, specific knobs for whoever sizes the production
+deployment, rather than an unmeasured unknown.
+
+### 11.2 ⚠️ A real, previously-invisible bug, found only because this test disconnects like a browser does
+
+The chat load test's own client — deliberately, and realistically — closes the SSE stream as
+soon as it has read the first token, the same thing a browser tab does on navigation or a
+visitor closing the page mid-reply. Every prior test in this codebase drains a stream to
+completion. This one didn't, and found:
+
+- **Every early-disconnected chat turn logged an `unhandled_exception`** (38 occurrences across
+  ~150 requests): a `CancelledError` from the client disconnect propagates through
+  `SecurityHeadersMiddleware`/`RequestContextMiddleware` (both `BaseHTTPMiddleware` subclasses —
+  a known Starlette interaction where a client disconnect during a streamed response surfaces as
+  an unhandled exception in that middleware layer, not a clean cancellation) into a SQLAlchemy
+  session left mid-flush, producing a second, more confusing error
+  ("*This Session's transaction has been rolled back due to a previous exception during
+  flush...*").
+- **⚠️ It is not just log noise — the assistant's reply is never persisted.** Queried directly:
+  every one of 53 user messages sent in the concurrent chat runs has **zero** matching assistant
+  message in `messages` (`role='assistant'` count = 0, `role='user'` count = 53, across all 8
+  test agents). **100% reproduction, not a race.** A control request — identical setup, but the
+  client reads the stream to completion instead of stopping at the first token — persisted both
+  messages correctly on the first try. The HTTP status the client sees is still `200` (SSE
+  headers are already on the wire before the stream breaks — the same "can't 404 from inside a
+  `StreamingResponse`" shape the 2026-08-10 session log already found once for a different
+  reason), so nothing in the response itself signals that the reply was lost.
+- **Effect on the running system**: an operator (or the client-facing widget, or the Playground)
+  who has ever navigated away, closed a tab, or refreshed mid-reply has silently lost that
+  assistant turn from conversation history — not flagged anywhere until this test disconnected
+  on purpose to look for it.
+
+**Not fixed in this pass** — this needs a design decision (does a disconnected stream persist
+whatever content had been generated so far, or discard it deliberately; does the middleware
+order change; does `run_turn`'s persistence move earlier, before the point a cancellation can
+interrupt it) that touches `app/main.py`'s middleware stack and/or `app/chat/runtime.py`'s
+streaming/persistence path — the same category of "stop and flag rather than guess" this
+project's own session-log convention already uses for exactly this shape of finding. Recorded
+here and in `RISK-REGISTER.md` as a new, previously-undocumented gap, per this session's own
+instruction to record rather than silently fix anything non-trivial found along the way.
