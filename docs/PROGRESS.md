@@ -38,6 +38,39 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **The 13 known backend test failures, diagnosed precisely (2026-09-24).** The prior note
+  ("need a download from a server this machine can't reach") was a guess; it is now confirmed
+  against the tracebacks. Full suite twice on the dev DB (port 5750): **1192 passed / 13 failed /
+  4 skipped**, both runs, the same 13.
+  **One cause: `tiktoken` cannot download its BPE ranks.** The resource is
+  `https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken`. From this machine
+  the name resolves (57.150.192.193) but the TLS connection is **reset** (`WinError 10054`, curl
+  exit 35) while github.com and huggingface.co answer 200 — a selective block on this network, not
+  a general outage and not a DNS failure. `app/rag/tokenizer.py` degrades to `len/4` by design,
+  which is what the token tests then trip over.
+  - `tests/test_docling_chunking.py` × 9 — `DoclingChunkingUnavailable` (chunker builds a
+    tiktoken-backed tokenizer): `test_the_heading_path_is_embedded`, `..._is_not_stored`,
+    `test_the_enriched_string_is_never_persisted_as_content`,
+    `test_inline_mode_puts_the_heading_where_the_fts_index_can_see_it`,
+    `test_the_two_heading_modes_really_differ`, `test_every_chunk_carries_its_heading_path`,
+    `test_caller_metadata_survives`, `test_peers_under_one_heading_merge_and_other_sections_do_not`,
+    `test_no_page_key_when_the_document_has_no_page_geometry`.
+  - `tests/test_docling_chunking.py` × 3 — assertions that the count is *not* `len/4`, failing
+    because it is: `test_token_count_is_the_tokenizers_not_a_character_ratio` (`8 != 8`),
+    `test_token_count_of_a_known_fixture` (`3 == 2`),
+    `test_non_english_is_no_longer_wildly_undercounted` (`11 > 22`).
+  - `tests/test_rag.py::test_estimate_tokens` × 1 — `100 == 50` for `"a" * 400`.
+  **Real-world consequence on this machine:** ingest silently records `len/4` token counts, which
+  undercounts Tamil/Devanagari several-fold. Fix for CI or a locked-down worker: point
+  `TIKTOKEN_CACHE_DIR` at a pre-warmed path. CI with normal internet access should not see these.
+  **Not a network failure — a flake, not reproduced:** the *first* full run had 5 extra failures,
+  `tests/test_tenant_isolation.py` probes for `GET/PATCH/DELETE /v1/agents/{agent}`,
+  `/versions`, `/widget-config` (org B got 200 on org A's agent). They passed in isolation
+  (69/69), with their neighbours (83/83), with `test_docling_chunking.py` before them (73/73),
+  in a 974-test run of every file before them, and in the second full run. Org resolution and
+  `agents.service._get_agent` both check `organization_id` correctly. Cause **not identified**;
+  if it recurs, capture the full failing run's output before re-running.
+
 - **R14 fixed: a dropped chat stream no longer loses the reply (2026-09-24, ADR-083).** Instruction
   was "solve the issues and existing bugs". Three attempts, and the first two failing is the
   useful part — recorded in full in ADR-083 so nobody retries them:
