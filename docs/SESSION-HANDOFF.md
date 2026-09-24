@@ -3,6 +3,63 @@
 > **Read this first, then continue the build.** This file is the pick-up point for the next
 > session. It records what's done, what's half-done, and exactly what to do next.
 
+## ▶ CURRENT STATE — 2026-09-24 (this block supersedes the 2026-07-19 text below, kept as history)
+
+Branch `master`, HEAD `c3b6ec9`. Tags: `phase-20-complete`, `agentic-phase-1`…`4-complete`
+(Phase 5 deliberately not started). Phases 0–20 (18 = billing, deferred) **and docs/17 Phases
+1–4** are shipped. For the running detail see `docs/PROGRESS.md`, `docs/DECISIONS.md` (now to
+**ADR-083**), `docs/RISK-REGISTER.md`, and the `session-log` skill.
+
+### What the last stretch did (newest first)
+| Commit | What |
+|---|---|
+| `c3b6ec9` | **R14 fixed (ADR-083):** a client dropping a streaming chat lost the reply (and, if early, the conversation + user message). Now handed to a Celery task (`chat.finalize_turn`). Also fixed the "pre-existing unrelated failure" test — it was stale, not a bug. |
+| `e7661ea` | **R4 measured:** first-ever concurrency test (`infra/perf/load_test.py`). Zero errors up to 50 concurrent chats / 25 workflow runs; latency degrades ~linearly (DB pool default, single dev Celery worker). It also *found* R14. |
+| `1e34ecc` | **R1 closed (ADR-082):** backups now archive the `uploads` volume; restore round-trip verified on real data. |
+| `74a0e6f`, `b9315d7` | docs/17 Phase 5 gate checked → **not met, held**; Phases 1–4 hardening pass (found zero-coverage MCP endpoints → 17 tests; a missed `EXPECTED_TABLES`). |
+| `0b55c03` | **Workflow tests + WORKFLOWS_PUBLISH test-failure gate (ADR-081)** — closes Phase 3's own DoD gap. |
+| `d0e13b3`…`7bf5378` | **docs/17 Phase 4:** workflow submit-review / rollback / structural version diff / admin "awaiting review" (ADR-080). |
+
+### Where we stand (honest level)
+- **Engineering: feature-complete for the v1 spec and well tested** — ~1100 backend tests, 187
+  frontend, strict mypy/ruff/tsc/eslint clean, migrations `0001`–`0027` each verified up/down/up
+  on real Postgres, agentic runtime + visual workflow builder + agent/workflow testing shipped.
+  Latest full run: 1096 pass; the 13 failures are tokenizer tests that need the tiktoken CDN,
+  unreachable from this machine at the time (they passed earlier).
+- **Operations: pre-production.** No real client runs a workflow; nothing has run under
+  production sizing. That is why docs/17 Phase 5 (Integration SDK) is held — by its own gate,
+  not by oversight.
+- **Risk register** (`docs/RISK-REGISTER.md`): **closed** R1 (backups), R4 (measured), R14
+  (stream-drop data loss, ~0.5% unexplained residual). **Open and blocking real clients:**
+  - **R2** — the live `aurozenai` KB document still contains unredacted contact PII (ops task;
+    needs the operator's OK before touching a real client's data).
+  - **R3** — no external pen-test ever; needs a budget/vendor decision from a human.
+  - P1: R5 distress-detection inconsistency, R6 guard models fail open (no alerting), R7
+    grounding 12/15 fabricated with no context, R8 cross-turn injection uncovered.
+  - Sizing to do before promising an SLA: async DB `pool_size`/`max_overflow`, Celery worker count.
+- **Not committed / not mine:** `CLAUDE.md` (session log moved into the `session-log` skill),
+  `.claude/`, and older WIP in `app/chat/pii.py`, `app/db/templates.py`, `app/llm/types.py`.
+  Someone should review and commit or drop these.
+
+### Do this next
+1. **R2** — show the flagged `aurozenai` document to the operator, redact, re-ingest.
+2. Decide **R3** (external security review) — a human/budget call.
+3. Then P1s: R6 alerting on `guard_l2_unavailable`/`guard_l3_unavailable` is the cheapest win.
+4. Optional: chase the ~0.5% R14 straggler; k8s uploads (R11).
+
+### Environment gotchas that bit this session
+- **Windows reserves TCP 5430–5729 after a reboot** → Postgres can't bind 5433. Check with
+  `netsh interface ipv4 show excludedportrange protocol=tcp`. Workaround used: host port **5750**
+  (`POSTGRES_HOST_PORT=5750`) + per-command `DATABASE_URL=postgresql+asyncpg://botforge:botforge@localhost:5750/botforge`
+  (API, worker, alembic, pytest). No files were edited; the data volume is intact.
+- Docker Desktop is down at the start of every session; `Start-Process` it, then compose up.
+- Git Bash mangles `/paths` passed to `docker run` — use `MSYS2_ARG_CONV_EXCL="*"` with Windows-style `-v` paths.
+- The full pytest run is ~5–19 min; wait for a digit-anchored `[0-9]+ passed`, not just "passed".
+
+---
+
+*Everything below is the 2026-07-19 hand-off, unchanged, kept as history.*
+
 Last updated: **2026-07-19** · Latest tag: `phase-20-complete` · Branch: `master`
 
 > ## ✅ BUILD COMPLETE — all phases 0–20 done (18 = billing, deferred by design).
