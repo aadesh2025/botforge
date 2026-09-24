@@ -63,16 +63,18 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   **Real-world consequence on this machine:** ingest silently records `len/4` token counts, which
   undercounts Tamil/Devanagari several-fold. Fix for CI or a locked-down worker: point
   `TIKTOKEN_CACHE_DIR` at a pre-warmed path. CI with normal internet access should not see these.
-  **Not a network failure — the first run collided with another session's work in progress:** the
-  *first* full run had 5 extra failures, `tests/test_tenant_isolation.py` probes for
-  `GET/PATCH/DELETE /v1/agents/{agent}`, `/versions`, `/widget-config` (org B got 200 on org A's
-  agent). That file did not exist when the session began; a second Claude session was writing and
-  committing it (`103fc55`, 12:15) in the same working tree while the run was in flight, alongside
-  the SSRF commits `eb73d0f`/`35cd189`. It then passed in isolation (69/69), with its neighbours,
-  with `test_docling_chunking.py` before it, and in the second full run (1192 passed). Org
-  resolution and `agents.service._get_agent` both check `organization_id` correctly. The exact
-  draft state that failed was not captured, so the mechanism is inferred, not proven — but there
-  is no reproducible leak. **Lesson: don't run a full suite in a tree another session is editing.**
+  **Not a network failure — the first run overlapped a deliberate mutation check:** the *first* full
+  run had 5 extra failures, `tests/test_tenant_isolation.py` probes for `GET/PATCH/DELETE
+  /v1/agents/{agent}`, `/versions`, `/widget-config` (org B got 200 on org A's agent). Those are
+  **exactly the 5 probes that fail when the org check in `agents.service._get_agent` is removed**:
+  the session that wrote the sweep did that on purpose, in the shared working tree, to prove the
+  sweep can detect a leak (5 failed, 3 passed for `-k agents`), then restored the file (`git diff`
+  empty). A full run that imported `agents/service.py` inside that window saw the mutated code.
+  Reproduced: the same 5 fail deterministically under that mutation. That the run overlapped the
+  window is inferred from timing, not captured. `_get_agent` in `HEAD` checks `organization_id`; the
+  sweep passes 69/69 in isolation and in the second full run (1192 passed). No leak in committed
+  code. **Lesson: don't run a full suite in a tree another session is editing — and don't mutate
+  shared source for a mutation check; do it in a worktree.**
 
 - **R14 fixed: a dropped chat stream no longer loses the reply (2026-09-24, ADR-083).** Instruction
   was "solve the issues and existing bugs". Three attempts, and the first two failing is the

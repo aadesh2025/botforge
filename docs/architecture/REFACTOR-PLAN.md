@@ -45,6 +45,16 @@ between docs and code, (3) locking the current boundaries in with an architectur
   `loop.getaddrinfo`. `tools/http_tool.py` and `webhooks/dispatch.py` already use `follow_redirects=False`; only the
   ingestion path is exposed.
 
+### S-03 Tenant-supplied LLM `base_url` is fetched with no SSRF guard (found in the verification pass, NOT fixed)
+* Where: `modules/credentials` (`CredentialCreate/Update.base_url`, any role with `tools:manage`, incl. `editor`) ->
+  `llm/registry.py::build_chat_provider` -> `CustomProvider`/`OpenAICompatibleProvider` POSTs to
+  `{base_url}/chat/completions` from the API host. `core/ssrf.py` is not applied anywhere in `llm/` or `credentials/`.
+* Impact: an org member can aim the API host at loopback/private/metadata addresses with a fixed path suffix and
+  see error text. Same class as S-01/S-02; narrower (POST, fixed suffix) but real.
+* Not fixed here because it is a behavior change that needs your call: self-hosters may legitimately point a custom
+  provider at a private-network endpoint (LAN vLLM/Ollama). Options: block private hosts for non-staff (like stdio),
+  or an explicit `ALLOW_PRIVATE_PROVIDER_URLS` opt-in per deployment.
+
 ### R-01 Tenant isolation is by convention, and 47 flagged queries were only partly reviewed
 * See `REPOSITORY-MAP.md` §7. No leak found in the ~15 reviewed; ~30 remain unreviewed. Plan: finish the review, add one
   parametrised cross-tenant test per resource that takes a client-supplied id (agents, conversations, documents, chunks,
@@ -89,7 +99,7 @@ Encode what is true today so it cannot rot; each rule is a real invariant, not a
 | A-08 | `chat/inbound.py` (channel turns) and `conversations/service._prepare_turn` (web turns) may duplicate turn preparation | **Investigate only.** Both use `chat.assembly`; do not merge without a behavior-equivalence test. |
 | A-09 | `chat/runtime.run_turn` 253 lines, `chat/inbound.events` 217 lines | **Leave.** `docs/11 §10a` and the no-context A/B rule apply; splitting the highest-risk function for a line count is the exact AI-refactor smell the brief warns about. |
 | A-10 | `db/templates.py` holds agent prompt content inside `db/` | **Leave.** CLAUDE.md §12 requires an A/B re-run after any edit; it has uncommitted changes now. |
-| A-11 | `.env` DB port drift (5433 vs container 5750) | Fix the local `.env` or `infra/.env` yourself; not a code change. |
+| A-11 | `.env` DB port drift (5433 vs container 5750) | Resolved 2026-09-24: gitignored `.env` and `infra/.env` now say 5750 (Windows reserves 5430-5729 after a reboot). `.env.example` stays at the canonical 5432. |
 
 | A-12 | 23 cross-package imports of `_private` helpers (see A-03 rule 4), notably the turn pipeline in `conversations.service` reused by `chat.inbound` and `worker.tasks` | Promote to public names in small commits (rename + call sites, no logic change), deleting each line from `KNOWN_PRIVATE_IMPORTS`. This is also the real answer to A-08: the two turn paths share code, they do not duplicate it. |
 

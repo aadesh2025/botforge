@@ -30,6 +30,24 @@ CI presumably has network access; this was not verified.
 
 ## Local environment notes
 
-* Containers up: `botforge-postgres-1` (host port **5750**), `botforge-redis-1`. `.env` has `DATABASE_URL` on port
-  **5433**, so tests need `DATABASE_URL=postgresql+asyncpg://…@localhost:5750/botforge` exported for the run. `.env` was not changed.
+* Containers up: `botforge-postgres-1` (host port **5750**), `botforge-redis-1`. At the time of the first baseline `.env` said
+  5433; the verification pass (see below) changed the gitignored `.env` and `infra/.env` to 5750, so no override is needed now.
 * Python 3.14 in `.venv` (CLAUDE.md says 3.11); everything above still passed.
+
+## After the security/architecture work (verification pass, 2026-09-24, HEAD 6a3bfcb)
+
+| Check | Result |
+|---|---|
+| `ruff check .` (apps/api, whole dir, as CI) | pass |
+| `mypy app` | pass, 218 files |
+| Backend `pytest -q`, no DB override | 1192 passed, 13 failed, 4 skipped (11m43s). Same 13 tiktoken tests as above; the 4 skips are the opt-in Docling golden files |
+| `tests/test_tenant_isolation.py` alone | 69 passed |
+| `tests/test_architecture.py` alone | 9 passed; 4 rule classes verified to fail on injected violations, then reverted |
+| `test_ssrf` + `test_mcp` + `test_webhooks` + `test_tools` | 50 passed |
+| Web `npm run lint` / `tsc --noEmit` / `npm test` | pass / pass / 187 passed |
+| Web `npm run build` | pass, lockfile hash unchanged |
+| Widget `node build.mjs` | pass (esbuild absent, so unminified); tracked output unchanged |
+| Playwright (isolated stack: fake-LLM API :8010, worker on Redis db 5, `next start` :3002) | 66 passed, 7 failed. The same 7 fail identically on the pre-work API code (worktree at f1957d4), so they are pre-existing: `10-sidebar`, `15-canned-responses` x2, `16-macros` x2, `25-dashboard-real-data` (empty-state test), `31-workflow-run-history`. Cause not investigated |
+
+`npm run test:e2e` (the wrapper that sweeps `@example.com` fixtures) was deliberately not used: its cleanup also deletes the
+`@botforge.local` seed account. The raw `playwright test` leaves ~53+ fixture orgs in the dev DB; `make clean-devdata` removes them.
