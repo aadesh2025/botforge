@@ -24,8 +24,12 @@ Branch `master`, HEAD `c3b6ec9`. Tags: `phase-20-complete`, `agentic-phase-1`…
 - **Engineering: feature-complete for the v1 spec and well tested** — ~1100 backend tests, 187
   frontend, strict mypy/ruff/tsc/eslint clean, migrations `0001`–`0027` each verified up/down/up
   on real Postgres, agentic runtime + visual workflow builder + agent/workflow testing shipped.
-  Latest full run: 1096 pass; the 13 failures are tokenizer tests that need the tiktoken CDN,
-  unreachable from this machine at the time (they passed earlier).
+  Latest full run (2026-09-24, twice): **1192 pass / 13 fail / 4 skip**; the 13 are all one cause —
+  `tiktoken` cannot fetch `openaipublic.blob.core.windows.net/.../cl100k_base.tiktoken` from this
+  network (TLS reset). Named individually in `docs/PROGRESS.md`. A CI/VPS with normal internet should not see them.
+- **docs/14 (Knowledge Pipeline v2) is partly built and everything Docling is OFF** — see the
+  2026-09-24 audit in `docs/PROGRESS.md`. Not started: K6 (confidence + structured facts), K3-3…K3-6,
+  K4-4. Nothing in it is a launch blocker; `DOCLING_ENABLED=false` and reranker off are the safe defaults.
 - **Operations: pre-production.** No real client runs a workflow; nothing has run under
   production sizing. That is why docs/17 Phase 5 (Integration SDK) is held — by its own gate,
   not by oversight.
@@ -43,7 +47,7 @@ Branch `master`, HEAD `c3b6ec9`. Tags: `phase-20-complete`, `agentic-phase-1`…
   a `.docx` and a `.png` — owner to decide. (The CLAUDE.md/session-log/WIP items were committed 2026-09-24.)
 
 ### Do this next
-1. **Supabase decision (ADR-086)** — answer the open question (does auth move too?), then revise docs/16.
+1. **Revise `docs/16-VPS-MIGRATION.md` for Supabase (ADR-086).** Auth question is answered: **BotForge keeps its own auth; only the database moves.** Close the Data-API/RLS exposure, set up pooler/TLS, re-run `infra/perf/load_test.py` from the VM.
 2. Decide **R3** (external security review) — a human/budget call.
 3. Then P1s: R6 alerting on `guard_l2_unavailable`/`guard_l3_unavailable` is the cheapest win.
 4. Optional: chase the ~0.5% R14 straggler; k8s uploads (R11).
