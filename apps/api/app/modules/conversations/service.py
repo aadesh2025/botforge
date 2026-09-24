@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import time
@@ -365,6 +366,51 @@ async def _finalize_turn(
     return msg
 
 
+async def _enqueue_finalize_turn(
+    conv: Conversation, result: TurnResult, latency_ms: int, first_text: str
+) -> None:
+    """Hand a cancelled turn's persistence off to a Celery task (RISK-REGISTER R14) — used
+    when the client disconnects before `_finalize_turn` could run inline. Not a first attempt:
+    retrying `_finalize_turn` inline, on the SAME request session, inside this same except
+    block (even wrapped in `asyncio.shield()` / `anyio.to_thread.run_sync()`) kept failing,
+    because anyio's cancel scope re-raises `CancelledError` at EVERY subsequent checkpoint
+    until the scope is actually exited — not once — so every further `await` in this handler,
+    including `to_thread.run_sync()`'s own internal checkpoint, was cancelled again before the
+    thread it was meant to dispatch ever ran (confirmed empirically: no `chat.finalize_turn`
+    task ever reached the worker with that version). See `app.worker.tasks.finalize_turn_task`'s
+    docstring for where the actual persistence happens — including why it may need to recreate
+    `conv` itself, not just append the assistant reply: `conv` is only ever flushed, never
+    committed, until this SAME request's own happy path finishes, so a disconnect landing early
+    enough can cancel the conversation/user-message flush too, not just the assistant one.
+    Every field this passes is already populated on the in-memory `conv` object regardless —
+    `UUIDPrimaryKey` assigns its id client-side at construction, before any DB round trip.
+
+    Deliberately a **plain synchronous call, not `queue_email`'s off-thread pattern** — this
+    function's body contains no `await` at all, so there is no checkpoint left for the same
+    scope to interrupt. `Task.delay()` is a synchronous network round-trip to Redis, so this
+    does briefly block the event loop; accepted here (unlike in `queue_email`, which runs on
+    every signup/invite) because this path only ever runs once a request is already cancelled
+    and no client is waiting on it — a slow broker delays this cleanup, not a real request.
+    """
+    import dataclasses
+
+    from app.worker.tasks import finalize_turn_task
+
+    conv_data = {
+        "id": str(conv.id),
+        "organization_id": str(conv.organization_id),
+        "agent_id": str(conv.agent_id),
+        "channel": conv.channel,
+        "channel_user_id": conv.channel_user_id,
+        "contact_id": str(conv.contact_id) if conv.contact_id else None,
+        "external_id": conv.external_id,
+    }
+    try:
+        finalize_turn_task.delay(conv_data, dataclasses.asdict(result), latency_ms, first_text)
+    except Exception:
+        log.exception("finalize_turn_enqueue_failed", conversation_id=str(conv.id))
+
+
 async def chat_events(
     session: AsyncSession, ctx: OrgContext, agent_id: uuid.UUID, data: schemas.ChatRequest
 ) -> AsyncIterator[StreamEvent]:
@@ -374,21 +420,40 @@ async def chat_events(
         session, ctx, agent_id, data, stream=True
     )
 
-    # Tell the client which conversation this is (esp. for a freshly created one).
-    yield StreamEvent(type="conversation", conversation_id=str(conv.id))
-
     result = TurnResult()
     t0 = time.perf_counter()
-    async for ev in run_turn(
-        provider, req, citations, result, executor=executor,
-        max_iters=settings.tool_max_iterations, budget=budget,
-        protected_prompt=instruction_prompt_of(req.messages),
-        pii_allowlist=build_allowlist(list(ctx.org.public_contacts or [])),
-    ):
-        yield ev
-    latency_ms = int((time.perf_counter() - t0) * 1000)
-
-    msg = await _finalize_turn(session, conv, result, latency_ms, data.message)
+    msg: Message | None = None
+    try:
+        # Tell the client which conversation this is (esp. for a freshly created one). Inside
+        # the `try` on purpose: a client that drops on the very first event has already had
+        # `conv` and the user message flushed, and that is the earliest place to lose them.
+        yield StreamEvent(type="conversation", conversation_id=str(conv.id))
+        async for ev in run_turn(
+            provider, req, citations, result, executor=executor,
+            max_iters=settings.tool_max_iterations, budget=budget,
+            protected_prompt=instruction_prompt_of(req.messages),
+            pii_allowlist=build_allowlist(list(ctx.org.public_contacts or [])),
+        ):
+            yield ev
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        msg = await _finalize_turn(session, conv, result, latency_ms, data.message)
+    except (asyncio.CancelledError, GeneratorExit):
+        # The client disconnected mid-stream (tab closed, navigated away — RISK-REGISTER R14:
+        # a load test proved this is common, not rare, and every prior version of this
+        # function let the reply vanish from history when it happened). Covers a disconnect
+        # landing ANYWHERE in the block above — during generation or mid-`_finalize_turn`
+        # (`msg` still `None` either way, since a cancelled `await` never returns a value).
+        #
+        # BOTH exceptions, because Starlette ends a dropped stream two different ways and
+        # the load test hit both: task cancellation (`CancelledError`, ~1/3 of drops — the
+        # session is left mid-flush) and `aclose()` on the generator (`GeneratorExit`, the
+        # other ~2/3 — the session is fine, so the request commits normally and the user
+        # message survives, but nothing ever writes the reply). The first draft of this fix
+        # caught only `CancelledError` and still lost 61 of 91 replies.
+        if msg is None:
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+            await _enqueue_finalize_turn(conv, result, latency_ms, data.message)
+        raise
     yield StreamEvent(type="message", message_id=str(msg.id))
 
 

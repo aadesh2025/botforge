@@ -7,6 +7,7 @@ bot does not generate (the operator replies via the inbox).
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import time
@@ -249,16 +250,32 @@ class InboundTurn:
             )
 
         t0 = time.perf_counter()
-        async for ev in run_turn(
-            provider, req, [c.model_dump(mode="json") for c in citations], self.result,
-            executor=executor, max_iters=settings.tool_max_iterations, budget=budget,
-            fallback_message=self.version.fallback_message or _DEFAULT_PROVIDER_FAILURE,
-            protected_prompt=system_prompt,
-            pii_allowlist=await self._pii_allowlist(),
-        ):
-            yield ev
-        latency_ms = int((time.perf_counter() - t0) * 1000)
-        self.assistant_message = await _finalize_turn(session, conv, self.result, latency_ms, self.message)
+        try:
+            async for ev in run_turn(
+                provider, req, [c.model_dump(mode="json") for c in citations], self.result,
+                executor=executor, max_iters=settings.tool_max_iterations, budget=budget,
+                fallback_message=self.version.fallback_message or _DEFAULT_PROVIDER_FAILURE,
+                protected_prompt=system_prompt,
+                pii_allowlist=await self._pii_allowlist(),
+            ):
+                yield ev
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+            self.assistant_message = await _finalize_turn(session, conv, self.result, latency_ms, self.message)
+        except (asyncio.CancelledError, GeneratorExit):
+            # Same fix as conversations/service.py::chat_events, for the same reason — both
+            # exceptions, since a dropped stream ends either way (see that comment)
+            # (RISK-REGISTER R14) — the widget/channel path shares this exact vulnerability:
+            # a visitor's client disconnecting mid-stream must not silently drop the reply
+            # from conversation history. See `_enqueue_finalize_turn`'s docstring for why this
+            # hands off to a Celery task rather than retrying inline on the request's own
+            # session (an in-process retry was tried first and does not work — anyio's cancel
+            # scope re-raises `CancelledError` at every subsequent checkpoint, not just once).
+            if self.assistant_message is None:
+                from app.modules.conversations.service import _enqueue_finalize_turn
+
+                latency_ms = int((time.perf_counter() - t0) * 1000)
+                await _enqueue_finalize_turn(conv, self.result, latency_ms, self.message)
+            raise
         yield StreamEvent(type="message", message_id=str(self.assistant_message.id))
 
     async def _org(self) -> Organization | None:

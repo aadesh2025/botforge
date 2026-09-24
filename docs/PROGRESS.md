@@ -38,6 +38,39 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **R14 fixed: a dropped chat stream no longer loses the reply (2026-09-24, ADR-083).** Instruction
+  was "solve the issues and existing bugs". Three attempts, and the first two failing is the
+  useful part — recorded in full in ADR-083 so nobody retries them:
+  1. Persist inline in a `CancelledError` handler with a bare `flush()` → silently rolled back
+     (`CancelledError` is a `BaseException`; it skips `get_session()`'s rollback *and* commit).
+  2. Catch it and retry (`rollback()` + finalize + `commit()`) → still 0 replies: anyio's cancel
+     scope re-raises at **every** subsequent checkpoint, so each recovery `await` was cancelled
+     in turn. The `queue_email` off-thread pattern failed for the same reason (no task reached
+     the worker). Found only by re-running the reproduction after each draft.
+  3. **Works:** a plain synchronous `Task.delay()` (no `await`, so no checkpoint to interrupt)
+     handing a new `chat.finalize_turn` task the conversation fields + `TurnResult`; the worker's
+     own session recreates the conversation/user message under the same client-assigned UUIDv7
+     id if they never became durable, then appends the reply via the unchanged `_finalize_turn`.
+  A further miss found by the next verification run: Starlette ends a dropped stream by
+  `aclose()` (→ `GeneratorExit`) about twice as often as by cancellation; the first working
+  draft handled only `CancelledError` and still lost 61 of 91 replies. Both are caught now.
+  **Verified on the real stack** (fake provider, guards off, own Redis DB): concurrent load
+  test → 91/91 conversations, 91/91 user messages, **90/91** replies (was 0/91); 100 sequential
+  early-disconnects → 100/100/100. **Residuals, not hidden:** one unexplained straggler in ~190
+  requests; recovered replies are whatever had streamed so far (can be truncated); a widget-path
+  drop during pre-generation awaits can still lose that turn's user message. Regression tests
+  (`tests/test_chat_disconnect.py`, 6) drive the generator directly (`aclose()` /
+  `athrow(CancelledError)`) because httpx's `ASGITransport` buffers the body.
+  **Also fixed — the long-standing "pre-existing unrelated failure"**
+  `test_playground_without_handoff_feature_does_not_trigger` (a 502 reported as known-and-ignored
+  in every report since Phase 1): a **stale test, not a product bug**. The default provider is
+  `groq`, and since 2026-07-31 the Playground deliberately raises a typed 502 instead of
+  stubbing an echo; the test still asserted the echo. It now opts into `provider: fake`.
+  **Environment note:** after a reboot Windows reserved TCP 5430–5729 (`netsh interface ipv4
+  show excludedportrange`), so Postgres could not bind 5433 — dev DB was brought up on host
+  port 5750 via `POSTGRES_HOST_PORT` with `DATABASE_URL` overridden per command; no files
+  changed, data volume intact (migrations at head).
+
 - **RISK-REGISTER R4 measured, and a real data-loss bug (R14) found doing it (2026-09-23).**
   New `infra/perf/load_test.py` — the first concurrency test ever run against this stack; every
   prior verification anywhere in this file is sequential, one-request-at-a-time correctness.

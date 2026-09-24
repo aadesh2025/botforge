@@ -644,7 +644,16 @@ were none, not to re-tune connection pools or worker counts. `pool_size`/`max_ov
 Celery worker concurrency are now identified, specific knobs for whoever sizes the production
 deployment, rather than an unmeasured unknown.
 
-### 11.2 ⚠️ A real, previously-invisible bug, found only because this test disconnects like a browser does
+### 11.2 ⚠️ A real, previously-invisible bug, found only because this test disconnects like a browser does — ✅ fixed 2026-09-24 (ADR-083, RISK-REGISTER R14)
+
+> **Update:** fixed the next day. The account below is left as originally written because it is
+> what the fix was built against; the "**Not fixed in this pass**" paragraph at the end is
+> superseded. Two things it got wrong or missed, found while fixing: the load test's drops
+> actually take **two** shapes (`CancelledError` ~1/3, `GeneratorExit` ~2/3 — a first draft that
+> handled only the first still lost 61 of 91 replies), and when the drop lands early the
+> **conversation and user message are lost too**, not only the reply (the "user messages always
+> survive" reading came from load-test timing, not a guarantee). Result after the fix: 91/91
+> conversations, 91/91 user messages, **90/91** replies; one unexplained straggler remains.
 
 The chat load test's own client — deliberately, and realistically — closes the SSE stream as
 soon as it has read the first token, the same thing a browser tab does on navigation or a

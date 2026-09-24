@@ -146,6 +146,80 @@ def resume_delayed_workflow_task(self: object, run_id: str) -> str:
     return _run(_run_workflow_execution(run_id, resume_decision=None, resume=True))
 
 
+async def _run_finalize_turn(
+    conv_data: dict[str, object], result_data: dict[str, object], latency_ms: int, first_text: str
+) -> str:
+    from app.chat.runtime import TurnResult
+    from app.models import Conversation
+    from app.modules.conversations.service import _finalize_turn, _persist_user_message
+
+    async with SessionFactory() as session:
+        conv = await session.get(Conversation, uuid.UUID(str(conv_data["id"])))
+        if conv is None:
+            # The request that generated this turn was cancelled before its OWN flush ever
+            # became durable — not just the assistant reply, the conversation row and its
+            # opening user message too (both flushed, never committed, in the same
+            # now-abandoned transaction; see `finalize_turn_task`'s docstring). Recreate them
+            # using the SAME id the request already picked: `UUIDPrimaryKey` assigns UUIDv7
+            # client-side at construction, before any DB round trip, so `conv_data["id"]` is
+            # stable regardless of whether the original row ever committed.
+            conv = Conversation(
+                id=uuid.UUID(str(conv_data["id"])),
+                organization_id=uuid.UUID(str(conv_data["organization_id"])),
+                agent_id=uuid.UUID(str(conv_data["agent_id"])),
+                channel=str(conv_data["channel"]),
+                channel_user_id=conv_data.get("channel_user_id"),
+                contact_id=(
+                    uuid.UUID(str(conv_data["contact_id"])) if conv_data.get("contact_id") else None
+                ),
+                external_id=conv_data.get("external_id"),
+                status="active",
+            )
+            session.add(conv)
+            await session.flush()
+            await _persist_user_message(session, conv, first_text)
+            await session.flush()
+        result = TurnResult(**result_data)  # type: ignore[arg-type]
+        if not result.content and not result.error:
+            # Dropped before the model produced anything: keep the conversation and the
+            # visitor's message (restored above if needed), but don't write an empty reply.
+            await session.commit()
+            return "no_reply"
+        msg = await _finalize_turn(session, conv, result, latency_ms, first_text)
+        await session.commit()
+        return str(msg.id)
+
+
+@celery_app.task(name="chat.finalize_turn", bind=True, max_retries=3)  # type: ignore[untyped-decorator]
+def finalize_turn_task(
+    self: object, conv_data: dict[str, object], result_data: dict[str, object], latency_ms: int, first_text: str
+) -> str:
+    """Persists a chat turn's assistant reply after the request that generated it is already
+    gone (RISK-REGISTER R14) — a client disconnecting mid-stream (tab closed, navigated away,
+    or simply reading only the first SSE event, all proven common by `infra/perf/load_test.py`)
+    must not silently drop the reply from conversation history. If the disconnect landed EARLY
+    enough that even the conversation/user-message flush from the same request never became
+    durable either, this recreates both from `conv_data` before appending the reply — see
+    `_run_finalize_turn`.
+
+    Enqueued rather than persisted inline in the request's own cancellation handler, and this
+    was not the first thing tried: an in-process retry using the request's own session, even
+    wrapped in `asyncio.shield()`, kept failing — anyio's cancel scope re-raises
+    `CancelledError` at EVERY subsequent checkpoint until the scope is actually exited, not
+    just once, so every further `await` inside the same cancelled request (including a
+    `session.rollback()` meant to recover from it) was cancelled again in turn. A worker task
+    runs in a different process entirely, outside that cancel scope, with its own committing
+    session (`SessionFactory`, this module's docstring) — exactly the same reason `queue_email`
+    hands SMTP off to a task instead of sending inline from a request that might not still be
+    there to wait for it.
+    """
+    try:
+        return _run(_run_finalize_turn(conv_data, result_data, latency_ms, first_text))
+    except Exception as exc:
+        log.warning("finalize_turn_task_failed", conversation_id=conv_data.get("id"), error=str(exc))
+        raise self.retry(countdown=5, exc=exc) from exc  # type: ignore[attr-defined]
+
+
 async def _run_sweep() -> int:
     from app.webhooks.dispatch import sweep_due_deliveries
 

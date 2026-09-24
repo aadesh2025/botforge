@@ -18,6 +18,56 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-083: A dropped chat stream hands its reply to a Celery task — an in-request retry cannot work (RISK-REGISTER R14)
+- **Date:** 2026-09-24
+- **Status:** accepted
+- **Context:** `infra/perf/load_test.py` (R4) found that a client which stops reading a streaming
+  chat mid-reply — a closed tab, a navigation, or simply reading only the first SSE event — never
+  had the assistant reply persisted, while seeing HTTP 200 throughout. Both `chat_events`
+  (dashboard) and `InboundTurn.events()` (widget/channels) only `flush()` until the request's
+  own `get_session()` commits after the generator finishes, so anything cut short lost its
+  writes. Under a fast provider the drop landed *early* often enough that the **conversation and
+  the user's message were lost too**, not just the reply.
+- **Decision:** on a dropped stream, enqueue `chat.finalize_turn` (`app/worker/tasks.py`) with
+  the conversation's identifying fields and the partial/complete `TurnResult`; the worker uses
+  its own committing session, recreates the conversation + user message under the **same id** if
+  they never became durable (`UUIDPrimaryKey` assigns UUIDv7 client-side at construction, so the
+  id is stable before any DB round trip), then appends the reply via the unchanged
+  `_finalize_turn`. Skips the reply row when nothing was generated. The handler catches **both**
+  `asyncio.CancelledError` and `GeneratorExit`: Starlette ends a dropped stream either by
+  cancelling the task or by `aclose()`-ing the generator, and under load ~1/3 took the first
+  path and ~2/3 the second.
+- **Why not persist inline in the handler — this was tried first, twice, and does not work:**
+  (1) a bare `flush()` is silently rolled back, because `CancelledError` is a `BaseException`
+  and skips `get_session()`'s `except Exception` *and* its post-yield `commit()`; (2) catching
+  the cancellation and retrying (`rollback()` + `_finalize_turn` + `commit()`) still fails,
+  because anyio's cancel scope re-raises `CancelledError` at **every** subsequent checkpoint
+  until the scope is exited — not once — so each further `await`, including the recovery
+  `rollback()`, was cancelled again. `anyio.to_thread.run_sync(..., abandon_on_cancel=True)`
+  (the `queue_email` pattern) failed for the same reason: its own internal checkpoint was
+  cancelled before the thread it should have dispatched ever ran (no task reached the worker).
+  What works is a **plain synchronous `Task.delay()`** in a function with no `await`, so there
+  is no checkpoint left to interrupt. It briefly blocks the event loop on a Redis round trip —
+  accepted, since it only runs for a request that is already dead and has no client waiting.
+- **Alternatives considered:** committing right after the user message (rejected: an explicit
+  `session.commit()` on the request session also commits the test suite's shared,
+  rollback-at-teardown session and would leak rows into every chat test — the same reason
+  `commit_each_step` is threaded through `workflows/service.py`); a background `asyncio` task
+  with its own session (rejected: same cancel-scope reach, plus concurrent use of the request
+  session during teardown); persisting *before* streaming (rejected: changes when the reply
+  exists and interacts with the L5 output guard, ADR-049).
+- **Consequences / residuals, stated rather than implied away:** verified against the real
+  stack — the concurrent load test now leaves 91/91 conversations, 91/91 user messages and
+  **90/91** replies (was 0/91 replies), and 100 sequential early-disconnects left 100/100/100.
+  **One straggler in ~190 requests (~0.5%) is unexplained and was not chased.** A reply
+  recovered from a drop is **whatever had streamed so far**, so it can be truncated (the reply
+  row carries no `finish_reason`); that is deliberate — a partial answer in history beats a
+  hole — but it is not the full text the provider would have produced. A drop during the
+  widget path's pre-`run_turn` awaits (`InboundTurn.events()` guards/retrieval) is not covered
+  and can still lose that turn's user message. Regression tests drive the generator directly
+  (`aclose()` / `athrow(CancelledError)`), since httpx's `ASGITransport` buffers the body and
+  cannot drop a stream.
+
 ### ADR-082: Backups now cover the `uploads` volume — same script, same backup service, read-only mount
 - **Date:** 2026-09-23
 - **Status:** accepted

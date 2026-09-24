@@ -344,6 +344,16 @@ async def test_playground_without_handoff_feature_does_not_trigger(client: Async
     """The keyword branch must stay gated on the Model tab's toggle — this is the control."""
     headers, _ = await _headers(client)
     agent = await _create_agent(client, headers)  # handoff_enabled defaults to False
+    # The default provider is groq, and since 2026-07-31 the Playground raises a typed
+    # `llm.provider_unavailable` (502) rather than stubbing an echo when no key is configured —
+    # so this control has to opt into `fake` explicitly. It sat red for weeks as a "pre-existing
+    # unrelated failure" because it was asserting the pre-07-31 behaviour, not a product bug.
+    patched = await client.patch(
+        f"/v1/agents/{agent['id']}/versions/1",
+        json={"model_config": {"provider": "fake", "model": "fake"}},
+        headers=headers,
+    )
+    assert patched.status_code == 200, patched.text
 
     resp = await client.post(
         f"/v1/agents/{agent['id']}/playground/chat",
