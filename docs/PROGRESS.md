@@ -38,6 +38,30 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   be blended into the Groq number. Ollama is excluded from the NFR-1 first-token figure by design.
 
 ## Shipped enhancements (post-v1)
+- **docs/14 (Knowledge Pipeline v2) audit — what is done and what is left (2026-09-24).** Checked
+  against the code, config and commits, not only the doc (which is dated 2026-08-17). Headline:
+  **built and tested, but everything Docling is OFF** — `DOCLING_ENABLED=false`, structural
+  chunking off, reranker off; `docling-serve` exists in the *dev* compose only, not `docker-compose.prod.yml`.
+  - **Done and live:** P0-1 FTS literal; P0-2 eval harness + CI gates; K1-1…K1-5 (K1-5 closed
+    2026-08-17, `b84d96b`, verified against a real `docling-serve`); the cold-start warm-up
+    (`e0f1a22`, 124.6 s → 8.1 s); K2-1 real token counts (cl100k, enabled); K2-6 heading in the FTS
+    index (ADR-067); K3-1 upload allowlist; K3-2 email gate; K5-1 per-KB `fts_config`; K5-2 PDF page cap;
+    K5-3 extraction retention. Follow-up 2 (wide-spacing phone gap) measured — 0 instances in 18 real
+    chunks — and deliberately filed, not fixed.
+  - **Built but deliberately disabled:** K2-2/3/4 structural chunking (K2-5 measured hybrid **−0.0029**,
+    so the gate held); K4-1/2/3/5 reranker (protocol, no-op default, HTTP cross-encoder, ADR-063).
+  - **Not done:** **K6** (extraction confidence K6-A1…A5, structured facts K6-B1…B7) — no code, no
+    migration; its K1-5 prerequisite is now met but it also needs Docling enabled and `docling-serve`
+    added to the prod compose. **K3-3…K3-6** (charts, `q=media` queue, ASR, media quota) — blocked on
+    Granite Vision RAM measurement and real client audio, *not* on a running docling-serve (that has
+    run live since K1-5; the doc's wording is stale). **K4-4** (rerank latency delta) — needs a
+    deployed rerank service. **§12 rollout steps 1–6** — none executed.
+  - **New findings from this audit:** (1) the prod api/worker image does not pre-warm `tiktoken`, so
+    the first ingest downloads the ranks; fine on a normally-connected VPS, and it degrades to `len/4`
+    (never fails) where it cannot — bake it into the image or set `TIKTOKEN_CACHE_DIR` for a
+    locked-down box. (2) The docs/14 header block and the K3-3 note need a wording refresh.
+  - **Nothing here blocks launch.** It is optional quality/format work behind flags that default safe.
+
 - **The 13 known backend test failures, diagnosed precisely (2026-09-24).** The prior note
   ("need a download from a server this machine can't reach") was a guess; it is now confirmed
   against the tracebacks. Full suite twice on the dev DB (port 5750): **1192 passed / 13 failed /
