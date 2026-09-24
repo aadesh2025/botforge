@@ -18,6 +18,31 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-087: A tenant-set LLM provider `base_url` must be public unless the operator allowlists the host (S-03)
+- **Date:** 2026-09-24
+- **Status:** accepted
+- **Context:** `ProviderCredential.base_url` is written by any role with `tools:manage` (owner/admin/editor) and used
+  by `ollama`, `custom` and the catalog's OpenAI-compatible providers (native vendors ignore it). The API host then
+  GETs `{base}/models` and POSTs `{base}/chat/completions` with no SSRF check, so a client editor could aim it at
+  loopback, private ranges or a cloud metadata address. Two amplifiers: a trailing `?` on the URL turns the appended
+  suffix into a query string, giving the caller the whole path; and the tenant sees `resp.text[:200]` on 4xx/5xx, model
+  ids, and connect errors (a port-scan oracle). Redirects were never followed (httpx default), so that was not a vector.
+  Private endpoints are an intended feature (catalog: "vLLM, LM Studio, a private gateway"), so blocking all of them was not an option.
+- **Decision:** trust is the **operator's**, not the actor's. (1) `PROVIDER_PRIVATE_HOSTS` (env, comma-separated exact
+  hostnames/IPs) names private hosts tenants may use; default empty. (2) Save time: `credentials.service._check_base_url`
+  requires http(s), no `?`/`#`, and a host that `core.ssrf.is_blocked_destination` allows (422 `credentials.base_url_blocked` /
+  `_invalid`). (3) Request time (the real boundary, covering older rows and DNS that changes): providers built from a
+  tenant URL (`custom`, an `ollama` override, a catalog override) run the same check in an httpx request hook and refuse
+  with `ProviderError`. The platform's `OLLAMA_BASE_URL` and the catalog's vendor URLs are not guarded.
+- **Alternatives considered:** block every private host (breaks intended self-hosting); trust rows created by staff
+  (as ADR-085 does for stdio: an editor can PATCH a staff-made row, so the marker is not stable, and it needs a
+  `created_by` lookup per request); a deployment-wide "allow private" switch (opens every private host to every tenant).
+- **Consequences:** Behavior change: `POST/PUT/PATCH` credentials with a private, loopback or unresolvable `base_url` now
+  return 422 unless allowlisted; existing rows pointing at private hosts stop working until the operator allowlists the
+  host (chat turns fail with a provider error, `POST /credentials/{id}/test` returns `ok:false`). Staff are not exempt.
+  Dev: to use LM Studio/Ollama on localhost through the *Custom* provider set `PROVIDER_PRIVATE_HOSTS=localhost`.
+  Residual: DNS rebinding between check and connect; a host the operator allowlists is trusted entirely.
+
 ### ADR-086: Database hosting is Supabase-managed Postgres (on Oracle's free tier for compute), not self-hosted Postgres on the VPS
 - **Date:** 2026-09-24
 - **Status:** accepted. **Auth decision (owner, 2026-09-24): option (a) — database only.** BotForge keeps its own auth (argon2, JWT + rotating refresh, OAuth, magic links); Supabase Auth is **not** adopted at VPS deploy. Revisit only via a new ADR.

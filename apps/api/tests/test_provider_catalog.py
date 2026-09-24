@@ -213,7 +213,11 @@ async def test_a_provider_that_needs_a_key_refuses_an_empty_one(client: AsyncCli
     assert resp.json()["error"]["code"] == "credentials.api_key_required"
 
 
-async def test_custom_endpoint_requires_a_base_url(client: AsyncClient) -> None:
+async def test_custom_endpoint_requires_a_base_url(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A local endpoint (LM Studio, vLLM) is only accepted once the operator has named it (S-03).
+    monkeypatch.setattr(settings, "provider_private_hosts", "localhost")
     headers = await _org_headers(client)
     resp = await client.put("/v1/credentials/providers/custom", json={"api_key": "k"}, headers=headers)
     assert resp.status_code == 400

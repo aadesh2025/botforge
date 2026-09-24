@@ -6,6 +6,15 @@ import ipaddress
 import socket
 
 
+def is_blocked_destination(host: str, allowed_hosts: str = "") -> bool:
+    """`is_blocked_host`, except a host the operator named in `allowed_hosts` (comma-separated,
+    exact hostname or IP literal, case-insensitive) is trusted. Only for destinations a tenant
+    picked but the operator has vetted; every other caller uses `is_blocked_host` directly."""
+    if host.lower() in {h.strip().lower() for h in allowed_hosts.split(",") if h.strip()}:
+        return False
+    return is_blocked_host(host)
+
+
 def is_blocked_host(host: str) -> bool:
     """SSRF guard: reject loopback / private / link-local / reserved destinations."""
     try:

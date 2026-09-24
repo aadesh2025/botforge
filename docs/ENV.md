@@ -48,6 +48,7 @@ port and the `pgdata` volume are unchanged, so no data moves with it.
 | `GEMINI_API_KEY` | Google Gemini free tier | yes |
 | `OPENROUTER_API_KEY` | free models via OpenRouter | yes |
 | `OLLAMA_BASE_URL` | local models + embeddings | no (bundled) |
+| `PROVIDER_PRIVATE_HOSTS` | comma-separated private/loopback hostnames or IPs a tenant-set provider endpoint (Custom endpoint, or a URL override on Ollama/Mistral/…) may use. Default empty = public endpoints only (ADR-087). Operator-only | no |
 | `OPENAI_API_KEY` | paid | yes |
 | `ANTHROPIC_API_KEY` | paid | yes |
 | `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | default embeddings | no |

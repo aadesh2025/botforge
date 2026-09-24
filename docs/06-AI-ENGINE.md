@@ -29,7 +29,8 @@ presence_penalty, stop, tools (JSON schema), tool_choice, stream.
 4. **OpenRouter** (`OPENROUTER_API_KEY`) — exposes many free models via OpenAI-compatible API.
 5. **OpenAI** (`OPENAI_API_KEY`) — paid; `gpt-4o`, `gpt-4o-mini`, etc.
 6. **Anthropic** (`ANTHROPIC_API_KEY`) — paid; Claude models via Messages API.
-7. **Custom OpenAI-compatible** — user provides `base_url` + key; treat like OpenAI.
+7. **Custom OpenAI-compatible** — user provides `base_url` + key; treat like OpenAI. The URL must be public
+   unless the operator lists its host in `PROVIDER_PRIVATE_HOSTS` (ADR-087); checked at save time and on every request.
 
 Because most of the above (Groq, Ollama, OpenRouter, OpenAI, custom) speak the
 **OpenAI-compatible** protocol, implement one `OpenAICompatibleProvider` parameterized by

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.ssrf import is_blocked_destination
 from app.llm.base import ProviderError
 from app.llm.types import (
     ChatRequest,
@@ -76,7 +78,12 @@ class OpenAICompatibleProvider:
         name: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = 60.0,
+        guard_destination: bool = False,
     ) -> None:
+        # True when `base_url` came from a tenant (credential override / Custom endpoint) rather
+        # than from the catalog or platform config: every request is then refused unless it
+        # targets a public address or a host in `settings.provider_private_hosts`.
+        self._guard_destination = guard_destination
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         if name:
@@ -88,9 +95,19 @@ class OpenAICompatibleProvider:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        hooks = {"request": [self._check_destination]} if self._guard_destination else None
         return httpx.AsyncClient(
-            base_url=self.base_url, headers=headers, timeout=self._timeout, transport=self._transport
+            base_url=self.base_url,
+            headers=headers,
+            timeout=self._timeout,
+            transport=self._transport,
+            follow_redirects=False,
+            event_hooks=hooks,
         )
+
+    async def _check_destination(self, request: httpx.Request) -> None:
+        if await asyncio.to_thread(is_blocked_destination, request.url.host, settings.provider_private_hosts):
+            raise ProviderError("refusing to call a private or loopback provider endpoint", retryable=False)
 
     @staticmethod
     def _raise_for_status(resp: httpx.Response) -> None:
@@ -240,6 +257,8 @@ class OllamaProvider(OpenAICompatibleProvider):
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None, **kw: Any) -> None:
         url = (base_url or settings.ollama_base_url).rstrip("/") + "/v1"
+        # Only a tenant override is guarded; the default is the operator's OLLAMA_BASE_URL.
+        kw.setdefault("guard_destination", bool(base_url))
         super().__init__(url, api_key or "ollama", name="ollama", **kw)
 
 
@@ -254,4 +273,5 @@ class CustomProvider(OpenAICompatibleProvider):
     name = "custom"
 
     def __init__(self, base_url: str, api_key: str | None = None, **kw: Any) -> None:
+        kw.setdefault("guard_destination", True)
         super().__init__(base_url, api_key, name="custom", **kw)

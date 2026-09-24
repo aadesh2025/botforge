@@ -43,10 +43,14 @@
   assistant output before it is stored/returned.
 
 ## 4. SSRF
-- ✅ **Coverage**: the shared guard `app/rag/loaders._is_blocked_host` (rejects loopback / private /
-  link-local / reserved / multicast, resolved via DNS) is applied to **all** user-controlled outbound
-  fetches: URL knowledge ingestion (`rag/loaders`), the HTTP tool (`tools/http_tool`), the
-  `http_request` builtin (`tools/builtins`), and **outbound webhook delivery** (`webhooks/dispatch`).
+- ✅ **Coverage**: the shared guard `app/core/ssrf.py` (rejects loopback / private / link-local / reserved /
+  multicast, resolved via DNS) is applied to **all** tenant-controlled outbound fetches: URL knowledge
+  ingestion (`rag/loaders`, every redirect hop), the HTTP tool (`tools/http_tool`), the `http_request`
+  builtin (`tools/builtins`), outbound webhook delivery (`webhooks/dispatch`), MCP SSE servers
+  (`tools/mcp_client`, ADR-085) and tenant-set LLM provider endpoints (`llm/openai_compatible`, ADR-087;
+  private hosts only via the operator's `PROVIDER_PRIVATE_HOSTS`). stdio MCP servers are staff-only (ADR-085).
+- ⚠️ **Residual**: DNS rebinding between the check and the connection is not closed anywhere (needs the
+  resolved IP pinned on the socket).
 - ✅ **n8n exemption is deliberate & documented**: `app/integrations/n8n_client` targets the
   operator-configured, trusted `N8N_BASE_URL` (loopback in dev), not arbitrary user input, so it is
   intentionally not SSRF-guarded (noted in the module docstring).

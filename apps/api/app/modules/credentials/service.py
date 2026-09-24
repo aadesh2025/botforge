@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import rbac
+from app.core.config import settings
 from app.core.crypto import decrypt, encrypt
 from app.core.errors import AppError
+from app.core.ssrf import is_blocked_destination
 from app.llm import catalog
 from app.llm.base import ProviderError
 from app.llm.catalog import ModelSpec, ProviderSpec
@@ -116,6 +120,32 @@ async def _clear_default(session: AsyncSession, org_id: uuid.UUID, provider: str
         c.is_default = False
 
 
+async def _check_base_url(base_url: str | None) -> None:
+    """Refuse an endpoint URL that would make the API host call something it should not.
+
+    The request-time guard in `llm/openai_compatible.py` is the real boundary (it also covers
+    rows saved before this check and DNS that changes later); this gives the editor an error at
+    save time instead of a failed chat turn. A `?` or `#` is refused because the provider appends
+    `/models` or `/chat/completions` to this URL: a trailing `?` turns that suffix into a query
+    string and hands the caller control of the whole path.
+    """
+    url = (base_url or "").strip()
+    if not url:
+        return
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise AppError("credentials.base_url_invalid", "The endpoint must be an http(s) URL.", 422)
+    if parsed.query or parsed.fragment or "?" in url or "#" in url:
+        raise AppError("credentials.base_url_invalid", "The endpoint URL cannot contain ? or #.", 422)
+    if await asyncio.to_thread(is_blocked_destination, parsed.hostname, settings.provider_private_hosts):
+        raise AppError(
+            "credentials.base_url_blocked",
+            "That endpoint is a private, loopback or unresolvable address. Ask the platform "
+            "operator to allow it (PROVIDER_PRIVATE_HOSTS) or use a public URL.",
+            422,
+        )
+
+
 async def create_credential(
     session: AsyncSession, ctx: OrgContext, data: schemas.CredentialCreate
 ) -> schemas.CredentialOut:
@@ -125,6 +155,7 @@ async def create_credential(
         raise AppError(
             "credentials.base_url_required", f"{spec.label} needs the URL of your endpoint.", 400
         )
+    await _check_base_url(data.base_url)
     if data.is_default:
         await _clear_default(session, ctx.org.id, data.provider)
     cred = ProviderCredential(
@@ -169,6 +200,7 @@ async def upsert_provider_key(
         raise AppError(
             "credentials.base_url_required", f"{spec.label} needs the URL of your endpoint.", 400
         )
+    await _check_base_url(base_url)
 
     if cred is None:
         cred = ProviderCredential(
@@ -212,6 +244,7 @@ async def update_credential(
     if data.label is not None:
         cred.label = data.label
     if data.base_url is not None:
+        await _check_base_url(data.base_url)
         cred.base_url = data.base_url
     if data.api_key is not None:
         cred.api_key_enc = encrypt(data.api_key)

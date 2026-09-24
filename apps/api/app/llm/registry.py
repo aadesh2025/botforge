@@ -104,7 +104,10 @@ def build_chat_provider(
             raise AppError(
                 "llm.custom_base_url_required", f"A base_url is required for '{provider}'.", 400
             )
-        return OpenAICompatibleProvider(url, api_key, name=provider, transport=transport)
+        # A stored override (regional endpoint, proxy) is tenant-supplied; the catalog URL is not.
+        return OpenAICompatibleProvider(
+            url, api_key, name=provider, transport=transport, guard_destination=bool(base_url)
+        )
     raise AppError("llm.unknown_provider", f"Unknown provider '{provider}'.", 400)
 
 

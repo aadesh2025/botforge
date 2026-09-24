@@ -45,15 +45,31 @@ between docs and code, (3) locking the current boundaries in with an architectur
   `loop.getaddrinfo`. `tools/http_tool.py` and `webhooks/dispatch.py` already use `follow_redirects=False`; only the
   ingestion path is exposed.
 
-### S-03 Tenant-supplied LLM `base_url` is fetched with no SSRF guard (found in the verification pass, NOT fixed)
-* Where: `modules/credentials` (`CredentialCreate/Update.base_url`, any role with `tools:manage`, incl. `editor`) ->
-  `llm/registry.py::build_chat_provider` -> `CustomProvider`/`OpenAICompatibleProvider` POSTs to
-  `{base_url}/chat/completions` from the API host. `core/ssrf.py` is not applied anywhere in `llm/` or `credentials/`.
-* Impact: an org member can aim the API host at loopback/private/metadata addresses with a fixed path suffix and
-  see error text. Same class as S-01/S-02; narrower (POST, fixed suffix) but real.
-* Not fixed here because it is a behavior change that needs your call: self-hosters may legitimately point a custom
-  provider at a private-network endpoint (LAN vLLM/Ollama). Options: block private hosts for non-staff (like stdio),
-  or an explicit `ALLOW_PRIVATE_PROVIDER_URLS` opt-in per deployment.
+### S-03 Tenant-supplied LLM `base_url` is fetched with no SSRF guard: FIXED (ADR-087)
+* **Path:** any `tools:manage` role (owner/admin/editor) writes `ProviderCredential.base_url` via `POST /v1/credentials`,
+  `PUT /v1/credentials/providers/{p}` or `PATCH /v1/credentials/{id}` (the only writers). It is used by `ollama`, `custom`
+  and the catalog OpenAI-compatible providers (native vendors ignore it) on chat turns, `POST /credentials/{id}/test`
+  and `GET /credentials/providers/{p}/models` (READ role, uses the stored URL). The API host issued GET `/models` and
+  POST `/chat/completions` with no destination check.
+* **Correction to the first write-up:** the path suffix is *not* fixed. A trailing `?` makes httpx send
+  `…/meta-data/?/models`, so the caller controls the whole GET path. Redirects were never followed (httpx default).
+  The tenant sees 200 chars of 4xx/5xx bodies, model ids and connect errors.
+* **Threat model:** (1) tenant reaches internal services: possible, the bug. (2) self-hoster wants a private
+  endpoint: intended (catalog says "vLLM, LM Studio, a private gateway"). (3) staff wants an internal endpoint: same as (2).
+  (4) a second trusted step between input and request: none exists.
+* **Policy:** trust is the operator's, via env `PROVIDER_PRIVATE_HOSTS` (default empty), not the actor's. Save time
+  (`_check_base_url`): http(s), no `?`/`#`, host not blocked. Request time (httpx hook in `llm/openai_compatible.py`,
+  only for tenant-supplied URLs): same host check, refuses with `ProviderError`. `OLLAMA_BASE_URL` and catalog vendor
+  URLs are unguarded. Staff are not exempt (an editor can re-PATCH a staff-made row, so an actor marker is not stable).
+* **Tests:** `tests/test_provider_base_url.py` (32): 8 blocked literals at save and request time, all three write paths,
+  Ollama override, DNS-resolves-private, `?`/`#`/scheme, allowlist (named host only), staff not exempt, legacy DB row,
+  public endpoint reached, allowlisted host reached, platform Ollama default unguarded, catalog vendor unguarded /
+  override guarded, redirect not followed. Mutation-checked in a scratch worktree (11 and 17 failures respectively when the
+  request-time guard / save-time check is removed). `tests/test_provider_catalog.py::test_custom_endpoint_requires_a_base_url`
+  was changed deliberately: it saved a loopback URL as a plain owner.
+* **Behavior change:** those three endpoints now return 422 `credentials.base_url_blocked` / `credentials.base_url_invalid`;
+  existing rows pointing at private hosts fail until allowlisted. Self-hosters: set `PROVIDER_PRIVATE_HOSTS`.
+* **Residual:** DNS rebinding between check and connect; an allowlisted host is trusted entirely.
 
 ### R-01 Tenant isolation is by convention, and 47 flagged queries were only partly reviewed
 * See `REPOSITORY-MAP.md` §7. No leak found in the ~15 reviewed; ~30 remain unreviewed. Plan: finish the review, add one
@@ -118,6 +134,7 @@ Encode what is true today so it cannot rot; each rule is a real invariant, not a
 | S-01 stdio MCP / SSE SSRF | done, `35cd189` (tests: `tests/test_mcp.py`) — review existing prod rows with `transport=stdio` |
 | A-03 architecture tests | done, `b3b4f07` |
 | A-01 docs correction + ADR-084/085 | done |
+| S-03 tenant-set provider `base_url` SSRF | done (ADR-087, `tests/test_provider_base_url.py`) |
 | R-01 cross-tenant test sweep | done: `tests/test_tenant_isolation.py` (69 tests: 65 endpoint probes as a member of another org, spoofed `X-Org-Id`, list emptiness). No leak found. Mutation-checked: removing the org check in `agents._get_agent` fails 5 probes. Covers ~65 of the id-taking endpoints; workflow-run/test-run, agent-test and inbox sub-routes are not in the table yet |
 | A-07 tool-loop wording | done in `docs/06 §3`, `docs/02 §3.1`, `docs/07` (the doc's iteration cap was accurate; the drift was the file path and the missing agentic budget) |
 | A-04, A-12, P3 items | open, optional |

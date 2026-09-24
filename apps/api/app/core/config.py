@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     ollama_base_url: str = "http://localhost:11434"
+    # Comma-separated hostnames/IPs a tenant-supplied provider `base_url` (Custom endpoint,
+    # Ollama override, or a catalog provider's override) may point at even though they resolve
+    # to a private/loopback address, e.g. "host.docker.internal,10.0.0.5". Empty = tenants can
+    # only reach public endpoints. Operator-only: it is environment config, never a tenant
+    # setting. Does not affect `OLLAMA_BASE_URL`, which is trusted platform config.
+    provider_private_hosts: str = ""
     embedding_provider: str = "ollama"
     embedding_model: str = "nomic-embed-text"
     # One HTTP GET at startup, confirming the configured embedding endpoint answers AND has the
