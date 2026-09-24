@@ -31,18 +31,19 @@ Branch `master`, HEAD `c3b6ec9`. Tags: `phase-20-complete`, `agentic-phase-1`…
   not by oversight.
 - **Risk register** (`docs/RISK-REGISTER.md`): **closed** R1 (backups), R4 (measured), R14
   (stream-drop data loss, ~0.5% unexplained residual). **Open and blocking real clients:**
-  - **R2** — the live `aurozenai` KB document still contains unredacted contact PII (ops task;
-    needs the operator's OK before touching a real client's data).
+  - **R2** — *downgraded 2026-09-24:* not a live exposure (no production deployment exists). It is
+    now a pre-launch check: decide allow-list vs redact for the AUROZEN AI PDF's contact details, then
+    run `audit_kb_pii.py` against the Supabase DB once it is live (ADR-086).
   - **R3** — no external pen-test ever; needs a budget/vendor decision from a human.
   - P1: R5 distress-detection inconsistency, R6 guard models fail open (no alerting), R7
     grounding 12/15 fabricated with no context, R8 cross-turn injection uncovered.
   - Sizing to do before promising an SLA: async DB `pool_size`/`max_overflow`, Celery worker count.
-- **Not committed / not mine:** `CLAUDE.md` (session log moved into the `session-log` skill),
-  `.claude/`, and older WIP in `app/chat/pii.py`, `app/db/templates.py`, `app/llm/types.py`.
-  Someone should review and commit or drop these.
+- **Not committed:** `apps/web/package-lock.json`, and untracked `docs/14-*-PROMPT.md`,
+  `docs/14-FOLLOWUP-PROMPTS.md`, `docs/16-VPS-MIGRATION.md`, `designreference/`, `start_botforge.bat`,
+  a `.docx` and a `.png` — owner to decide. (The CLAUDE.md/session-log/WIP items were committed 2026-09-24.)
 
 ### Do this next
-1. **R2** — show the flagged `aurozenai` document to the operator, redact, re-ingest.
+1. **Supabase decision (ADR-086)** — answer the open question (does auth move too?), then revise docs/16.
 2. Decide **R3** (external security review) — a human/budget call.
 3. Then P1s: R6 alerting on `guard_l2_unavailable`/`guard_l3_unavailable` is the cheapest win.
 4. Optional: chase the ~0.5% R14 straggler; k8s uploads (R11).

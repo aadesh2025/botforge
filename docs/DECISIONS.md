@@ -18,6 +18,70 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-086: Database hosting is Supabase-managed Postgres (on Oracle's free tier for compute), not self-hosted Postgres on the VPS
+- **Date:** 2026-09-24
+- **Status:** accepted for the **database**. **Whether auth also moves to Supabase is NOT decided** — see "Open question" below; do not build on either assumption until it is answered.
+- **Context:** `docs/16-VPS-MIGRATION.md` (not yet executed) assumes the API, worker and a self-managed
+  `pgvector/pgvector:pg16` container all run on one Oracle Cloud Always Free VM (compose `postgres` service,
+  nightly `pg_dump` to a volume, no published DB port). The actual plan is to keep the Oracle VM for the
+  application containers and use Supabase's managed Postgres for the database (and conversation storage — those
+  already live in Postgres, so that is the same database, not a second store). CLAUDE.md §4 fixes the stack at
+  "PostgreSQL 16 + pgvector"; Supabase is Postgres with pgvector available, so this **does not** violate the fixed
+  stack — it changes who operates the database.
+- **Decision:** the production `DATABASE_URL` points at Supabase Postgres. The compose `postgres` service is not
+  used in production. Local dev keeps the bundled Postgres (unchanged).
+- **What changes (checked against this repo) vs. what needs confirming on first contact (🔶 = prediction from general
+  knowledge of Supabase, not verified here — confirm against Supabase's current docs and plan page):**
+  - **Connection string shape.** Today: `postgresql+asyncpg://botforge:…@localhost:<port>/botforge`, no TLS. Supabase:
+    the database name is `postgres` (not `botforge`); TLS is required (`app/db/session.py` does no TLS setup today);
+    and there are three endpoints — the direct host (`db.<project-ref>.supabase.co:5432`), the Supavisor **session**
+    pooler and the **transaction** pooler (`…pooler.supabase.com`, user `postgres.<project-ref>`, ports 5432 / 6543 🔶).
+    🔶 The direct host is IPv6-only unless a paid add-on is bought; whether the Oracle VM has working outbound IPv6 must
+    be checked, otherwise the pooler is the only free path.
+  - **Pooler mode matters for asyncpg.** 🔶 Transaction-mode pooling does not support prepared statements, which asyncpg
+    uses by default; it needs statement caching disabled (and unique prepared-statement names) in
+    `create_async_engine(..., connect_args=...)`. Recommendation: **API/worker on the session pooler or the direct
+    connection; Alembic migrations on the direct connection** (DDL and advisory locks are not safe to assume through a
+    transaction pooler). Needs a test, not an assumption — `app/db/session.py` currently sets neither.
+  - **R4 pool sizing is affected in two ways.** (1) The measured 15-connection ceiling (docs/15 §11.1) is
+    **client-side** — SQLAlchemy's default `pool_size=5 + max_overflow=10` per process — so Supabase does not change it;
+    what changes is the *server-side* limit it counts against: Supabase plans cap direct connections and pooler
+    clients (🔶 small on the free/nano tier — check the plan's current numbers), and the API, the Celery worker and beat
+    each hold their own pool. (2) **The R4 latency numbers do not transfer at all.** They were measured against a
+    Postgres on the same machine (chat p50 49 ms at c=1); with the database across a network, every sequential query in
+    a chat turn pays a round trip, so the Oracle VM and the Supabase project must be in the same cloud region.
+    `infra/perf/load_test.py` has to be re-run from the Oracle VM against the Supabase instance before any SLA is quoted.
+  - **Security: Supabase exposes tables in the `public` schema through its auto-generated REST API (PostgREST).** 🔶
+    BotForge's tables are in `public` and have no RLS (ADR-002 made RLS optional). The project's anon key is designed to
+    be public, so that API could read them. Before real data lands: **disable the Data API or enable deny-all RLS on
+    every table** (the FastAPI backend connects as a privileged role and is unaffected). This is the most important item
+    on this list.
+  - **pgvector / extensions.** `0001_extensions.py` runs `CREATE EXTENSION IF NOT EXISTS vector` and `pgcrypto`. 🔶
+    Supabase supports both but by default installs extensions into an `extensions` schema; the `vector` type must resolve
+    on the connection's `search_path`. Run the migrations against a scratch Supabase project first.
+  - **Backups (RISK-REGISTER R1, ADR-082).** The `backup` service `pg_dump`s the *local* compose Postgres and mounts the
+    uploads volume. Against Supabase the database half must target the direct connection (or be replaced by Supabase's
+    own backups — 🔶 daily backups/PITR are plan-dependent and not on the free tier). The **uploads volume is
+    unaffected**: uploaded files stay on the Oracle VM's disk unless Supabase Storage is separately chosen (it is not,
+    by this ADR).
+  - **Plan limits.** 🔶 The free tier has a small database-size cap and pauses idle projects — unsuitable for a paying
+    client's chat data; budget for a paid plan before client #1.
+- **Open question (needs the owner's answer):** the plan was described as Supabase for "database + auth +
+  conversation storage". Postgres and conversations are settled above. **"Auth" is ambiguous** and is not a small
+  choice: (a) *database only* — keep BotForge's own auth (argon2, JWT + rotating refresh, OAuth, magic links,
+  `current_org`, the Next.js BFF cookies) and just point it at a different Postgres; or (b) *replace it with Supabase
+  Auth* — which touches `app/modules/auth`, `current_org` token decoding, org-membership/RBAC identity, the web BFF,
+  every test that signs up a user, and contradicts CLAUDE.md §4's "Auth: JWT access + refresh, OAuth, password
+  (argon2), magic links". Default until answered: **(a)**. If (b), it needs its own ADR and a migration plan for the
+  `users`/`sessions` tables; do not start it from this one.
+- **Alternatives considered:** self-hosted Postgres on the VM (docs/16 as written — simplest, one box, no network hop,
+  but the owner operates backups, upgrades and HA); a managed Postgres from another vendor (same trade-offs, no reason
+  given to prefer it).
+- **Consequences:** `docs/16-VPS-MIGRATION.md` is stale until revised (a pointer to this ADR was added at its top).
+  `.env.example` / `docs/ENV.md` will need the new URL shape and any TLS/pooler settings when the config change is made
+  — not done here, this ADR records the decision only. RISK-REGISTER R2's clean-up is now scheduled against the new
+  database (audit run once Supabase is live), not the local one.
+
 ### ADR-085: stdio MCP servers are platform-staff only; SSE MCP URLs and URL-ingest redirects go through the SSRF guard
 - **Date:** 2026-09-24
 - **Status:** accepted
