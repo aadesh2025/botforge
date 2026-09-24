@@ -20,7 +20,7 @@ Format each entry as below. Newest at the top.
 
 ### ADR-086: Database hosting is Supabase-managed Postgres (on Oracle's free tier for compute), not self-hosted Postgres on the VPS
 - **Date:** 2026-09-24
-- **Status:** accepted for the **database**. **Whether auth also moves to Supabase is NOT decided** — see "Open question" below; do not build on either assumption until it is answered.
+- **Status:** accepted. **Auth decision (owner, 2026-09-24): option (a) — database only.** BotForge keeps its own auth (argon2, JWT + rotating refresh, OAuth, magic links); Supabase Auth is **not** adopted at VPS deploy. Revisit only via a new ADR.
 - **Context:** `docs/16-VPS-MIGRATION.md` (not yet executed) assumes the API, worker and a self-managed
   `pgvector/pgvector:pg16` container all run on one Oracle Cloud Always Free VM (compose `postgres` service,
   nightly `pg_dump` to a volume, no published DB port). The actual plan is to keep the Oracle VM for the
@@ -66,13 +66,13 @@ Format each entry as below. Newest at the top.
     by this ADR).
   - **Plan limits.** 🔶 The free tier has a small database-size cap and pauses idle projects — unsuitable for a paying
     client's chat data; budget for a paid plan before client #1.
-- **Open question (needs the owner's answer):** the plan was described as Supabase for "database + auth +
+- **Open question — ANSWERED 2026-09-24: (a).** Original text kept for the reasoning: the plan was described as Supabase for "database + auth +
   conversation storage". Postgres and conversations are settled above. **"Auth" is ambiguous** and is not a small
   choice: (a) *database only* — keep BotForge's own auth (argon2, JWT + rotating refresh, OAuth, magic links,
   `current_org`, the Next.js BFF cookies) and just point it at a different Postgres; or (b) *replace it with Supabase
   Auth* — which touches `app/modules/auth`, `current_org` token decoding, org-membership/RBAC identity, the web BFF,
   every test that signs up a user, and contradicts CLAUDE.md §4's "Auth: JWT access + refresh, OAuth, password
-  (argon2), magic links". Default until answered: **(a)**. If (b), it needs its own ADR and a migration plan for the
+  (argon2), magic links". Chosen: **(a)**. If (b), it needs its own ADR and a migration plan for the
   `users`/`sessions` tables; do not start it from this one.
 - **Alternatives considered:** self-hosted Postgres on the VM (docs/16 as written — simplest, one box, no network hop,
   but the owner operates backups, upgrades and HA); a managed Postgres from another vendor (same trade-offs, no reason
