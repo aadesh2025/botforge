@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +16,7 @@ from app.core import rbac
 from app.core.crypto import encrypt
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.core.ssrf import is_blocked_host
 from app.integrations.n8n_client import get_client
 from app.llm.types import ToolCall, ToolSpec
 from app.models import Agent, AgentVersion, MCPServer, Tool, ToolRun
@@ -25,7 +28,7 @@ from app.tools.http_tool import execute_http_tool
 from app.tools.mcp_client import MCPToolError
 from app.tools.mcp_client import list_tools as mcp_list_tools
 from app.tools.mcp_tool import execute_mcp_tool
-from app.tools.mcp_tool import server_config as mcp_server_config
+from app.tools.mcp_tool import resolve_server_config as mcp_resolve_server_config
 from app.tools.n8n_tool import execute_n8n_tool, n8n_args_schema, relax_n8n_schema
 
 log = get_logger("tools")
@@ -465,6 +468,23 @@ async def create_mcp_server(
     a `Tool` row of type `mcp` still has to be created (POST /v1/tools), and even then it is
     only usable in a turn once the agentic runtime is on for this org (docs/17 §2)."""
     rbac.require_permission(ctx.role, rbac.TOOLS_MANAGE)
+    if data.transport == "stdio":
+        # A stdio server is a command run on the API host. Any org role with TOOLS_MANAGE
+        # (including the client `editor` role) could otherwise execute arbitrary code there.
+        if not ctx.user.is_staff:
+            raise AppError(
+                "tools.mcp_stdio_forbidden",
+                "stdio MCP servers can only be registered by platform staff. Use an SSE server.",
+                403,
+            )
+    else:
+        parsed = urlparse(data.url_or_command)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise AppError("tools.mcp_url_invalid", "An SSE MCP server needs an http(s) URL.", 422)
+        if await asyncio.to_thread(is_blocked_host, parsed.hostname):
+            raise AppError(
+                "tools.mcp_url_blocked", "That URL points at a private or loopback address.", 422
+            )
     auth: dict[str, Any] = {}
     if data.args:
         auth["args"] = data.args
@@ -511,7 +531,7 @@ async def test_mcp_server_connection(
     rbac.require_permission(ctx.role, rbac.TOOLS_MANAGE)
     server = await _get_mcp_server(session, ctx, server_id)
     try:
-        tools = await mcp_list_tools(mcp_server_config(server))
+        tools = await mcp_list_tools(await mcp_resolve_server_config(session, server))
     except MCPToolError as exc:
         return schemas.MCPTestConnectionResponse(ok=False, error=str(exc))
     return schemas.MCPTestConnectionResponse(

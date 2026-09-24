@@ -14,11 +14,20 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.tools.mcp_client as mcp_client
 import app.tools.mcp_tool as mcp_tool_module
 import app.tools.service as tools_service
+from app.models import MCPServer, User
 from app.tools.mcp_client import MCPToolError
+
+
+@pytest.fixture(autouse=True)
+def _no_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Registration resolves the SSE host; tests use made-up names, so block by literal address."""
+    monkeypatch.setattr(tools_service, "is_blocked_host", lambda host: host == "10.0.0.5")
 
 
 async def _headers(client: AsyncClient, email: str = "a@example.com") -> tuple[dict[str, str], dict]:
@@ -77,14 +86,86 @@ async def test_create_and_list_mcp_servers(client: AsyncClient) -> None:
     assert [s["id"] for s in listed.json()] == [server["id"]]
 
 
-async def test_stdio_server_with_args_and_env(client: AsyncClient) -> None:
+async def test_editor_cannot_register_a_stdio_server(client: AsyncClient) -> None:
+    """A stdio server is a command run on the API host: registering one is remote code execution
+    for whoever holds TOOLS_MANAGE, which includes the client `editor` role."""
     headers, _ = await _headers(client)
+    r = await client.post(
+        "/v1/mcp/servers",
+        json={"name": "Local FS", "transport": "stdio", "url_or_command": "npx", "args": ["-y", "x"]},
+        headers=headers,
+    )
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "tools.mcp_stdio_forbidden"
+
+
+async def test_staff_can_register_a_stdio_server_with_args_and_env(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    headers, _ = await _headers(client, "staff@example.com")
+    user = (await db_session.execute(select(User).where(User.email == "staff@example.com"))).scalar_one()
+    user.is_staff = True
+    await db_session.flush()
     server = await _create_server(
         client, headers, name="Local FS", transport="stdio", url_or_command="npx",
         args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"], env={"NODE_ENV": "production"},
     )
     assert server["transport"] == "stdio"
     assert server["url_or_command"] == "npx"
+
+
+async def test_sse_server_at_a_private_address_is_rejected(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    r = await client.post(
+        "/v1/mcp/servers",
+        json={"name": "Inner", "transport": "sse", "url_or_command": "http://10.0.0.5/sse"},
+        headers=headers,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "tools.mcp_url_blocked"
+
+
+async def test_sse_server_needs_an_http_url(client: AsyncClient) -> None:
+    headers, _ = await _headers(client)
+    r = await client.post(
+        "/v1/mcp/servers",
+        json={"name": "Odd", "transport": "sse", "url_or_command": "file:///etc/passwd"},
+        headers=headers,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "tools.mcp_url_invalid"
+
+
+async def test_a_stdio_row_from_a_non_staff_creator_is_never_run(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """Rows registered before the rule existed must stop running at connect time."""
+    _, org = await _headers(client, "legacy@example.com")
+    creator = (await db_session.execute(select(User).where(User.email == "legacy@example.com"))).scalar_one()
+    row = MCPServer(
+        organization_id=uuid.UUID(org["id"]), name="Legacy", transport="stdio",
+        url_or_command="calc.exe", enabled=True, created_by=creator.id,
+    )
+    db_session.add(row)
+    await db_session.flush()
+
+    config = await mcp_tool_module.resolve_server_config(db_session, row)
+    assert config.stdio_allowed is False
+    with pytest.raises(MCPToolError, match="platform staff"):
+        await mcp_client.list_tools(config)
+
+    creator.is_staff = True
+    await db_session.flush()
+    assert (await mcp_tool_module.resolve_server_config(db_session, row)).stdio_allowed is True
+
+
+async def test_connect_refuses_an_sse_url_that_resolves_to_a_private_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_client, "is_blocked_host", lambda host: True)
+    config = mcp_client.MCPServerConfig(transport="sse", url_or_command="https://rebind.example/sse")
+    with pytest.raises(MCPToolError, match="private/loopback"):
+        await mcp_client.list_tools(config)
 
 
 async def test_invalid_transport_rejected(client: AsyncClient) -> None:

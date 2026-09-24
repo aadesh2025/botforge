@@ -15,7 +15,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import decrypt
-from app.models import MCPServer
+from app.models import MCPServer, User
 from app.tools.base import ToolResult
 from app.tools.mcp_client import MCPServerConfig, MCPToolError, call_tool
 
@@ -36,6 +36,17 @@ def server_config(server: MCPServer) -> MCPServerConfig:
     )
 
 
+async def resolve_server_config(session: AsyncSession, server: MCPServer) -> MCPServerConfig:
+    """`server_config` plus the stdio permission: only a server registered by platform staff may
+    spawn a subprocess. Checked at connect time, not just at registration, so a stdio row created
+    before that rule existed (or by a since-demoted user) stops running."""
+    config = server_config(server)
+    if server.transport == "stdio" and server.created_by is not None:
+        creator = await session.get(User, server.created_by)
+        config.stdio_allowed = bool(creator and creator.is_staff)
+    return config
+
+
 async def execute_mcp_tool(
     session: AsyncSession, org_id: UUID, config: dict[str, Any], args: dict[str, Any]
 ) -> ToolResult:
@@ -51,7 +62,7 @@ async def execute_mcp_tool(
         return ToolResult(output={}, status="error", error=f"MCP server '{server.name}' is disabled")
 
     try:
-        output = await call_tool(server_config(server), str(tool_name), args)
+        output = await call_tool(await resolve_server_config(session, server), str(tool_name), args)
     except MCPToolError as exc:
         return ToolResult(output={}, status="error", error=str(exc))
     return ToolResult(output=output, status="success")

@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from mcp import ClientSession, StdioServerParameters
 from mcp import types as mcp_types
@@ -27,6 +28,7 @@ from mcp.client.stdio import stdio_client
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.ssrf import is_blocked_host
 
 log = get_logger("tools.mcp")
 
@@ -42,6 +44,9 @@ class MCPServerConfig:
     args: list[str] | None = None
     env: dict[str, str] | None = None
     headers: dict[str, str] | None = None  # SSE auth, e.g. {"Authorization": "Bearer ..."}
+    # A stdio server is a subprocess on this host, so it is only ever run when platform staff
+    # registered it. Callers set this from the registering user; the default refuses.
+    stdio_allowed: bool = False
 
 
 def _session_cm(config: MCPServerConfig) -> Any:
@@ -55,7 +60,22 @@ def _session_cm(config: MCPServerConfig) -> Any:
     raise MCPToolError(f"unsupported MCP transport '{config.transport}'")
 
 
+async def _check_destination(config: MCPServerConfig) -> None:
+    """Refuse the two ways a tenant-registered server could reach the host itself."""
+    if config.transport == "stdio":
+        if not config.stdio_allowed:
+            raise MCPToolError("stdio MCP servers can only be registered by platform staff")
+        return
+    parsed = urlparse(config.url_or_command)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise MCPToolError("an SSE MCP server needs an http(s) URL")
+    if await asyncio.to_thread(is_blocked_host, parsed.hostname):
+        raise MCPToolError("refusing to connect to a private/loopback host")
+
+
 async def _with_session(config: MCPServerConfig, fn: Any, *, timeout_s: float) -> Any:
+    await _check_destination(config)
+
     async def _run() -> Any:
         async with _session_cm(config) as (read, write):
             async with ClientSession(read, write) as session:
