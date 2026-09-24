@@ -70,6 +70,12 @@ between docs and code, (3) locking the current boundaries in with an architectur
 * **Behavior change:** those three endpoints now return 422 `credentials.base_url_blocked` / `credentials.base_url_invalid`;
   existing rows pointing at private hosts fail until allowlisted. Self-hosters: set `PROVIDER_PRIVATE_HOSTS`.
 * **Residual:** DNS rebinding between check and connect; an allowlisted host is trusted entirely.
+* **Operational follow-up (not done; production was not inspected):** (1) run this read-only query against production:
+  `SELECT o.name, c.provider, c.base_url FROM provider_credentials c JOIN organizations o ON o.id = c.organization_id
+  WHERE c.base_url IS NOT NULL AND c.base_url <> '';` (no key columns); (2) pick the rows whose host is private, loopback or
+  unresolvable; (3) review each with its owner; (4) add legitimate hosts to `PROVIDER_PRIVATE_HOSTS` in the root `.env` (read by
+  the api and worker containers through `env_file`) and restart both; (5) update or remove stale credentials through the
+  normal credential endpoints. Nothing is deleted automatically.
 
 ### R-01 Tenant isolation is by convention, and 47 flagged queries were only partly reviewed
 * See `REPOSITORY-MAP.md` §7. No leak found in the ~15 reviewed; ~30 remain unreviewed. Plan: finish the review, add one
