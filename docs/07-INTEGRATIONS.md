@@ -134,7 +134,7 @@ secret and its `X-Hub-Signature-256` check (`channels/meta_signature.py`).
 Implement a `Channel` interface: `verify(request)`, `parse_inbound(request) -> InboundMsg`,
 `send(conversation, text, attachments)`, and an optional
 `fetch_profile(channel, external_id) -> ContactProfile | None`. Register per type. Keeps
-`chat.service` channel-agnostic.
+the chat runtime channel-agnostic.
 
 ### Contact identity
 Every inbound path — channels *and* the widget — resolves the sender to a `contacts` row keyed

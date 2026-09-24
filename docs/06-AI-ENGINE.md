@@ -83,14 +83,17 @@ After each call, compute `cost_micros`, write to `messages` and roll up into `us
 Enforce a token budget: reserve for completion, trim oldest history first, then reduce
 retrieved context, never drop the system prompt.
 
-## 3. Agent runtime / orchestration (`apps/api/chat/service.py`)
+## 3. Agent runtime / orchestration (`apps/api/app/chat/runtime.py`, `run_turn`)
 
 Loop:
 1. Build request (§2 assembly) with tool schemas if `features.tools_enabled`.
 2. Stream from provider.
 3. If the model emits a **tool call**: pause generation, execute via `tools.service`
-   (built-in / HTTP / n8n), append tool result as a `tool` message, and continue the loop
-   (max N tool iterations, configurable, to prevent loops).
+   (built-in / HTTP / n8n / MCP), append tool result as a `tool` message, and run another
+   provider pass. The loop is bounded by `settings.tool_max_iterations` (default 4) and, when the
+   agentic runtime is on for the org (`chat.budget.agentic_loop_enabled`: platform flag AND explicit
+   org opt-in), by an `AgentBudget` shared with nested calls — steps, tool calls, wall-clock
+   seconds, cost (`agentic_max_*` settings). Whichever trips first ends the loop; it is sticky.
 4. On completion: persist assistant message, citations, tool_runs, usage; update conversation
    `last_message_at`, memory.
 5. Stream events to client per `04 §Streaming event contract`.

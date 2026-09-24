@@ -18,6 +18,39 @@ Format each entry as below. Newest at the top.
 
 ## Build decisions
 
+### ADR-085: stdio MCP servers are platform-staff only; SSE MCP URLs and URL-ingest redirects go through the SSRF guard
+- **Date:** 2026-09-24
+- **Status:** accepted
+- **Context:** The architecture audit (`docs/architecture/REFACTOR-PLAN.md` S-01/S-02) found that any org role with
+  `tools:manage` — including the client `editor` role — could register an MCP server with `transport=stdio` and make
+  the API host spawn an arbitrary command (test-connection, or an agent turn once the agentic loop was on). SSE MCP
+  URLs had no destination check, and `rag.loaders.load_url` checked only the first hop before following redirects.
+- **Decision:** (1) stdio registration requires `user.is_staff`; at connect time a stdio server also runs only if its
+  registering user is still staff (`mcp_tool.resolve_server_config` -> `MCPServerConfig.stdio_allowed`), so rows created
+  earlier stop working. (2) SSE URLs must be http(s) and pass `core.ssrf.is_blocked_host` at registration and on every
+  connect. (3) `load_url` follows redirects manually and checks each hop (cap 5). (4) The guard moved from a private name in
+  `rag/loaders.py` to `core/ssrf.py`.
+- **Alternatives considered:** a command allowlist (still executes tenant-chosen binaries, needs upkeep); sandboxed stdio
+  (real work, no need yet); a platform env flag (a second switch for the same decision).
+- **Consequences:** Behavior change: a client can no longer register stdio MCP servers; SSE servers on private/loopback
+  addresses are refused (a local dev MCP needs a public or tunnelled URL). Residual: DNS rebinding between the check and
+  the connection is not closed (needs the resolved IP pinned on the socket); `http_tool`, `builtins._http_request` and webhook
+  dispatch already use `follow_redirects=False`. Existing prod rows with `transport=stdio` created by non-staff should be
+  reviewed and deleted — nothing here removes them.
+
+### ADR-084: Tenant isolation is by org-scoped fetch, not by a repository layer — docs corrected, no retrofit
+- **Date:** 2026-09-24
+- **Status:** accepted
+- **Context:** `CLAUDE.md §8` and `docs/02-ARCHITECTURE.md` described a repository pattern in which a base repository
+  injects `organization_id`. The audit found 0 module repositories; `db/repository.py::BaseRepository` is used only by
+  `tests/test_db.py`, and 34 files build `select()` directly. RLS is also not implemented.
+- **Decision:** Keep the working convention (root resource via an org-scoped `_get_*`, children by verified parent id,
+  public surfaces resolve the org from a public key) and correct the docs. Do not retrofit repositories across 34 files.
+- **Alternatives considered:** adopt `BaseRepository` everywhere (large churn on the most security-sensitive layer, no
+  behavior gain); add RLS (worthwhile defense-in-depth, but a separate, larger decision).
+- **Consequences:** Isolation depends on every new service function following the convention, so it must be covered by a
+  cross-tenant test (open item R-01 in the refactor plan). `BaseRepository` stays as an available option for new modules.
+
 ### ADR-083: A dropped chat stream hands its reply to a Celery task — an in-request retry cannot work (RISK-REGISTER R14)
 - **Date:** 2026-09-24
 - **Status:** accepted

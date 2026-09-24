@@ -35,8 +35,13 @@
 ## 2. Services & responsibilities
 
 ### apps/api (FastAPI) — modular monolith
-Organized by **domain modules**, each with `router.py`, `service.py`, `repository.py`,
-`schemas.py`, `models.py`. Modules:
+Organized by **domain**. The CRUD-style domains live in `app/modules/<name>/` with `router.py`,
+`service.py`, `schemas.py` (+ `deps.py` where needed); there is **no per-module `repository.py`** —
+services query through the SQLAlchemy session directly (ADR-084). ORM models live together in
+`app/models/`. The engine/adapter domains sit beside `modules/` as top-level packages
+(`chat`, `channels`, `tools`, `workflows`, `webhooks`, `rag`, `llm`, `contacts`, `crm`, `realtime`,
+`worker`, `integrations`). The bullets below are logical domains, not directory names. Import
+boundaries are enforced by `apps/api/tests/test_architecture.py`.
 
 - `auth` — signup/login/oauth/magic-link, JWT, sessions, password reset.
 - `orgs` — organizations, memberships, invitations, RBAC enforcement.
@@ -76,12 +81,13 @@ retries, analytics rollups, scheduled jobs. Redis is the broker + result backend
 
 ### 3.1 Chat message (RAG + tools + streaming)
 1. Client sends message to `POST /v1/agents/{id}/chat` (or over WS) with conversation id.
-2. `chat.service` loads agent config, conversation history, applies token budget.
+2. The conversation service (`modules/conversations/service.py`, or `chat/inbound.py` for channel messages) loads agent config, conversation history, applies token budget.
 3. If RAG enabled: embed the query → pgvector similarity search → assemble context + citations.
 4. Build prompt (system persona + retrieved context + memory + history + user turn).
 5. Call LLM via `llm` layer (provider = agent config; fallback chain on error).
-6. If the model requests a tool call → `tools.service` executes (built-in/HTTP/n8n) → feed
-   result back → continue generation.
+6. If the model requests a tool call → `tools.service` executes (built-in/HTTP/n8n/MCP) → feed
+   result back → another provider pass, up to `tool_max_iterations` and the agentic budget
+   (`chat/runtime.py::run_turn`, `docs/06 §3`).
 7. Stream tokens to client via SSE/WS; persist assistant message, tool logs, usage/cost.
 8. Emit `message.created` webhook; update analytics counters.
 
@@ -107,9 +113,12 @@ retries, analytics rollups, scheduled jobs. Redis is the broker + result backend
 
 - **Model:** shared database, shared schema, **row-level tenant scoping** by `organization_id`
   on every tenant-owned table.
-- **Enforcement:** a base repository requires an `org_id` and injects the filter; a FastAPI
-  dependency resolves the current org from the JWT/API key and forbids cross-org access.
-  Add Postgres Row-Level Security policies as defense-in-depth.
+- **Enforcement (as built, ADR-084):** a FastAPI dependency (`modules/orgs/deps.py::current_org`) resolves
+  the caller's `OrgContext` from the JWT/API key and rejects non-members. Every service function
+  then fetches its root resource through an org-scoped `_get_*` helper (`WHERE organization_id = ctx.org.id`)
+  and queries child rows (messages, chunks, runs) by that already-verified parent. This is a
+  convention, not a structural guard: `db/repository.py::BaseRepository` exists but no service uses it.
+  Cross-tenant behavior is covered by per-module tests. **Postgres Row-Level Security is not implemented.**
 - **Public surfaces** (widget, channel webhooks) resolve org via the agent's public key /
   channel id, never trust client-supplied org ids.
 

@@ -94,8 +94,8 @@ warning, keep building. Real keys get dropped in later by the human.
 ## 8. Coding standards
 
 - **Backend:** async everywhere, typed, Pydantic schemas for every request/response,
-  service layer separated from routers, repository pattern for DB access, no business
-  logic in routers. Alembic migration for every schema change. Structured logging (JSON).
+  service layer separated from routers, DB access in the service layer through org-scoped
+  `_get_*` helpers (no repository layer, ADR-084), no business logic in routers. Alembic migration for every schema change. Structured logging (JSON).
 - **Frontend:** server components by default, client components only when needed, all API
   calls through a typed client generated from the OpenAPI spec, no `any`, colocate tests.
 - **Security:** validate all input, parametrized queries only, tenant isolation enforced at
