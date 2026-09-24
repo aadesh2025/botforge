@@ -69,7 +69,7 @@ class ModelInfo(BaseModel):
 StreamEventType = Literal[
     "token", "tool_call", "tool_result", "usage", "citations", "conversation", "message", "done", "error",
     # The output guard suppressed or rewrote the reply after streaming had already begun
-    # (docs/11 §4-L5, ADR-047). `delta` carries the replacement text: a client that streamed
+    # (docs/11 §4-L5, ADR-049). `delta` carries the replacement text: a client that streamed
     # tokens must discard what it rendered for this turn and show this instead. Buffering
     # every reply until it could be checked would have cost first-token latency on every
     # turn to defend against a rare event, so the correction is sent after the fact.

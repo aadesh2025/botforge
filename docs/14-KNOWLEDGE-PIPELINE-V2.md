@@ -711,13 +711,17 @@ the same move docs/11 made with the red-team corpus.
 > - **OCR** (§3.2 W3): a rasterized page with zero embedded text layer — `pypdf` extracts exactly
 >   0 chars. Docling's OCR reads it and extracts 419 chars of real policy text.
 >
-> **⚠️ Cold-start timeout risk, found by accident, not designed for.** The *first* conversion
-> against a freshly-started `docling-serve` (loading the CPU-only layout model) took **124.6
-> seconds** — past the 120s `DOCLING_TIMEOUT_SECONDS` default — and `convert_with_fallback()`
-> correctly fell back to the legacy extractor. A second, warm request finished in seconds. So
-> **the first document any client uploads after a `docling-serve` restart may legitimately fail
-> over to the legacy path with nothing actually broken.** Not fixed here (a warm-up call at
-> service startup is the likely fix); recorded so it isn't mistaken for a regression later.
+> **⚠️ Cold-start timeout risk, found by accident, not designed for — fixed the same day
+> (`docs/14-FOLLOWUP-PROMPTS.md` task 1).** The *first* conversion against a freshly-started
+> `docling-serve` (loading the CPU-only layout model) took **124.6 seconds** — past the 120s
+> `DOCLING_TIMEOUT_SECONDS` default — and `convert_with_fallback()` correctly fell back to the
+> legacy extractor. `converters.probe_reachable()` now fires a real conversion at API startup
+> (gated by `docling_enabled`, never a health-check ping — verified live that pinging `/health`
+> never triggers model loading) so the first *client* upload doesn't pay that cost. Verified
+> end-to-end on a genuinely fresh container: probe gives up client-side after 5s while
+> `docling-serve`'s job worker keeps loading in the background (confirmed in its own logs), and
+> the next real conversion dropped to **8.1s**. Narrows the window, does not close it — a
+> `docling-serve` crash/restart independent of the API's lifecycle still hits it cold.
 >
 > **⚠️ The original PII fixture had its own bug, found the same way — by actually running
 > `find_pii()` against real output instead of assuming.** Its phone number used five-space digit

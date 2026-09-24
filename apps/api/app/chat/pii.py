@@ -136,6 +136,15 @@ def _matchable(text: str) -> str:
     Length-preserving is the point: `find_pii` returns offsets that the output guard slices the
     *original* string with, so NFKC (which can change length, `ﬁ` → `fi`) is not usable here.
     Every offending character maps to exactly one space.
+
+    ⚠️ **Known, filed, deliberately not fixed (docs/14 K1-5 follow-up task 2):** this maps every
+    character 1:1, so a *run* of several original spaces stays that many spaces — `PhoneNumberMatcher`
+    does not match a number with wide (3+ char) irregular spacing between digit groups, and
+    collapsing such a run here would shift every offset after it, breaking the invariant this
+    function exists for. Measured against the real corpus (18 chunks, incl. the actual
+    `Aurozen_AI` KB the 2026-08-03 incident came from) on 2026-08-17: **zero real instances** of
+    this pattern. Filed rather than fixed — a real fix needs an offset-remapping layer, which is
+    high-blast-radius for an unmeasured-live gap. Revisit only if a real document surfaces it.
     """
     return "".join(
         ch

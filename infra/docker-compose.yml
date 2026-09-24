@@ -99,13 +99,14 @@ services:
     command: celery -A app.worker.celery_app beat --loglevel=info
 
   web:
-    image: node:20-bookworm-slim
+    image: node:22-bookworm-slim
     working_dir: /app
     env_file: ../.env
     environment:
+      API_INTERNAL_URL: http://api:8000
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - ../apps/web:/app
       - web_node_modules:/app/node_modules
@@ -165,10 +166,9 @@ services:
   ollama:
     image: ollama/ollama
     ports:
-      # ⚠️ Collides with a host-installed Ollama, which is what the documented dev workflow
-      # (CLAUDE.md §12) actually uses — api and web run on the host, not in compose. If this
-      # container will not bind, that is why, and the host one is already serving.
-      - "11434:11434"
+      # Changed from 11434 to 11435 to avoid collision with host-installed Ollama.
+      # If you want the containerized version, kill the host Ollama and revert to 11434:11434.
+      - "11435:11434"
     volumes:
       - ollamadata:/root/.ollama
     entrypoint: ["/bin/sh", "-c"]

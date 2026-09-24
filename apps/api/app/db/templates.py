@@ -1,9 +1,12 @@
 """Prebuilt agent role templates offered at creation time.
 
-A template is a *starting point*, not a locked preset: `POST /v1/agents` copies its fields into
-the new agent's first draft, and everything is editable from that moment on. Nothing here is
-persisted as a template reference — once an agent is created there is no link back, which is
-deliberate (editing this file must never retroactively change a live agent).
+A template is a *starting point*, not a locked preset: `POST /v1/agents` **copies** its fields
+into the new agent's first draft, and everything is editable from that moment on. Editing this
+file never retroactively changes a live agent, because no content is read back at runtime.
+
+The one thing that is persisted is the id, in `persona.template_id`, and it is purely a **hint**:
+the builder uses it to look up this catalog's `suggested_next_step` banner. An unknown or removed
+id degrades to no banner — never to an error — so deleting a template here is safe.
 
 Adding a fifth role is one `AgentTemplate(...)` entry in `AGENT_TEMPLATES`; no schema change and
 no migration, because templates are static catalog data rather than rows.
