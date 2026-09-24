@@ -1,7 +1,8 @@
 # Architecture and dependency-boundary verification
 
 Goal: learn the architecture the repository actually has, check that its boundaries hold, and avoid
-imposing a different one.
+imposing a different one. Understand the existing architecture before changing it. Prefer an existing
+abstraction to a new one, and a local change to a repository-wide one.
 
 ## 1. Discover, do not assume
 
@@ -100,7 +101,9 @@ change its structure.
 
 ## 9. Things not to introduce
 
-Repository-per-module, service-per-class, factory-per-provider, interface-per-function, microservices, event
-buses, dependency-injection containers, CQRS, or clean/hexagonal/DDD restructurings, unless the repository
-already uses them or the user asked. An abstraction needs a present reason: multiple implementations, an
-external system to isolate, a needed test substitute, or a boundary being violated now.
+Repository-per-module, interface-per-class or -function, service-per-class, factory-per-provider,
+microservices, event buses, dependency-injection containers or frameworks, CQRS, or clean/hexagonal/DDD
+restructurings. Introduce one only if (1) the project already uses it, (2) the user explicitly asked, or (3) it
+is required to solve a demonstrated concrete problem, which you can state and evidence. An abstraction needs a
+present reason: multiple implementations, an external system to isolate, a needed test substitute, or a
+boundary being violated now.

@@ -1,7 +1,8 @@
 # Git and worktree discipline
 
 Goal: change only what the task requires, leave other people's work alone, and never make a state you cannot
-explain.
+explain. The commands below assume git; if the project uses another version control system or none, apply the
+same steps with its equivalents, or take and record a manual snapshot of the files you may touch.
 
 ## 1. Preflight (read-only)
 
@@ -45,6 +46,13 @@ Use a worktree for baselines and experiments so the main tree stays untouched.
 - After each verification command that can write (build, install, format, codegen), check the status for new
   or modified files.
 
+## 4a. Before and after checklist
+
+Before changes: status; current branch; current commit; recent history; diff; untracked files.
+After changes: status; diff statistics; the full diff, read in full. Every changed file has a stated reason.
+Protected without exception unless the task requires touching them: user and uncommitted work, generated
+files, lockfiles, migrations (never edit historical ones), environment and local configuration files.
+
 ## 5. Staging and committing
 
 Only commit when the task calls for it or the user asked. When you do:
@@ -69,9 +77,9 @@ condition.
 
 ## 7. Commands to avoid without explicit instruction
 
-Hard resets, forced checkouts or restores that discard changes, blanket cleans of untracked files, force
-pushes, branch or tag deletion, history rewriting (rebase, filter), recursive deletion outside paths you
-created, and any bulk operation that names everything. Prefer a safer equivalent (inspect first, restore a
+Hard resets (for example `git reset --hard`), forced checkouts or restores that discard changes, blanket cleans
+of untracked files (for example `git clean -fd`), force pushes, branch or tag deletion, history rewriting
+(rebase, filter), recursive deletion outside paths you created, and any bulk operation that names everything. Prefer a safer equivalent (inspect first, restore a
 single file you own, delete only what you created). Look at a target before deleting or overwriting it.
 
 ## 8. Final diff review

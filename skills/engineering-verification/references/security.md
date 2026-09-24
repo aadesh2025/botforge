@@ -1,7 +1,8 @@
 # Security verification
 
 Goal: confirm that boundaries which matter *in this project* hold, and that a recent fix is not bypassed by a
-sibling path. It is not a full penetration test and it does not force irrelevant checks on every project.
+sibling path. The method is risk-based: identify the attack surfaces that exist, then verify those. Do not run
+a generic checklist against every project. It is not a full penetration test.
 
 ## 1. Identify the applicable attack surfaces
 
@@ -85,6 +86,8 @@ Trace, for every such path: **input → validation → storage → URL construct
 
 ## 5. Other classes (apply when present)
 
+- **OAuth and third-party sign-in**: redirect URI validation, state and PKCE handling, token storage and
+  scope, account linking and takeover paths, what is trusted from the provider's response.
 - **Command and process execution**: who can influence the command, arguments or environment; is it gated to
   a trusted role; is the gate re-checked at execution time, not only at registration.
 - **Injection**: parameterized queries only; no string-built SQL, shell, template or path from input; safe

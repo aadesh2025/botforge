@@ -1,19 +1,23 @@
-# Feature safety: impact analysis and change locality
+# Feature safety methodology (Mode 3)
 
-Use before implementing any non-trivial feature or behavior change. Skip for a one-line fix whose location and
-effect are obvious.
+Use before implementing any non-trivial feature or behavior change: one that adds an entry point, stored data, an
+outbound call, a permission or a dependency, or touches more than one domain. Skip the written plan for a
+change whose location and effect are obvious and local; do not skip the search for existing code.
 
 ## 1. Order of work
 
 1. Restate the request and the acceptance criteria.
-2. Find the owning domain (where this concern already lives).
-3. Search for existing abstractions and implementations to reuse.
-4. Write the impact plan below.
-5. Analyze security, authorization and tenant impact.
-6. Implement in small steps, running the narrowest relevant check after each.
-7. Test the behavior, the failure cases and the security boundary.
-8. Run the broader checks; review the diff against the plan.
-9. Write the feature report.
+2. Investigate the affected part of the system (`investigation.md`, scoped to the feature): its boundaries,
+   data, callers, tests and documentation.
+3. Find the owning domain (where this concern already lives).
+4. Search for existing abstractions and implementations to reuse.
+5. Write the impact plan below.
+6. Analyze security, authorization and tenant impact.
+7. Implement in small steps, running the narrowest relevant check after each.
+8. Test the behavior, the failure cases and the security boundary.
+9. Run the broader checks (`verification.md` section 2, scoped to the change); review the full diff against the
+   plan.
+10. Write the feature report.
 
 Do not create files first. Search first.
 
@@ -43,12 +47,14 @@ existing contract should not require changes outside the contract's own area.
 
 ## 4. Impact plan
 
-Fill `templates/feature-impact.md` before editing. It must name:
+Fill `templates/feature-impact-plan.md` before editing. It must state **what should change and what should
+not**. It names:
 
-- expected files to change, and files that must **not** change (be specific: the neighboring domains a careless
-  implementation would be tempted to touch);
-- API, data (tables, migrations, indexes, ownership, deletion), security, authorization, tenant,
-  integration, frontend, background-job impact;
+- the domain owner, the existing abstraction and the existing implementation to reuse;
+- expected files to change, and protected files that must **not** change (be specific: the neighboring domains a
+  careless implementation would be tempted to touch);
+- API, database (tables, migrations, indexes, ownership, deletion), security, authorization, tenant,
+  integration, background-job and frontend impact;
 - tests required (unit, integration, security boundary, regression) and documentation to update;
 - ripple effects: who else calls what you change; shared types; configuration and environment variables;
   deployment.
@@ -92,6 +98,6 @@ Method: `security.md`.
 
 ## 8. Feature report
 
-Use the report section of `templates/feature-impact.md`. Compare the final change set with the plan: list any
+Use the report section of `templates/feature-impact-plan.md`. Compare the final change set with the plan: list any
 file that changed and was not in the plan and explain it. State remaining risks, including anything not
 verified.

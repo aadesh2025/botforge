@@ -32,7 +32,7 @@ your machine.
 
 ## 3. Baseline
 
-Before any change, run the checks on the untouched tree and record (`templates/baseline.md`): commit, date,
+Before any change, run the checks on the untouched tree and record (format in `verification.md` section 1): commit, date,
 environment, each command, exact result counts, duration, the identifiers of every failing test, and whatever
 could not run and why. This record is what you compare against later.
 
@@ -42,20 +42,22 @@ rows, and locks make such runs stall or fail for reasons unrelated to the code).
 
 ## 4. Classify every failure
 
-Label each failure with exactly one of: baseline failure, new regression, environment failure, flaky, unknown
+Label each failure with exactly one of: baseline failure, regression, environment failure, flaky failure, unknown
 (definitions and evidence in `SKILL.md`). Procedure:
 
 1. Record the failing identifier and the first informative error line.
 2. Re-run that test alone. Passing alone but failing in the suite suggests order, contention or state.
-3. Reproduce on the base: create a temporary worktree at the base commit (see `git-discipline.md`), run the
-   same test there with the same environment. Same identifiers and same error means baseline failure. Do not
+3. Reproduce on the base: create a temporary worktree at the base commit or merge base (see
+   `git-discipline.md`), or use a recorded CI result or documented baseline, and run the same test there with
+   the same environment. Same identifiers and same error means baseline failure. Do not
    rely on memory, documentation or an earlier report.
-4. If it passes on the base and fails with the changes, it is a regression: investigate.
+4. If it passes on the base and fails with the changes, it is a regression: investigate. If you cannot
+   reproduce the base (cannot build it, no CI result, no documented baseline), say so and use unknown.
 5. If the cause is outside the code, show the message that proves it (network refused, download failed,
    service unavailable, credential missing) and label it environment failure. Say what would make it pass; do
    not change behavior to make an environment failure go green.
 6. If results vary on identical code, repeat and record the counts (for example 3 of 3 pass alone, 1 of 2 fail
-   in the suite) and label it flaky. State the cause as unproven unless you proved it.
+   in the suite) and label it flaky failure. State the cause as unproven unless you proved it.
 7. If none of the above fits, label it unknown and say what you tried.
 
 When you compare two runs, compare the **lists of failing identifiers**, not just the totals; equal counts

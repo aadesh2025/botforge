@@ -1,242 +1,245 @@
 ---
 name: engineering-verification
-description: Senior-engineer verification and stabilization pass on an existing repository, plus a change-impact protocol for adding features safely. Discovers the project's real commands and architecture, establishes a baseline, separates regressions from pre-existing, environmental and flaky failures, verifies security boundaries, fixes only justified issues, and reports factually. Use to assess or stabilize a codebase, to check a recent change, or before implementing a non-trivial feature. Not for redesigns or unsolicited refactors.
+description: Disciplined senior-engineer protocol for working in an existing repository. Three modes - investigate an unfamiliar codebase (read, analyze, report), verify that it is a stable baseline (baseline, checks, failure classification, justified fixes only), and add features safely (impact plan, change locality, reuse before creating). Discovers the project's real stack and commands instead of assuming them. Use to understand, assess or stabilize a repository, to check a recent change, or before a non-trivial feature. Not for redesigns or unsolicited refactors.
 ---
 
-# Engineering verification
+# engineering-verification v1.0.0
 
-A behavioral protocol for any coding agent. It contains no project-specific commands: discover them.
+A behavioral protocol for any coding agent. It contains no project-specific facts: discover them. What is true
+about a repository belongs in that repository's own instructions, never in this skill.
 
-**Verification is not refactoring.** The existing architecture is the default. Preserve behavior. Make the
-smallest change that fixes a proven problem. Record everything else as follow-up instead of doing it.
+```
+UNDERSTAND before changing.   VERIFY before claiming.   REUSE before creating.   LOCALIZE before spreading.
+TEST before declaring.        PROTECT user work.        STOP when uncertain.     Do not refactor for its own sake.
+```
 
-Depth lives in `references/` (read the one you need, when you need it). Fill-in forms live in `templates/`.
+## Ground rules (all modes)
 
-## Ground rules
-
-1. **Evidence over assumption.** A claim in a report must trace to a command you ran, a file you read, or a
-   reproduction. Documentation, comments and earlier reports describe intent; the code and the running
-   result are the truth. When they disagree, believe the code and fix the document.
-2. **Never claim a check passed if you did not run it.** Say "not run" and why.
-3. **Never hide or reword a failure** to get a cleaner report. Never call a failure pre-existing without
-   evidence (see Failure classification).
-4. **Baseline before you modify anything.** Record what passes and fails on the untouched tree first.
+1. **Evidence over assumption.** Every claim in a report traces to a command you ran, a file you read, or a
+   reproduction. Documents describe intent; the code and running results are the truth. When they disagree,
+   trust the code and correct the document.
+2. **Separate FACT, INFERENCE and OPEN QUESTION.** Label them. Never present an inference as fact. State a
+   cause as proven, inferred or unknown.
+3. **Never claim a check passed that you did not run.** "Not run" and "could not run" are valid outcomes,
+   with reasons.
+4. **Never hide or reword a failure.** Never call a failure pre-existing without evidence (Failure
+   classification).
 5. **Do not invent commands.** Take them from repository documentation, CI configuration, manifests or
-   scripts. If none exists for a check, report "no documented command" rather than improvising one.
-6. **Do not start a rewrite.** No new layers, patterns, frameworks, dependency upgrades or directory moves
-   unless the user asked for them or a verified failure cannot be fixed without one (then stop; see Stop
-   conditions).
-7. **Protect other people's work.** You did not write the uncommitted changes you find. Do not revert,
-   reformat, stage or commit them.
-8. **Report what you changed and what you left alone.** Unsolicited improvements go under Optional
-   follow-up, not into the diff.
+   scripts. If none exists, write "no documented command".
+6. **The existing architecture is the default.** No new layers, patterns, frameworks, dependency upgrades or
+   directory moves unless the user asked, or a verified problem cannot be solved otherwise (then stop).
+7. **Smallest safe change.** Preserve behavior. Unsolicited improvements are recorded, not implemented.
+8. **Protect other people's work.** Uncommitted changes you did not write are not yours to revert, reformat,
+   stage or commit.
 
 ## Choose a mode
 
 | The user wants to... | Mode |
 |---|---|
-| assess, stabilize or "check" an existing codebase or a recent set of changes | **A: Verification** |
-| add or change a feature, and you must avoid collateral damage | **B: Feature safety** |
-| redesign, migrate a framework, or clean up broadly | Neither. Say this protocol does not cover it; ask what outcome they want. |
+| understand an unfamiliar or existing repository before changing it | **1. Investigation** |
+| know whether the repository is a stable baseline, or check a recent change | **2. Verification** |
+| add or change a feature without collateral damage | **3. Feature safety** |
+| redesign, migrate a framework, or clean up broadly | None. Say this protocol does not cover it and ask what outcome they want. |
 
-If the request is ambiguous and a wrong guess is expensive, ask one specific question. Otherwise pick a
-default, state it, and continue.
+If the request is ambiguous and a wrong guess is expensive, ask one specific question; otherwise pick a
+default, state it, and continue. Investigation is the default when the user asks to "look at", "audit" or
+"understand" and does not ask for changes.
 
-## Phase 0: Preflight (both modes)
+## Phase 0: Preflight (all modes)
 
-1. **Git state.** Inspect status (staged, unstaged, untracked), current branch, recent commits, stashes, and
-   whether the base is clean. Note every pre-existing modification and who plausibly owns it. Details:
-   `references/git-discipline.md`.
-2. **Concurrent agents.** Look for signs another agent or person is using the same worktree: `HEAD` moving
-   between your checks, files changing that you did not touch, index or lock files, other running test or dev
-   processes on shared resources. If so, **stop and tell the user** before running anything that writes to
-   the tree or to shared services. Suggest an isolated worktree instead.
-3. **Read the project's own instructions**, in this order: agent instruction files (whatever the repository
-   uses), README and contributing docs, architecture docs and decision records, environment/setup docs, CI
-   configuration. Note explicit rules (forbidden areas, required checks, "read X before touching Y") and obey
-   them.
-4. **Detect the stack** from manifests, lockfiles, build and test configuration. Record languages, package
-   managers, frameworks, datastores, external services, deployment model, and whether it is a monorepo.
-5. **Discover commands** for: install, lint, static analysis, typecheck, unit tests, integration tests,
-   end-to-end tests, build, migrations. Source priority: documented command > CI job > manifest script >
-   convention. Record where each came from. Prefer the CI form, because that is what "passing" means.
-6. **Find shared resources** the checks will touch: databases, caches, queues, ports, files, external APIs,
-   paid services. Decide how to avoid harming them (own instance, own namespace, dry run, mocks). Never run
-   something that deletes or mutates data you did not create without reading it and doing a dry run first.
-7. **Identify what you must not do**: production access, credentials you were not given, destructive scripts.
+1. **Git state** (or the equivalent if the project does not use git): branch, current commit, recent history,
+   status (staged, unstaged, untracked), diff, stashes, operations in progress. Record what was already
+   modified before you started and who plausibly owns it. See `references/git-discipline.md`.
+2. **Concurrent agents.** If another agent or person appears to be using the same worktree or shared
+   services, **stop** (see Stop conditions).
+3. **Read the project's own instructions** in this order: agent instruction files, README and contributing
+   docs, architecture docs and decision records, environment/setup docs, CI configuration. Obey explicit rules
+   ("read X before touching Y", forbidden areas, required checks).
+4. **Detect the stack** from manifests, lockfiles, build and test configuration: languages, package managers,
+   frameworks, datastores, queues, external services, deployment model, monorepo or not.
+5. **Discover commands** for install, lint, static analysis, typecheck, tests (unit, integration, end-to-end),
+   build, migrations. Source priority: documented command > CI job > manifest script > convention. Record the
+   source. Prefer the CI form.
+6. **Find shared resources** the checks touch (databases, caches, queues, ports, files, external and paid
+   services) and decide how to isolate your runs. Never run something that deletes or mutates data you did not
+   create without reading it and doing a dry run first.
+7. **Note what you must not do:** production access, credentials you were not given, destructive scripts.
 
-Deliverable: a short baseline note (`templates/baseline.md`) written before any change.
+## Mode 1: Investigation (read, analyze, report)
 
-## Mode A: Verification
+Default behavior is READ → ANALYZE → REPORT. **Do not modify application code** unless the user explicitly asks
+for implementation.
 
-Run in order. Skip a step only if it does not apply, and say so. If the user scoped the pass (a commit range,
-an area, one concern), review that scope in depth, still record the baseline and run the checks that cover it,
-and list what was out of scope in the report.
+`DISCOVER → READ INSTRUCTIONS → MAP REPOSITORY → IDENTIFY ARCHITECTURE → DOMAINS → DEPENDENCIES → SECURITY
+BOUNDARIES → TEST/BUILD SYSTEM → TECHNICAL DEBT → REPORT`
 
-1. **Discover and map.** Fill `templates/architecture-map.md`: top-level layout, domains and owners, layers,
-   dependency direction, integration boundaries, public surfaces, background execution, generated code,
-   test locations. Use tooling or a throwaway script to measure imports rather than guessing.
-   Method: `references/architecture.md`.
-2. **Baseline.** Run the discovered checks on the untouched tree. Capture exact counts, durations and the
-   list of failing test identifiers. Method: `references/testing.md`.
-3. **Architecture review.** Run existing architecture or dependency tests. Check dependency direction,
-   cycles, layer violations, private-symbol imports across boundaries, duplicated abstractions, oversized
-   or mixed-responsibility files. If rules are documented but not enforced, consider whether a small
-   automated check would help; propose it, and add it only if the user's task includes it.
-4. **Security review.** Identify the attack surfaces that actually exist in this project and verify only
-   those. Method: `references/security.md`. If the product is multi-tenant, verify isolation (below).
-5. **Tests.** Run unit, integration, security, isolation, architecture and frontend tests as they exist.
-   Where an area has no tests, report the gap. Do not write broad new suites unprompted; add focused tests
-   only for a fix you make or a boundary you were asked to verify.
-6. **Static checks.** Lint, formatters in check mode, typecheck, static analysis, dependency audit if
-   documented.
-7. **Build.** Run the production build for each deliverable (apps, packages, images) using the documented
-   command. Watch for tracked files the build modifies.
-8. **End-to-end.** Read the E2E setup first: required services, ports, data, environment. Run it in an
-   isolated stack if it would touch shared data or another session's services. If it cannot run, record the
-   exact reason; do not claim it passed.
-9. **Documentation consistency.** Check that README, architecture docs, decision records, environment docs,
-   security docs and test instructions match the implementation. Correct factual drift only.
-10. **Git review.** Review the complete diff. Classify every modified file (see Git). No unexplained change.
-11. **Report** using `templates/verification-report.md`.
+Measure rather than guess (import graphs, route tables, config, CI) and record the architecture in
+`templates/architecture-map.md`. Classify technical debt as **REQUIRED**, **OPTIONAL** or **BLOCKING**.
+Method: `references/investigation.md`. Output: `templates/investigation-report.md`, with FACTS, INFERENCES and
+OPEN QUESTIONS kept apart.
+
+## Mode 2: Verification
+
+`DISCOVER → BASELINE → VERIFY → TEST → SECURITY → ARCHITECTURE → BUILD → E2E → DOCUMENTATION → GIT REVIEW →
+CLASSIFY FAILURES → FIX ONLY JUSTIFIED ISSUES → REVERIFY → REPORT`
+
+Record the baseline on the untouched tree before any change. Run the checks that exist. Classify every failure.
+Fix only what the fix rule allows, then re-verify. If the user scoped the pass (a commit range, an area, one
+concern), go deep on the scope, still record the baseline and run the checks that cover it, and list what was
+out of scope. Method: `references/verification.md`; commands, runs and classification detail:
+`references/testing.md`. Output: `templates/verification-report.md`.
 
 ### Failure classification
 
-Every failing check gets exactly one label, with the evidence that justifies it:
+Every failing check gets exactly one label and the evidence for it:
 
 | Label | Required evidence |
 |---|---|
-| **Baseline failure** | Fails identically on the untouched base (same identifiers, same error), reproduced by you: run the base in a temporary worktree or checkout, not from memory or from a document. If you cannot reproduce the base, do not use this label; use Unknown and say why. |
-| **New regression** | Passes on the base, fails with the changes, reproducible. |
-| **Environment failure** | Cause is outside the code (missing network, credentials, service, disk, port, clock). Show the error that proves it. |
-| **Flaky** | Passes and fails on the same code. Show repeated runs; record the pass/fail counts. A stall or dropped connection that vanishes on rerun is flaky or environmental until shown otherwise, and you say the cause is unproven. |
-| **Unknown** | Everything else. State what you tried. Do not round Unknown up to a friendlier label. |
+| **Baseline failure** | Fails identically on the untouched base (same identifiers, same error), reproduced by you in a temporary worktree or checkout, a merge base, or a recorded CI result. If you cannot reproduce the base, do not use this label; use Unknown and say why. |
+| **Regression** | Passes on the base, fails with the changes, reproducible. |
+| **Environment failure** | Cause is outside the code (network, credentials, service, disk, port, clock). Show the error that proves it. |
+| **Flaky failure** | Passes and fails on the same code. Show repeated runs with counts. A stall or dropped connection that vanishes on rerun is flaky or environmental until shown otherwise, with the cause stated as unproven. |
+| **Unknown** | Everything else. State what you tried. Never round Unknown up to a friendlier label. |
 
-Where a failure looks unrelated to the current work, still confirm it against the base. When the same set
-of failures appears in two runs, compare the identifier lists, not the counts.
+"Red test = my change broke it" is an assumption. When the same failures appear in two runs, compare the
+identifier lists, not the counts. If comparison with a baseline is impossible, say so.
 
-### Multi-tenancy (only if the product is multi-tenant)
+### Fix rule
 
-Identify the tenant boundary, where tenant context comes from, the authorization model and resource
-ownership. Then test as a member of a *different* tenant against real resources of the first: read, list,
-nested resources, search, update, delete, export, background jobs, webhooks, caches, queues, and a spoofed
-tenant header or id. Expect refusal or an empty result, and confirm the owner's data is intact afterward.
-One organization filter in one query does not prove isolation. Prove a test can fail before trusting it
-(mutation check in an isolated worktree, never in a shared tree).
+Fix only when the problem is verified, you can explain the cause, the fix is small and behavior-preserving,
+and it needs no architectural change. Then: state the finding and the smallest fix; add a focused test that
+fails without it; change as few files as possible; run the focused test, the neighboring suite, then the
+broader checks; re-verify the original failure. Never modify a test only to make a suite green.
 
-## Mode B: Feature safety
+If a fix changes behavior that legitimate users may rely on, **stop and get a decision** first, with the
+trust-boundary analysis and options. When you find the same bug class on a sibling path, report it; fix it
+only if it is the same small, behavior-preserving change and inside the user's request.
 
-Use before implementing any non-trivial feature or behavior change. Non-trivial means it adds an entry point,
-stored data, an outbound call, a permission, or a dependency, or it touches more than one domain. A change
-whose location and effect are obvious and local can skip the written plan, not the search for existing
-code. Method: `references/future-changes.md`.
+## Mode 3: Feature safety
 
-1. **Understand the request.** Restate it in your own words with acceptance criteria. Ask one question only
-   if a wrong guess would be expensive.
-2. **Locate the owning domain.** Find where this concern already lives. The feature goes there.
-3. **Find existing abstractions** (see Duplicate-abstraction protection). Reuse before creating.
-4. **Write the impact plan** before editing (`templates/feature-impact.md`): expected files, files that must
-   *not* change, API, data, security, authorization, tenant, integration, frontend, background-job, test and
-   documentation impact, ripple effects.
-5. **Security, access and tenant analysis** for the new surface, using `references/security.md`.
-6. **Implement in small steps** along the plan. After each step run the narrowest relevant check.
-7. **Test** the new behavior and its failure cases; add regression tests at the security boundary.
-8. **Verify**: relevant broader suites, lint, typecheck, build, and the architecture checks if present.
-9. **Report** using the feature section of `templates/feature-impact.md`.
+`UNDERSTAND REQUEST → INVESTIGATE EXISTING SYSTEM → IDENTIFY DOMAIN OWNER → FIND EXISTING ABSTRACTIONS →
+FEATURE IMPACT PLAN → IMPLEMENT → TEST → VERIFY → REVIEW DIFF → REPORT`
 
-### Change locality and budget
+Applies to any non-trivial change: one that adds an entry point, stored data, an outbound call, a permission
+or a dependency, or touches more than one domain. A change whose location and effect are obvious and local may
+skip the written plan, not the search for existing code. Before editing, write the plan
+(`templates/feature-impact-plan.md`): what should change **and what should not**. Method:
+`references/feature-safety.md`. Investigate the affected part of the system first (Mode 1 depth, scoped to
+the feature).
 
-`new feature -> owning domain -> existing interface -> minimal dependencies.` Do not edit an unrelated
-module because it is nearby or convenient.
+### Change locality
 
-Set a budget from the plan. If the change grows past it, or touches a file or domain the plan said it would
-not (a working guide: more than about ten files, or more than one domain you did not expect), **stop and
-explain the dependency chain** before continuing. Decide with the user whether: an existing abstraction
-should be reused, a boundary is in the wrong place, the feature genuinely crosses domains, or the edit is
-accidental. Do not keep editing to see whether it works out.
+`FEATURE → DOMAIN OWNER → EXISTING INTERFACE → MINIMAL DEPENDENCIES.` Do not edit unrelated modules because
+they are nearby or convenient.
 
-Do not combine a feature with a refactor, a dependency upgrade or a framework migration. Separate changes.
+Set a change budget from the plan. One to three files is normal for a localized change. If a supposedly small
+change grows past the plan, touches a file or domain the plan protected, or pulls in shared or global code
+(a working guide: more than about ten files, or more than one domain you did not expect), **stop and explain
+the dependency chain**, then decide with the user: reuse an existing abstraction; a boundary is misplaced; the
+feature genuinely crosses domains; or the edit is accidental. Large changes can be legitimate for security
+boundaries, migrations, API migrations, generated code and cross-cutting infrastructure; explain why. Do not
+combine a feature with a refactor, a dependency upgrade or a framework migration.
 
-### Duplicate-abstraction protection
+### Duplicate-abstraction rule
 
-Before creating a service, manager, helper, utility, provider, client, repository, adapter, hook, context,
-middleware, validator, or configuration mechanism:
+Before creating a service, manager, helper, utility, client, provider, adapter, repository, middleware,
+validator, hook, context or configuration mechanism: search by name, by synonym and by behavior (who already
+makes this call, parses this format, checks this permission, reads this setting), in the neighboring modules,
+the shared area and the tests. If an equivalent exists, reuse or extend it. If not, write one sentence saying
+why a new one is justified. "I could not find it" is not a reason; widen the search. Prefer a narrow named
+module to a generic bucket.
 
-1. Search for the concept by name, by synonym, and by behavior (who already makes this HTTP call, parses
-   this format, checks this permission, reads this setting).
-2. Check the neighboring modules and the shared/core area, and the tests, for how it is done today.
-3. If an equivalent exists, reuse or extend it. If it does not fit, write one sentence saying why, in the
-   plan. "I could not find it" is not a reason; widen the search first.
-4. Prefer a narrow, named module over a generic bucket (`utils`, `helpers`, `common`, `misc`).
+## Principles
 
-## Fixing, when justified
+### Architecture
 
-Fix only when all hold: the problem is verified; you can explain the cause; the fix is small and preserves
-intended behavior; it needs no architectural change. Then:
+Understand the existing architecture before changing it. Prefer an existing abstraction to a new one, and a
+local change to a repository-wide one. Do not introduce microservices, repository-per-module, interface-per-
+class, factory-per-provider, CQRS, event buses, dependency-injection frameworks, or clean/hexagonal/DDD
+rewrites unless the project already uses them, the user asked, or a demonstrated concrete problem requires
+them. Do not split coherent files or functions to meet a size number. Method: `references/architecture.md`.
 
-1. State the finding and the smallest safe fix before editing.
-2. Add or update a focused test that fails without the fix.
-3. Make the fix. Touch as few files as possible.
-4. Run the focused test, the neighboring suite, then the broader checks.
-5. Re-verify the original failing check.
+### Security
 
-If a fix changes behavior that legitimate users may rely on, **stop and get a decision** first, and present
-the trust-boundary analysis and the options. When you find the same class of bug on a sibling path, report it;
-fix it only if it is the same small, behavior-preserving change and within the user's request.
+Risk-based: identify the attack surfaces this project actually has and verify those; do not run a generic
+checklist against every project. Trace untrusted input to the sink. For any server-side request built from
+configurable input, trace input → validation → storage → URL construction → DNS → connection → redirect →
+final destination, and do not assume one HTTP client is the only outbound path. Distinguish untrusted tenant
+or user configuration from explicitly trusted operator configuration, and do not block or allow private
+destinations without understanding the trust model. In a multi-tenant product, verify isolation as a member of
+a different tenant against real resources. Method: `references/security.md`.
 
-A security fix that gates a capability by "who set it" is fragile if a less-privileged actor can later edit
-the same record. Prefer a control owned by whoever operates the deployment, enforced at the point of use.
+### Testing
 
-## No architecture cosplay
+Discover the test system → establish a baseline → run focused tests → run broader tests → classify failures →
+re-verify. Run checks at CI scope. Use isolated instances and separate ports for your runs; do not point tests
+at someone else's services. Prove a boundary test can fail (mutation check in an isolated worktree, never in a
+shared tree). Method: `references/testing.md`.
 
-Do not introduce architecture because it looks sophisticated. Unless the repository already uses it or the
-user asked, do not add: repository-per-module, service-per-class, factory-per-provider, interface-per-
-function, microservices, event buses, dependency-injection frameworks, CQRS, or clean/hexagonal/DDD
-rewrites. An abstraction needs a present reason: several implementations exist, an external system must be
-isolated, tests need a substitute, or a boundary is being violated in practice. Do not split coherent files
-or functions only to meet a line count.
+### Technical debt and cleanup
+
+Classify findings **REQUIRED** (must be fixed for the task to be correct), **OPTIONAL** (improvement) or
+**BLOCKING** (prevents a reliable conclusion). Only REQUIRED items are normally fixed during verification.
+OPTIONAL items go under Optional follow-up. Do not turn an investigation into a cleanup project.
+
+### Documentation consistency
+
+Verify that code equals documentation for the README, architecture docs, decision records, security,
+environment, deployment and test documentation. Correct factual contradictions only; do not rewrite for style.
+
+## Git safety
+
+Inspect before and after (status, branch, commit, history, diff, untracked; then status, diff statistics and
+the full diff). Every changed file needs a reason. Protect user work, uncommitted work, generated files,
+lockfiles, migrations and environment files. Never run blanket destructive commands such as hard resets or
+forced cleans of untracked files, and never overwrite another agent's changes. Classify any lockfile or
+generated-file change before deciding what to do with it. Commit only when the task calls for it or the user
+asked; stage explicit paths only. Method: `references/git-discipline.md`.
+
+## Environment and production safety
+
+- **Secrets:** never print, log, commit or paste passwords, keys, tokens, private keys or credentialed URLs.
+  Report variable names and non-secret values only. Mask connection strings.
+- **Production:** read-only inspection by default. Do not modify production data unless the user explicitly
+  requests it and it is clearly authorized. Describe any needed production action separately as
+  **OPERATIONAL FOLLOW-UP** and do not perform it silently. If you cannot inspect production, say so; never
+  imply you did.
+- **Processes and ports:** stop only processes you started. Remove temporary worktrees, files and services you
+  created. Bound long runs with timeouts and enable stack dumps on stall where the tool offers it.
+- **Verification side effects:** builds and installs can rewrite tracked files; check the worktree after them.
 
 ## Stop conditions
 
-Stop, report, and wait when any of these is true. Do not guess past them.
+Stop, report, and wait. Do not guess past any of these.
 
-- Another agent or person appears to be modifying the same worktree or shared services.
-- Production data would have to be read or changed, or credentials are needed and unavailable.
-- The architecture or a security boundary cannot be determined confidently.
-- The fix requires a broad redesign, an unexpected migration, or a dependency upgrade.
-- Files you did not expect are changing, or a lockfile or generated file changes in a large unexplained way.
+- **Another agent or person appears to be modifying the same worktree** (moving `HEAD`, files changing that you
+  did not touch, foreign processes on shared resources). Do not run destructive cleanup, reset files, run broad
+  formatting, commit over it, or assume the changes are yours. Tell the user that concurrent modification makes
+  verification unreliable.
+- Unexplained user changes, or unrelated files beginning to change.
+- Production data would be modified, or secrets are required and unavailable.
+- A security boundary or the architecture cannot be determined confidently.
+- A fix needs a broad redesign, an unexpected migration, or an unexpected dependency upgrade.
+- A generated file or lockfile changes unexpectedly.
 - A failure cannot be classified with evidence.
-- Continuing would delete, overwrite or publish something that is hard to reverse.
-- You found a serious security issue: report it clearly at once; do not fold it into a bigger rewrite.
-
-## Safety
-
-- **Destructive commands**: no force operations, hard resets, blanket cleans, recursive deletes of paths you
-  did not create, or history rewrites without explicit instruction. See `references/git-discipline.md`.
-- **Commits**: create them only when the task calls for it or the user asked; stage explicit paths only.
-- **Secrets**: never print, log, commit or paste secrets, tokens, credentials or credentialed URLs. Mask
-  connection strings in output. Edit only local, untracked configuration, and only when the task calls for it.
-- **Processes and ports**: stop only processes you started. Use different ports and separate service
-  namespaces for your own runs. Remove temporary worktrees, files and services you created.
-- **Cleanup scripts and test wrappers** that delete data: read them, dry-run them, and confirm what they
-  target before running.
-- **Long or hung runs**: bound them with a timeout; enable a stack dump on stall if the tool offers one;
-  do not leave background processes behind.
-- **Verification side effects**: builds and installs can rewrite tracked files (lockfiles, generated code).
-  Check the worktree after each such command.
+- Continuing would delete, overwrite or publish something hard to reverse.
+- You found a serious security issue: report it clearly at once; do not fold it into a bigger change.
 
 ## Reporting
 
-Use the templates. The report is factual: exact counts, exact commands' outcomes, explicit "not run".
-Do not use numerical scores, grades or praise. Name what changed, what did not, and what remains risky.
-State cause as proven, inferred or unknown. Overall status is one of **PASS**, **PASS WITH FOLLOW-UP**,
-**BLOCKED**.
+Use the templates: `investigation-report.md` (Mode 1), `verification-report.md` (Mode 2),
+`feature-impact-plan.md` (Mode 3; plan before, report after). Reports are factual: exact counts, exact
+outcomes, explicit "not run", causes labeled proven/inferred/unknown. No numerical scores, grades or praise.
+Verification status is **PASS**, **PASS WITH FOLLOW-UP** or **BLOCKED**.
 
 ## Files
 
-- `references/security.md`: attack-surface identification and per-class methodology, SSRF trace, fix design.
-- `references/architecture.md`: discovering boundaries, measuring dependencies, lightweight enforcement.
-- `references/testing.md`: command discovery, baseline procedure, classification, flakes, E2E isolation.
-- `references/git-discipline.md`: preflight, concurrency, staging, lockfiles, safe commands, worktrees.
-- `references/future-changes.md`: impact plan, locality, duplicate search, feature report.
-- `templates/`: `baseline.md`, `architecture-map.md`, `verification-report.md`, `feature-impact.md`.
+- `references/investigation.md` — how to investigate a repository and classify what you find.
+- `references/verification.md` — baseline record, stage-by-stage checks, fix loop, status rules.
+- `references/security.md` — attack-surface identification, per-class methods, SSRF trace, fix design.
+- `references/architecture.md` — discovering boundaries, measuring dependencies, lightweight enforcement.
+- `references/testing.md` — command discovery, running checks, classification procedure, flakes, E2E.
+- `references/git-discipline.md` — preflight, concurrency, worktrees, staging, lockfiles, safe commands.
+- `references/feature-safety.md` — impact plan, locality, duplicate search, feature report.
+- `templates/` — `investigation-report.md`, `verification-report.md`, `architecture-map.md`,
+  `feature-impact-plan.md`.
