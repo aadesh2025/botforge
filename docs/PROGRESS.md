@@ -63,13 +63,16 @@ Legend: ⬜ not started · 🟨 in progress · ✅ complete · ⏸️ deferred
   **Real-world consequence on this machine:** ingest silently records `len/4` token counts, which
   undercounts Tamil/Devanagari several-fold. Fix for CI or a locked-down worker: point
   `TIKTOKEN_CACHE_DIR` at a pre-warmed path. CI with normal internet access should not see these.
-  **Not a network failure — a flake, not reproduced:** the *first* full run had 5 extra failures,
-  `tests/test_tenant_isolation.py` probes for `GET/PATCH/DELETE /v1/agents/{agent}`,
-  `/versions`, `/widget-config` (org B got 200 on org A's agent). They passed in isolation
-  (69/69), with their neighbours (83/83), with `test_docling_chunking.py` before them (73/73),
-  in a 974-test run of every file before them, and in the second full run. Org resolution and
-  `agents.service._get_agent` both check `organization_id` correctly. Cause **not identified**;
-  if it recurs, capture the full failing run's output before re-running.
+  **Not a network failure — the first run collided with another session's work in progress:** the
+  *first* full run had 5 extra failures, `tests/test_tenant_isolation.py` probes for
+  `GET/PATCH/DELETE /v1/agents/{agent}`, `/versions`, `/widget-config` (org B got 200 on org A's
+  agent). That file did not exist when the session began; a second Claude session was writing and
+  committing it (`103fc55`, 12:15) in the same working tree while the run was in flight, alongside
+  the SSRF commits `eb73d0f`/`35cd189`. It then passed in isolation (69/69), with its neighbours,
+  with `test_docling_chunking.py` before it, and in the second full run (1192 passed). Org
+  resolution and `agents.service._get_agent` both check `organization_id` correctly. The exact
+  draft state that failed was not captured, so the mechanism is inferred, not proven — but there
+  is no reproducible leak. **Lesson: don't run a full suite in a tree another session is editing.**
 
 - **R14 fixed: a dropped chat stream no longer loses the reply (2026-09-24, ADR-083).** Instruction
   was "solve the issues and existing bugs". Three attempts, and the first two failing is the
