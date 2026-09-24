@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.core.config import settings
-from app.rag.loaders import _is_blocked_host
+from app.core.ssrf import is_blocked_host
 from app.tools.base import ToolResult
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
@@ -40,7 +40,7 @@ async def execute_http_tool(config: dict[str, Any], args: dict[str, Any]) -> Too
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return ToolResult(output={}, status="error", error="only http(s) URLs are allowed")
-    if _is_blocked_host(parsed.hostname):
+    if is_blocked_host(parsed.hostname):
         return ToolResult(output={}, status="error", error="refusing to call a private/loopback host")
 
     headers = _render(config.get("headers") or {}, args)

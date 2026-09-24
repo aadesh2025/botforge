@@ -13,10 +13,10 @@ from typing import Any
 from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.ssrf import is_blocked_host
 from app.llm.registry import build_embedding_provider
 from app.models import KnowledgeBase
 from app.rag import retrieval
-from app.rag.loaders import _is_blocked_host
 from app.tools.base import ToolContext, ToolResult
 
 ToolFn = Callable[[ToolContext, dict[str, Any]], Awaitable[ToolResult]]
@@ -130,7 +130,7 @@ async def _http_request(_ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return ToolResult(output={}, status="error", error="only http(s) URLs are allowed")
-    if _is_blocked_host(parsed.hostname):
+    if is_blocked_host(parsed.hostname):
         return ToolResult(output={}, status="error", error="refusing to call a private/loopback host")
     headers = args.get("headers") if isinstance(args.get("headers"), dict) else None
     body = args.get("body")

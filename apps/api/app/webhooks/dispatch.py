@@ -14,8 +14,8 @@ from urllib.parse import urlparse
 import httpx
 
 from app.core.logging import get_logger
+from app.core.ssrf import is_blocked_host
 from app.models import WebhookDelivery, WebhookEndpoint
-from app.rag.loaders import _is_blocked_host
 
 log = get_logger("webhooks")
 
@@ -117,7 +117,7 @@ async def deliver_delivery(
 
     parsed = urlparse(endpoint.url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname or (
-        transport is None and _is_blocked_host(parsed.hostname)
+        transport is None and is_blocked_host(parsed.hostname)
     ):
         delivery.status = "failed"  # SSRF guard / bad URL — permanent
         return False

@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
-import ipaddress
 import re
-import socket
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 import trafilatura
 
 from app.core.logging import get_logger
+from app.core.ssrf import is_blocked_host
 
 log = get_logger("rag.loaders")
 
@@ -77,35 +77,39 @@ def extract_main_content(html: str, url: str | None = None) -> str:
     return strip_html(html)
 
 
-def _is_blocked_host(host: str) -> bool:
-    """SSRF guard: reject loopback / private / link-local / reserved destinations."""
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror:
-        return True
-    for info in infos:
-        addr = info[4][0]
-        try:
-            ip = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            return True
-    return False
+_MAX_REDIRECTS = 5
+
+
+async def _host_blocked(host: str, transport: httpx.AsyncBaseTransport | None) -> bool:
+    # Skip the SSRF DNS check when a test transport is injected (no real network). The lookup
+    # is blocking, so it runs off the event loop.
+    if transport is not None:
+        return False
+    return await asyncio.to_thread(is_blocked_host, host)
 
 
 async def load_url(url: str, *, transport: httpx.AsyncBaseTransport | None = None) -> str:
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise LoaderError("Only http(s) URLs are supported.")
-    # Skip the SSRF DNS check when a test transport is injected (no real network).
-    if transport is None and _is_blocked_host(parsed.hostname):
-        raise LoaderError("Refusing to fetch a private/loopback URL.")
-    async with httpx.AsyncClient(
-        timeout=30.0, follow_redirects=True, transport=transport
-    ) as client:
-        resp = await client.get(url, headers={"User-Agent": "BotForge-Ingest/1.0"})
-        resp.raise_for_status()
+    """Fetch a page or text file. Every hop is SSRF-checked, not just the first: a public URL
+    that 302s to a private or metadata address must not be followed. (The name is resolved
+    again by httpx after the check, so a DNS-rebinding host can still race it — closing that
+    needs the resolved IP pinned on the connection.)"""
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=False, transport=transport) as client:
+        current = url
+        for _ in range(_MAX_REDIRECTS + 1):
+            parsed = urlparse(current)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                raise LoaderError("Only http(s) URLs are supported.")
+            if await _host_blocked(parsed.hostname, transport):
+                raise LoaderError("Refusing to fetch a private/loopback URL.")
+            resp = await client.get(current, headers={"User-Agent": "BotForge-Ingest/1.0"})
+            location = resp.headers.get("location")
+            if resp.is_redirect and location:
+                current = urljoin(current, location)
+                continue
+            resp.raise_for_status()
+            break
+        else:
+            raise LoaderError("Too many redirects.")
         content_type = resp.headers.get("content-type", "")
         body = resp.text
     if "html" in content_type or body.lstrip().lower().startswith(("<!doctype", "<html")):
